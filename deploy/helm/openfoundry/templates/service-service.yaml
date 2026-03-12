@@ -1,0 +1,18 @@
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "openfoundry.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "openfoundry.serviceLabels" (dict "root" $ "serviceName" $name) | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ $svc.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "openfoundry.serviceSelectorLabels" (dict "root" $ "serviceName" $name) | nindent 4 }}
+{{- end }}

@@ -1,0 +1,396 @@
+types:
+  imports:
+    CommonTypes:
+      base-type: any
+      external:
+        java: com.openfoundry.api
+      from: common-types.yml
+  definitions:
+    default-package: com.openfoundry.api.ontology
+    objects:
+      OntologyV2:
+        fields:
+          rid: Rid
+          apiName: string
+          displayName: string
+          description: string
+          version: string
+
+      CreateOntologyRequest:
+        fields:
+          apiName: string
+          displayName: string
+          description: string
+
+      ListOntologiesResponse:
+        fields:
+          data: list<OntologyV2>
+          nextPageToken: optional<PageToken>
+
+      PropertyDefinition:
+        docs: Defines a property on an object type
+        fields:
+          apiName: string
+          displayName: string
+          description: optional<string>
+          dataType: string
+          primaryKey: optional<boolean>
+
+      ObjectTypeV2:
+        fields:
+          apiName: string
+          displayName: string
+          description: optional<string>
+          primaryKey: string
+          properties: map<string, PropertyDefinition>
+          rid: optional<Rid>
+          titleProperty: optional<string>
+          status: optional<string>
+          implementsInterfaces: optional<list<string>>
+
+      ListObjectTypesResponse:
+        fields:
+          data: list<ObjectTypeV2>
+          nextPageToken: optional<PageToken>
+
+      ParameterDefinition:
+        docs: Defines a parameter on an action type
+        fields:
+          apiName: string
+          displayName: string
+          description: optional<string>
+          dataType: string
+          required: optional<boolean>
+
+      ActionTypeV2:
+        fields:
+          apiName: string
+          displayName: string
+          description: optional<string>
+          parameters: map<string, ParameterDefinition>
+          rid: optional<Rid>
+          status: optional<string>
+
+      ListActionTypesResponse:
+        fields:
+          data: list<ActionTypeV2>
+          nextPageToken: optional<PageToken>
+
+      LinkTypeV2:
+        fields:
+          apiName: string
+          displayName: string
+          description: optional<string>
+          sourceObjectType: string
+          targetObjectType: string
+          cardinality: optional<string>
+          rid: optional<Rid>
+          status: optional<string>
+
+      ListLinkTypesResponse:
+        fields:
+          data: list<LinkTypeV2>
+          nextPageToken: optional<PageToken>
+
+      InterfaceTypeV2:
+        fields:
+          apiName: string
+          displayName: string
+          description: optional<string>
+          properties: optional<map<string, PropertyDefinition>>
+          extendsInterfaces: optional<list<string>>
+          rid: optional<Rid>
+
+      ListInterfaceTypesResponse:
+        fields:
+          data: list<InterfaceTypeV2>
+          nextPageToken: optional<PageToken>
+
+      Rid:
+        alias: string
+
+      PageToken:
+        alias: string
+
+services:
+  OntologyService:
+    name: Ontology Service
+    package: com.openfoundry.api.ontology
+    base-path: /api/v2
+    default-auth: header
+    endpoints:
+      # -- Ontology CRUD -------------------------------------------------------
+      listOntologies:
+        http: GET /ontologies
+        docs: List all ontologies with pagination
+        args:
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListOntologiesResponse
+
+      createOntology:
+        http: POST /ontologies
+        docs: Create a new ontology
+        args:
+          body:
+            type: CreateOntologyRequest
+            param-type: body
+        returns: OntologyV2
+
+      getOntology:
+        http: GET /ontologies/{ontologyRid}
+        docs: Get an ontology by its RID
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+        returns: OntologyV2
+
+      deleteOntology:
+        http: DELETE /ontologies/{ontologyRid}
+        docs: Delete an ontology by its RID
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+
+      # -- Object Type CRUD ----------------------------------------------------
+      listObjectTypes:
+        http: GET /ontologies/{ontologyRid}/objectTypes
+        docs: List all object types in an ontology
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListObjectTypesResponse
+
+      createObjectType:
+        http: POST /ontologies/{ontologyRid}/objectTypes
+        docs: Create a new object type in an ontology
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          body:
+            type: ObjectTypeV2
+            param-type: body
+        returns: ObjectTypeV2
+
+      getObjectType:
+        http: GET /ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}
+        docs: Get an object type by its API name
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          objectTypeApiName:
+            type: string
+            param-type: path
+        returns: ObjectTypeV2
+
+      updateObjectType:
+        http: PUT /ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}
+        docs: Update an object type definition
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          objectTypeApiName:
+            type: string
+            param-type: path
+          body:
+            type: ObjectTypeV2
+            param-type: body
+        returns: ObjectTypeV2
+
+      deleteObjectType:
+        http: DELETE /ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}
+        docs: Delete an object type from an ontology
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          objectTypeApiName:
+            type: string
+            param-type: path
+
+      # -- Action Type CRUD ----------------------------------------------------
+      listActionTypes:
+        http: GET /ontologies/{ontologyRid}/actionTypes
+        docs: List all action types in an ontology
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListActionTypesResponse
+
+      createActionType:
+        http: POST /ontologies/{ontologyRid}/actionTypes
+        docs: Create a new action type in an ontology
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          body:
+            type: ActionTypeV2
+            param-type: body
+        returns: ActionTypeV2
+
+      getActionType:
+        http: GET /ontologies/{ontologyRid}/actionTypes/{actionTypeApiName}
+        docs: Get an action type by its API name
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          actionTypeApiName:
+            type: string
+            param-type: path
+        returns: ActionTypeV2
+
+      updateActionType:
+        http: PUT /ontologies/{ontologyRid}/actionTypes/{actionTypeApiName}
+        docs: Update an action type definition
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          actionTypeApiName:
+            type: string
+            param-type: path
+          body:
+            type: ActionTypeV2
+            param-type: body
+        returns: ActionTypeV2
+
+      deleteActionType:
+        http: DELETE /ontologies/{ontologyRid}/actionTypes/{actionTypeApiName}
+        docs: Delete an action type from an ontology
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          actionTypeApiName:
+            type: string
+            param-type: path
+
+      # -- Link Type CRUD ------------------------------------------------------
+      listLinkTypesForObjectType:
+        http: GET /ontologies/{ontologyRid}/objectTypes/{objectTypeApiName}/linkTypes
+        docs: List link types for a specific object type
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          objectTypeApiName:
+            type: string
+            param-type: path
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListLinkTypesResponse
+
+      createLinkType:
+        http: POST /ontologies/{ontologyRid}/linkTypes
+        docs: Create a new link type in an ontology
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          body:
+            type: LinkTypeV2
+            param-type: body
+        returns: LinkTypeV2
+
+      getLinkType:
+        http: GET /ontologies/{ontologyRid}/linkTypes/{linkTypeApiName}
+        docs: Get a link type by its API name
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          linkTypeApiName:
+            type: string
+            param-type: path
+        returns: LinkTypeV2
+
+      deleteLinkType:
+        http: DELETE /ontologies/{ontologyRid}/linkTypes/{linkTypeApiName}
+        docs: Delete a link type from an ontology
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          linkTypeApiName:
+            type: string
+            param-type: path
+
+      # -- Interface Type CRUD -------------------------------------------------
+      listInterfaceTypes:
+        http: GET /ontologies/{ontologyRid}/interfaceTypes
+        docs: List all interface types in an ontology
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListInterfaceTypesResponse
+
+      createInterfaceType:
+        http: POST /ontologies/{ontologyRid}/interfaceTypes
+        docs: Create a new interface type in an ontology
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          body:
+            type: InterfaceTypeV2
+            param-type: body
+        returns: InterfaceTypeV2
+
+      getInterfaceType:
+        http: GET /ontologies/{ontologyRid}/interfaceTypes/{interfaceTypeApiName}
+        docs: Get an interface type by its API name
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          interfaceTypeApiName:
+            type: string
+            param-type: path
+        returns: InterfaceTypeV2
+
+      deleteInterfaceType:
+        http: DELETE /ontologies/{ontologyRid}/interfaceTypes/{interfaceTypeApiName}
+        docs: Delete an interface type from an ontology
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          interfaceTypeApiName:
+            type: string
+            param-type: path

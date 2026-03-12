@@ -1,0 +1,37 @@
+{
+  "name": "@openfoundry/sdk",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Public TypeScript SDK for the OpenFoundry platform",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openfoundry/client": "workspace:*",
+    "@openfoundry/object-set": "workspace:*",
+    "@openfoundry/pagination": "workspace:*",
+    "@openfoundry/ontology-schema": "workspace:*",
+    "@openfoundry/rid": "workspace:*",
+    "@openfoundry/errors": "workspace:*",
+    "@openfoundry/auth-tokens": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "~5.5.4",
+    "vitest": "^3.2.0"
+  },
+  "license": "Apache-2.0"
+}

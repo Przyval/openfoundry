@@ -1,0 +1,27 @@
+{
+  "name": "@openfoundry/client",
+  "version": "0.1.0",
+  "description": "HTTP client with layered fetch wrapping for the OpenFoundry platform",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@openfoundry/errors": "workspace:*",
+    "@openfoundry/auth-tokens": "workspace:*"
+  },
+  "license": "Apache-2.0"
+}

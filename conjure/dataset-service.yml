@@ -1,0 +1,282 @@
+types:
+  imports:
+    CommonTypes:
+      base-type: any
+      external:
+        java: com.openfoundry.api
+      from: common-types.yml
+  definitions:
+    default-package: com.openfoundry.api.datasets
+    objects:
+      Rid:
+        alias: string
+
+      PageToken:
+        alias: string
+
+      Dataset:
+        docs: A dataset resource that contains files organized in branches and transactions
+        fields:
+          rid: Rid
+          name: string
+          description: optional<string>
+          parentFolderRid: optional<Rid>
+          createdAt: datetime
+          updatedAt: datetime
+
+      CreateDatasetRequest:
+        fields:
+          name: string
+          description: optional<string>
+          parentFolderRid: optional<Rid>
+
+      ListDatasetsResponse:
+        fields:
+          data: list<Dataset>
+          nextPageToken: optional<PageToken>
+
+      Branch:
+        docs: A named branch within a dataset
+        fields:
+          rid: Rid
+          name: string
+          datasetRid: Rid
+          createdAt: datetime
+
+      CreateBranchRequest:
+        fields:
+          name: string
+
+      ListBranchesResponse:
+        fields:
+          data: list<Branch>
+          nextPageToken: optional<PageToken>
+
+      TransactionType:
+        values:
+          - UPDATE
+          - APPEND
+          - SNAPSHOT
+
+      TransactionStatus:
+        values:
+          - OPEN
+          - COMMITTED
+          - ABORTED
+
+      Transaction:
+        docs: A transaction represents an atomic unit of changes to a dataset
+        fields:
+          rid: Rid
+          datasetRid: Rid
+          branchRid: Rid
+          type: TransactionType
+          status: TransactionStatus
+          createdAt: datetime
+          closedAt: optional<datetime>
+
+      OpenTransactionRequest:
+        fields:
+          branchRid: Rid
+          type: TransactionType
+
+      DatasetFile:
+        docs: Metadata about a file in a dataset (content not included)
+        fields:
+          path: string
+          size: integer
+          contentType: string
+          transactionRid: string
+
+      ListFilesResponse:
+        fields:
+          data: list<DatasetFile>
+          nextPageToken: optional<PageToken>
+
+services:
+  DatasetService:
+    name: Dataset Service
+    package: com.openfoundry.api.datasets
+    base-path: /api/v2
+    default-auth: header
+    endpoints:
+      # -- Dataset CRUD --------------------------------------------------------
+      listDatasets:
+        http: GET /datasets
+        docs: List all datasets with pagination
+        args:
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListDatasetsResponse
+
+      createDataset:
+        http: POST /datasets
+        docs: Create a new dataset
+        args:
+          body:
+            type: CreateDatasetRequest
+            param-type: body
+        returns: Dataset
+
+      getDataset:
+        http: GET /datasets/{datasetRid}
+        docs: Get a dataset by its RID
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+        returns: Dataset
+
+      deleteDataset:
+        http: DELETE /datasets/{datasetRid}
+        docs: Delete a dataset by its RID
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+
+      # -- Branch CRUD ---------------------------------------------------------
+      listBranches:
+        http: GET /datasets/{datasetRid}/branches
+        docs: List all branches in a dataset
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListBranchesResponse
+
+      createBranch:
+        http: POST /datasets/{datasetRid}/branches
+        docs: Create a new branch in a dataset
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+          body:
+            type: CreateBranchRequest
+            param-type: body
+        returns: Branch
+
+      getBranch:
+        http: GET /datasets/{datasetRid}/branches/{branchName}
+        docs: Get a branch by its name
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+          branchName:
+            type: string
+            param-type: path
+        returns: Branch
+
+      deleteBranch:
+        http: DELETE /datasets/{datasetRid}/branches/{branchName}
+        docs: Delete a branch from a dataset
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+          branchName:
+            type: string
+            param-type: path
+
+      # -- Transaction management -----------------------------------------------
+      openTransaction:
+        http: POST /datasets/{datasetRid}/transactions
+        docs: Open a new transaction on a dataset branch
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+          body:
+            type: OpenTransactionRequest
+            param-type: body
+        returns: Transaction
+
+      commitTransaction:
+        http: POST /datasets/{datasetRid}/transactions/{transactionRid}/commit
+        docs: Commit an open transaction, making its changes permanent
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+          transactionRid:
+            type: Rid
+            param-type: path
+        returns: Transaction
+
+      abortTransaction:
+        http: POST /datasets/{datasetRid}/transactions/{transactionRid}/abort
+        docs: Abort an open transaction, discarding its changes
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+          transactionRid:
+            type: Rid
+            param-type: path
+        returns: Transaction
+
+      # -- File management -----------------------------------------------------
+      listFiles:
+        http: GET /datasets/{datasetRid}/files
+        docs: List files in a dataset
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListFilesResponse
+
+      uploadFile:
+        http: PUT /datasets/{datasetRid}/files/{filePath}
+        docs: Upload or replace a file in a dataset. Send raw file content in the request body.
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+          filePath:
+            type: string
+            param-type: path
+          body:
+            type: binary
+            param-type: body
+        returns: DatasetFile
+
+      downloadFile:
+        http: GET /datasets/{datasetRid}/files/{filePath}
+        docs: Download a file from a dataset. Returns raw file content.
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+          filePath:
+            type: string
+            param-type: path
+        returns: binary
+
+      deleteFile:
+        http: DELETE /datasets/{datasetRid}/files/{filePath}
+        docs: Delete a file from a dataset
+        args:
+          datasetRid:
+            type: Rid
+            param-type: path
+          filePath:
+            type: string
+            param-type: path

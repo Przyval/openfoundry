@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openfoundry.fullname" . }}-config
+  labels:
+    {{- include "openfoundry.labels" . | nindent 4 }}
+data:
+  DATABASE_URL: {{ include "openfoundry.databaseUrl" . | quote }}
+  REDIS_URL: {{ include "openfoundry.redisUrl" . | quote }}
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  {{- range $name, $svc := .Values.services }}
+  SVC_{{ $name | upper }}_URL: "http://{{ include "openfoundry.fullname" $ }}-{{ $name }}:{{ $svc.port }}"
+  {{- end }}
+  GATEWAY_URL: "http://{{ include "openfoundry.fullname" . }}-gateway:{{ .Values.gateway.port }}"
+  CONSOLE_URL: "http://{{ include "openfoundry.fullname" . }}-console:{{ .Values.console.port }}"

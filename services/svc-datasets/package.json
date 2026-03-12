@@ -1,0 +1,31 @@
+{
+  "name": "@openfoundry/svc-datasets",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openfoundry/db": "workspace:*",
+    "@openfoundry/errors": "workspace:*",
+    "@openfoundry/permissions": "workspace:*",
+    "@openfoundry/rid": "workspace:*",
+    "@openfoundry/pagination": "workspace:*",
+    "@openfoundry/pipeline": "workspace:*",
+    "fastify": "^5.3.0",
+    "@fastify/cors": "^11.0.0",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "typescript": "~5.5.4",
+    "vitest": "^3.2.0",
+    "tsx": "^4.0.0"
+  }
+}

@@ -1,0 +1,338 @@
+types:
+  imports:
+    CommonTypes:
+      base-type: any
+      external:
+        java: com.openfoundry.api
+      from: common-types.yml
+  definitions:
+    default-package: com.openfoundry.api.objects
+    objects:
+      Rid:
+        alias: string
+
+      PageToken:
+        alias: string
+
+      PropertyValue:
+        alias: any
+        docs: Dynamic property value (string, integer, double, boolean, datetime, etc.)
+
+      PropertyMap:
+        alias: map<string, PropertyValue>
+
+      OntologyObject:
+        docs: An instance of an object type in an ontology
+        fields:
+          rid: Rid
+          objectType: string
+          primaryKey: string
+          properties: PropertyMap
+
+      ListObjectsResponse:
+        fields:
+          data: list<OntologyObject>
+          nextPageToken: optional<PageToken>
+
+      CreateObjectRequest:
+        fields:
+          primaryKey: string
+          properties: PropertyMap
+
+      UpdateObjectRequest:
+        fields:
+          properties: PropertyMap
+
+      # -- ObjectSet types -----------------------------------------------------
+
+      ObjectSetDefinition:
+        docs: |
+          Union type representing an object set query. Discriminated by the 'type' field.
+          Supported types: BASE, FILTER, UNION, INTERSECT, SUBTRACT, STATIC, SEARCH_AROUND
+        fields:
+          type: ObjectSetType
+          objectType: optional<string>
+          objectSet: optional<ObjectSetDefinition>
+          objectSets: optional<list<ObjectSetDefinition>>
+          filter: optional<FilterDefinition>
+          primaryKeys: optional<list<string>>
+          link: optional<string>
+
+      ObjectSetType:
+        values:
+          - BASE
+          - FILTER
+          - UNION
+          - INTERSECT
+          - SUBTRACT
+          - STATIC
+          - SEARCH_AROUND
+
+      FilterDefinition:
+        docs: |
+          Filter to apply on object properties. Supports eq, gt, gte, lt, lte, contains,
+          isNull, and, or, not operators.
+        fields:
+          type: string
+          field: optional<string>
+          value: optional<any>
+          filters: optional<list<FilterDefinition>>
+          filter: optional<FilterDefinition>
+
+      OrderByClause:
+        fields:
+          field: string
+          direction: optional<string>
+
+      LoadObjectsRequest:
+        docs: Request body for the loadObjects endpoint
+        fields:
+          objectSet: ObjectSetDefinition
+          pageSize: optional<integer>
+          pageToken: optional<PageToken>
+          orderBy: optional<list<OrderByClause>>
+
+      LoadObjectsResponse:
+        fields:
+          data: list<OntologyObject>
+          totalCount: integer
+          nextPageToken: optional<PageToken>
+
+      # -- Aggregation types ---------------------------------------------------
+
+      AggregationDefinition:
+        docs: Defines an aggregation operation to perform
+        fields:
+          type: string
+          field: optional<string>
+          name: optional<string>
+
+      GroupByDefinition:
+        fields:
+          field: string
+          type: string
+
+      AggregationResult:
+        fields:
+          name: optional<string>
+          value: any
+
+      GroupedAggregationResult:
+        fields:
+          group: map<string, any>
+          metrics: list<AggregationResult>
+
+      AggregateRequest:
+        docs: Request body for the aggregate endpoint
+        fields:
+          objectSet: ObjectSetDefinition
+          aggregation: list<AggregationDefinition>
+          groupBy: optional<list<GroupByDefinition>>
+
+      AggregateResponse:
+        fields:
+          data: any
+
+      # -- Link types ----------------------------------------------------------
+
+      LinkInstance:
+        docs: An instance of a link between two objects
+        fields:
+          sourceObjectType: string
+          sourcePrimaryKey: string
+          linkType: string
+          targetObjectType: string
+          targetPrimaryKey: string
+
+      CreateLinkRequest:
+        fields:
+          targetObjectType: string
+          targetPrimaryKey: string
+
+      ListLinksResponse:
+        fields:
+          data: list<OntologyObject>
+          nextPageToken: optional<PageToken>
+
+services:
+  ObjectService:
+    name: Object Service
+    package: com.openfoundry.api.objects
+    base-path: /api/v2
+    default-auth: header
+    endpoints:
+      # -- Object CRUD ---------------------------------------------------------
+      listObjects:
+        http: GET /ontologies/{ontologyRid}/objects/{objectType}
+        docs: List objects of a given type with pagination
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          objectType:
+            type: string
+            param-type: path
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListObjectsResponse
+
+      getObject:
+        http: GET /ontologies/{ontologyRid}/objects/{objectType}/{primaryKey}
+        docs: Get a single object by its primary key
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          objectType:
+            type: string
+            param-type: path
+          primaryKey:
+            type: string
+            param-type: path
+        returns: OntologyObject
+
+      createObject:
+        http: POST /ontologies/{ontologyRid}/objects/{objectType}
+        docs: Create a new object instance
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          objectType:
+            type: string
+            param-type: path
+          body:
+            type: CreateObjectRequest
+            param-type: body
+        returns: OntologyObject
+
+      updateObject:
+        http: PUT /ontologies/{ontologyRid}/objects/{objectType}/{primaryKey}
+        docs: Update properties of an existing object
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          objectType:
+            type: string
+            param-type: path
+          primaryKey:
+            type: string
+            param-type: path
+          body:
+            type: UpdateObjectRequest
+            param-type: body
+        returns: OntologyObject
+
+      deleteObject:
+        http: DELETE /ontologies/{ontologyRid}/objects/{objectType}/{primaryKey}
+        docs: Delete an object instance
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          objectType:
+            type: string
+            param-type: path
+          primaryKey:
+            type: string
+            param-type: path
+
+      # -- ObjectSet endpoints -------------------------------------------------
+      loadObjects:
+        http: POST /ontologies/{ontologyRid}/objectSets/loadObjects
+        docs: |
+          Load objects matching an ObjectSet definition with pagination and ordering.
+          Supports BASE, FILTER, UNION, INTERSECT, SUBTRACT, STATIC, and SEARCH_AROUND set types.
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          body:
+            type: LoadObjectsRequest
+            param-type: body
+        returns: LoadObjectsResponse
+
+      aggregate:
+        http: POST /ontologies/{ontologyRid}/objectSets/aggregate
+        docs: |
+          Compute aggregations over an ObjectSet, optionally grouped by fields.
+          Supports count, min, max, sum, avg aggregation types.
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          body:
+            type: AggregateRequest
+            param-type: body
+        returns: AggregateResponse
+
+      # -- Link endpoints ------------------------------------------------------
+      getLinks:
+        http: GET /ontologies/{ontologyRid}/objects/{objectType}/{primaryKey}/links/{linkType}
+        docs: Get objects linked via a specific link type (paginated)
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          objectType:
+            type: string
+            param-type: path
+          primaryKey:
+            type: string
+            param-type: path
+          linkType:
+            type: string
+            param-type: path
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListLinksResponse
+
+      createLink:
+        http: POST /ontologies/{ontologyRid}/objects/{objectType}/{primaryKey}/links/{linkType}
+        docs: Create a link between two objects
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          objectType:
+            type: string
+            param-type: path
+          primaryKey:
+            type: string
+            param-type: path
+          linkType:
+            type: string
+            param-type: path
+          body:
+            type: CreateLinkRequest
+            param-type: body
+        returns: LinkInstance
+
+      deleteLink:
+        http: DELETE /ontologies/{ontologyRid}/objects/{objectType}/{primaryKey}/links/{linkType}/{targetPrimaryKey}
+        docs: Delete a link between two objects
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          objectType:
+            type: string
+            param-type: path
+          primaryKey:
+            type: string
+            param-type: path
+          linkType:
+            type: string
+            param-type: path
+          targetPrimaryKey:
+            type: string
+            param-type: path

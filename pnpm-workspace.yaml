@@ -1,0 +1,6 @@
+packages:
+  - "packages/*"
+  - "packages/sdk/*"
+  - "packages/ui/*"
+  - "services/*"
+  - "apps/*"

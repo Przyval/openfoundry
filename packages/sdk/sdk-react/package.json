@@ -1,0 +1,35 @@
+{
+  "name": "@openfoundry/sdk-react",
+  "version": "0.0.1",
+  "private": true,
+  "description": "React hooks for the OpenFoundry SDK",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^18.3.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "typescript": "~5.5.4",
+    "vitest": "^3.2.0"
+  },
+  "license": "Apache-2.0"
+}

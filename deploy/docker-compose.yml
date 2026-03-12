@@ -1,0 +1,596 @@
+###############################################################################
+# OpenFoundry — Production Docker Compose
+# Usage:  docker compose -f deploy/docker-compose.yml --env-file deploy/.env.production up -d
+###############################################################################
+
+name: openfoundry
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        cpus: "1.0"
+        memory: 512M
+      reservations:
+        cpus: "0.1"
+        memory: 128M
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+  networks:
+    - internal
+
+x-service-env: &service-env
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  REDIS_URL: redis://redis:6379
+  JWT_SECRET: ${JWT_SECRET}
+  LOG_LEVEL: ${LOG_LEVEL:-warn}
+  LOG_FORMAT: json
+  NODE_ENV: production
+  ENFORCE_PERMISSIONS: "true"
+  S3_ENDPOINT: http://minio:9000
+  S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+  S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+  S3_BUCKET: ${S3_BUCKET:-openfoundry-media}
+  S3_REGION: ${S3_REGION:-us-east-1}
+
+services:
+  # ===========================================================================
+  # Infrastructure
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16 with pgvector
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    <<: *service-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ../db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    shm_size: 512mb
+    networks:
+      - internal
+
+  # ---------------------------------------------------------------------------
+  # Redis 7
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    <<: *service-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - internal
+
+  # ---------------------------------------------------------------------------
+  # MinIO — S3-compatible object storage
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    <<: *service-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.2"
+          memory: 256M
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - internal
+
+  # ---------------------------------------------------------------------------
+  # MinIO bootstrap — creates default bucket on first start
+  # ---------------------------------------------------------------------------
+  minio-init:
+    image: minio/mc:latest
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      mc mb --ignore-existing local/${S3_BUCKET:-openfoundry-media};
+      exit 0;
+      "
+    networks:
+      - internal
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+  # ===========================================================================
+  # Application Services
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # svc-gateway — API gateway / reverse proxy (only externally exposed service)
+  # ---------------------------------------------------------------------------
+  svc-gateway:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-gateway
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-gateway:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.2"
+          memory: 128M
+    ports:
+      - "${GATEWAY_EXTERNAL_PORT:-8080}:8080"
+    environment:
+      <<: *service-env
+      PORT: "8080"
+      HOST: "0.0.0.0"
+      AUTH_PUBLIC_KEY: ${AUTH_PUBLIC_KEY:-}
+      AUTH_ISSUER: ${AUTH_ISSUER:-openfoundry}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-openfoundry-api}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://console.openfoundry.local}
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-100}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      MULTIPASS_SERVICE_URL: http://svc-multipass:8084
+      ONTOLOGY_SERVICE_URL: http://svc-ontology:8081
+      OBJECTS_SERVICE_URL: http://svc-objects:8082
+      ACTIONS_SERVICE_URL: http://svc-actions:8083
+      DATASETS_SERVICE_URL: http://svc-datasets:8085
+      COMPASS_SERVICE_URL: http://svc-compass:8086
+      ADMIN_SERVICE_URL: http://svc-admin:8087
+      FUNCTIONS_SERVICE_URL: http://svc-functions:8088
+      WEBHOOKS_SERVICE_URL: http://svc-webhooks:8089
+      MEDIA_SERVICE_URL: http://svc-media:8090
+      SENTINEL_SERVICE_URL: http://svc-sentinel:8091
+      AIP_SERVICE_URL: http://svc-aip:8092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/status/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - internal
+      - external
+
+  # ---------------------------------------------------------------------------
+  # svc-multipass — Authentication / token service
+  # ---------------------------------------------------------------------------
+  svc-multipass:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-multipass
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-multipass:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    environment:
+      <<: *service-env
+      PORT: "8084"
+      TOKEN_EXPIRY_SECONDS: ${TOKEN_EXPIRY_SECONDS:-3600}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-openfoundry-console}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # svc-ontology — Ontology management
+  # ---------------------------------------------------------------------------
+  svc-ontology:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-ontology
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-ontology:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    environment:
+      <<: *service-env
+      PORT: "8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # svc-objects — Object instances (CRUD)
+  # ---------------------------------------------------------------------------
+  svc-objects:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-objects
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-objects:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    environment:
+      <<: *service-env
+      PORT: "8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8082/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # svc-actions — Action execution engine
+  # ---------------------------------------------------------------------------
+  svc-actions:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-actions
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-actions:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    environment:
+      <<: *service-env
+      PORT: "8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8083/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # svc-datasets — Dataset management
+  # ---------------------------------------------------------------------------
+  svc-datasets:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-datasets
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-datasets:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    environment:
+      <<: *service-env
+      PORT: "8085"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8085/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # svc-compass — Project / resource navigation
+  # ---------------------------------------------------------------------------
+  svc-compass:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-compass
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-compass:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    environment:
+      <<: *service-env
+      PORT: "8086"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8086/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # svc-admin — Administration / user management
+  # ---------------------------------------------------------------------------
+  svc-admin:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-admin
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-admin:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    environment:
+      <<: *service-env
+      PORT: "8087"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8087/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # svc-functions — Serverless function execution
+  # ---------------------------------------------------------------------------
+  svc-functions:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-functions
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-functions:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    environment:
+      <<: *service-env
+      PORT: "8088"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8088/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # svc-webhooks — Webhook delivery
+  # ---------------------------------------------------------------------------
+  svc-webhooks:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-webhooks
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-webhooks:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    environment:
+      <<: *service-env
+      PORT: "8089"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8089/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # svc-media — File / attachment storage
+  # ---------------------------------------------------------------------------
+  svc-media:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-media
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-media:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    environment:
+      <<: *service-env
+      PORT: "8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # svc-sentinel — Monitoring / alerting
+  # ---------------------------------------------------------------------------
+  svc-sentinel:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-sentinel
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-sentinel:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    environment:
+      <<: *service-env
+      PORT: "8091"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8091/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # svc-aip — AI / LLM integration
+  # ---------------------------------------------------------------------------
+  svc-aip:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.service
+      args:
+        SERVICE: svc-aip
+    image: ${IMAGE_REGISTRY:-openfoundry}/svc-aip:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    environment:
+      <<: *service-env
+      PORT: "8092"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8092/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ===========================================================================
+  # Console (Frontend)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # app-console — React SPA served via nginx
+  # ---------------------------------------------------------------------------
+  app-console:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.console
+    image: ${IMAGE_REGISTRY:-openfoundry}/app-console:${IMAGE_TAG:-latest}
+    <<: *service-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+    ports:
+      - "${CONSOLE_EXTERNAL_PORT:-3000}:80"
+    depends_on:
+      svc-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - internal
+      - external
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  pg_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  internal:
+    driver: bridge
+    internal: true
+  external:
+    driver: bridge

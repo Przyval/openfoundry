@@ -1,0 +1,31 @@
+{
+  "name": "@openfoundry/test-utils",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Test helpers, mock factories, and fixtures for the OpenFoundry platform",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@openfoundry/rid": "workspace:*",
+    "@openfoundry/ontology-schema": "workspace:*",
+    "@openfoundry/auth-tokens": "workspace:*",
+    "@openfoundry/errors": "workspace:*",
+    "jose": "^6.0.0"
+  },
+  "license": "Apache-2.0"
+}

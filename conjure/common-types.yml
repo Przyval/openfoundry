@@ -1,0 +1,53 @@
+types:
+  definitions:
+    default-package: com.openfoundry.api
+    objects:
+      Rid:
+        alias: string
+        docs: Resource identifier in format ri.<service>.<instance>.<type>.<locator>
+
+      PageToken:
+        alias: string
+        docs: Opaque cursor for pagination
+
+      PageRequest:
+        fields:
+          pageSize: optional<integer>
+          pageToken: optional<PageToken>
+
+      DisplayName:
+        alias: string
+
+      Description:
+        alias: string
+
+      Timestamp:
+        alias: datetime
+
+      PropertyValue:
+        alias: any
+        docs: Dynamic property value (string, integer, double, boolean, datetime, etc.)
+
+      PropertyMap:
+        alias: map<string, PropertyValue>
+        docs: Map of property API names to their values
+
+      OrderByClause:
+        fields:
+          field: string
+          direction:
+            type: optional<OrderDirection>
+            docs: Sort direction, defaults to asc
+
+      OrderDirection:
+        values:
+          - ASC
+          - DESC
+
+      ErrorResponse:
+        fields:
+          errorCode: string
+          errorName: string
+          errorInstanceId: string
+          parameters: optional<map<string, any>>
+          statusCode: integer

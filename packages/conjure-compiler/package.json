@@ -1,0 +1,21 @@
+{
+  "name": "@openfoundry/conjure-compiler",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openfoundry/conjure-ir": "workspace:*",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.5.4",
+    "vitest": "^3.2.0"
+  }
+}

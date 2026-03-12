@@ -1,0 +1,172 @@
+types:
+  imports:
+    CommonTypes:
+      base-type: any
+      external:
+        java: com.openfoundry.api
+      from: common-types.yml
+  definitions:
+    default-package: com.openfoundry.api.actions
+    objects:
+      Rid:
+        alias: string
+
+      PageToken:
+        alias: string
+
+      ActionApplyRequest:
+        docs: Request to apply (execute) an action
+        fields:
+          parameters: map<string, any>
+
+      ActionApplyResponse:
+        docs: Result of a successful action execution
+        fields:
+          rid: Rid
+          status: ActionExecutionStatus
+          result: optional<map<string, any>>
+
+      ValidationResult:
+        docs: Result of validating action parameters
+        fields:
+          valid: boolean
+          errors: optional<list<ValidationError>>
+
+      ValidationError:
+        fields:
+          field: optional<string>
+          message: string
+
+      ActionExecution:
+        docs: A record of an action execution
+        fields:
+          rid: Rid
+          actionApiName: string
+          parameters: map<string, any>
+          status: ActionExecutionStatus
+          result: optional<map<string, any>>
+          error: optional<string>
+          startedAt: datetime
+          completedAt: optional<datetime>
+
+      ActionExecutionStatus:
+        values:
+          - RUNNING
+          - SUCCEEDED
+          - FAILED
+
+      ListExecutionsResponse:
+        fields:
+          data: list<ActionExecution>
+          nextPageToken: optional<PageToken>
+
+      BatchApplyRequestItem:
+        fields:
+          parameters: map<string, any>
+
+      BatchApplyRequest:
+        docs: Request to apply an action in batch
+        fields:
+          requests: list<BatchApplyRequestItem>
+
+      BatchApplyResultItem:
+        fields:
+          rid: Rid
+          status: ActionExecutionStatus
+          result: optional<map<string, any>>
+          error: optional<string>
+
+      BatchApplyResponse:
+        fields:
+          results: list<BatchApplyResultItem>
+
+services:
+  ActionService:
+    name: Action Service
+    package: com.openfoundry.api.actions
+    base-path: /api/v2
+    default-auth: header
+    endpoints:
+      apply:
+        http: POST /ontologies/{ontologyRid}/actions/{actionApiName}/apply
+        docs: |
+          Apply (execute) an action with the given parameters.
+          Parameters are validated against the action type definition before execution.
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          actionApiName:
+            type: string
+            param-type: path
+          body:
+            type: ActionApplyRequest
+            param-type: body
+        returns: ActionApplyResponse
+
+      validate:
+        http: POST /ontologies/{ontologyRid}/actions/{actionApiName}/validate
+        docs: |
+          Validate action parameters without executing the action.
+          Returns validation result with any errors found.
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          actionApiName:
+            type: string
+            param-type: path
+          body:
+            type: ActionApplyRequest
+            param-type: body
+        returns: ValidationResult
+
+      applyBatch:
+        http: POST /ontologies/{ontologyRid}/actions/{actionApiName}/applyBatch
+        docs: |
+          Apply an action multiple times with different parameters in a single request.
+          Each request item is validated and executed independently.
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          actionApiName:
+            type: string
+            param-type: path
+          body:
+            type: BatchApplyRequest
+            param-type: body
+        returns: BatchApplyResponse
+
+      listExecutions:
+        http: GET /ontologies/{ontologyRid}/actions/{actionApiName}/executions
+        docs: List execution records for a specific action type with pagination
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          actionApiName:
+            type: string
+            param-type: path
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListExecutionsResponse
+
+      getExecution:
+        http: GET /ontologies/{ontologyRid}/actions/{actionApiName}/executions/{executionRid}
+        docs: Get a specific action execution record by its RID
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          actionApiName:
+            type: string
+            param-type: path
+          executionRid:
+            type: Rid
+            param-type: path
+        returns: ActionExecution

@@ -1,0 +1,26 @@
+{
+  "name": "@openfoundry/errors",
+  "version": "0.1.0",
+  "description": "Structured error types for the OpenFoundry platform",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@openfoundry/rid": "workspace:*"
+  },
+  "license": "Apache-2.0"
+}

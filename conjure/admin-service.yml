@@ -1,0 +1,250 @@
+types:
+  imports:
+    CommonTypes:
+      base-type: any
+      external:
+        java: com.openfoundry.api
+      from: common-types.yml
+  definitions:
+    default-package: com.openfoundry.api.admin
+    objects:
+      Rid:
+        alias: string
+
+      PageToken:
+        alias: string
+
+      UserStatus:
+        values:
+          - ACTIVE
+          - INACTIVE
+          - SUSPENDED
+
+      User:
+        docs: A user in the platform
+        fields:
+          rid: Rid
+          username: string
+          email: string
+          displayName: string
+          attributes: optional<map<string, string>>
+          status: UserStatus
+          createdAt: datetime
+          updatedAt: datetime
+
+      CreateUserRequest:
+        fields:
+          username: string
+          email: string
+          displayName: string
+          attributes: optional<map<string, string>>
+
+      UpdateUserRequest:
+        fields:
+          email: optional<string>
+          displayName: optional<string>
+          attributes: optional<map<string, string>>
+          status: optional<UserStatus>
+
+      ListUsersResponse:
+        fields:
+          data: list<User>
+          nextPageToken: optional<PageToken>
+
+      Group:
+        docs: A group of users for access control
+        fields:
+          rid: Rid
+          name: string
+          description: optional<string>
+          memberCount: integer
+          createdAt: datetime
+          updatedAt: datetime
+
+      CreateGroupRequest:
+        fields:
+          name: string
+          description: optional<string>
+
+      ListGroupsResponse:
+        fields:
+          data: list<Group>
+          nextPageToken: optional<PageToken>
+
+      GroupMembership:
+        docs: Represents a user's membership in a group
+        fields:
+          groupRid: Rid
+          userRid: Rid
+
+      AddMemberRequest:
+        fields:
+          userRid: Rid
+
+      GroupMemberSummary:
+        docs: Summary of a group member (subset of User)
+        fields:
+          rid: Rid
+          username: string
+          email: string
+          displayName: string
+          status: UserStatus
+
+      UserGroupSummary:
+        docs: Summary of a group a user belongs to
+        fields:
+          rid: Rid
+          name: string
+          description: optional<string>
+          createdAt: datetime
+          updatedAt: datetime
+
+services:
+  AdminService:
+    name: Admin Service
+    package: com.openfoundry.api.admin
+    base-path: /api/v2
+    default-auth: header
+    endpoints:
+      # -- User CRUD -----------------------------------------------------------
+      listUsers:
+        http: GET /admin/users
+        docs: List all users with pagination
+        args:
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListUsersResponse
+
+      searchUsers:
+        http: GET /admin/users/search
+        docs: Search users by username, email, or display name
+        args:
+          q:
+            type: string
+            param-type: query
+            docs: Search query string
+        returns: list<User>
+
+      createUser:
+        http: POST /admin/users
+        docs: Create a new user
+        args:
+          body:
+            type: CreateUserRequest
+            param-type: body
+        returns: User
+
+      getUser:
+        http: GET /admin/users/{userRid}
+        docs: Get a user by their RID
+        args:
+          userRid:
+            type: Rid
+            param-type: path
+        returns: User
+
+      updateUser:
+        http: PUT /admin/users/{userRid}
+        docs: Update user properties (email, display name, attributes, status)
+        args:
+          userRid:
+            type: Rid
+            param-type: path
+          body:
+            type: UpdateUserRequest
+            param-type: body
+        returns: User
+
+      deleteUser:
+        http: DELETE /admin/users/{userRid}
+        docs: Delete a user (sets status to INACTIVE)
+        args:
+          userRid:
+            type: Rid
+            param-type: path
+        returns: User
+
+      getUserGroups:
+        http: GET /admin/users/{userRid}/groups
+        docs: List all groups that a user belongs to
+        args:
+          userRid:
+            type: Rid
+            param-type: path
+        returns: list<UserGroupSummary>
+
+      # -- Group CRUD ----------------------------------------------------------
+      listGroups:
+        http: GET /admin/groups
+        docs: List all groups with pagination
+        args:
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListGroupsResponse
+
+      createGroup:
+        http: POST /admin/groups
+        docs: Create a new group
+        args:
+          body:
+            type: CreateGroupRequest
+            param-type: body
+        returns: Group
+
+      getGroup:
+        http: GET /admin/groups/{groupRid}
+        docs: Get a group by its RID
+        args:
+          groupRid:
+            type: Rid
+            param-type: path
+        returns: Group
+
+      deleteGroup:
+        http: DELETE /admin/groups/{groupRid}
+        docs: Delete a group
+        args:
+          groupRid:
+            type: Rid
+            param-type: path
+
+      # -- Membership management ------------------------------------------------
+      listGroupMembers:
+        http: GET /admin/groups/{groupRid}/members
+        docs: List all members of a group
+        args:
+          groupRid:
+            type: Rid
+            param-type: path
+        returns: list<GroupMemberSummary>
+
+      addGroupMember:
+        http: POST /admin/groups/{groupRid}/members
+        docs: Add a user to a group
+        args:
+          groupRid:
+            type: Rid
+            param-type: path
+          body:
+            type: AddMemberRequest
+            param-type: body
+        returns: GroupMembership
+
+      removeGroupMember:
+        http: DELETE /admin/groups/{groupRid}/members/{userRid}
+        docs: Remove a user from a group
+        args:
+          groupRid:
+            type: Rid
+            param-type: path
+          userRid:
+            type: Rid
+            param-type: path

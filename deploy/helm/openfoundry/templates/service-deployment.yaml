@@ -1,0 +1,59 @@
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openfoundry.fullname" $ }}-{{ $name }}
+  labels:
+    {{- include "openfoundry.serviceLabels" (dict "root" $ "serviceName" $name) | nindent 4 }}
+spec:
+  replicas: {{ $svc.replicas }}
+  selector:
+    matchLabels:
+      {{- include "openfoundry.serviceSelectorLabels" (dict "root" $ "serviceName" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "openfoundry.serviceSelectorLabels" (dict "root" $ "serviceName" $name) | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ $name }}
+          image: {{ $.Values.global.image.registry }}/openfoundry/svc-{{ $name }}:{{ $.Values.global.image.tag }}
+          imagePullPolicy: {{ $.Values.global.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ $svc.port | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "openfoundry.fullname" $ }}-config
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "openfoundry.fullname" $ }}-config
+                  key: REDIS_URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+{{- end }}

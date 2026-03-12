@@ -1,0 +1,38 @@
+{
+  "name": "@openfoundry/svc-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "API Gateway — main entry point for all OpenFoundry API requests",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastify": "^5.3.0",
+    "@fastify/cors": "^11.0.0",
+    "@fastify/helmet": "^13.0.0",
+    "@openfoundry/auth-tokens": "workspace:*",
+    "@openfoundry/errors": "workspace:*",
+    "@openfoundry/health": "workspace:*",
+    "@openfoundry/rid": "workspace:*",
+    "@openfoundry/search": "workspace:*",
+    "pg": "^8.13.0"
+  },
+  "optionalDependencies": {
+    "ioredis": "^5.4.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.0"
+  },
+  "license": "Apache-2.0"
+}

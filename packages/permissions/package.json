@@ -1,0 +1,42 @@
+{
+  "name": "@openfoundry/permissions",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Permission model supporting role-based access control for the OpenFoundry platform",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@openfoundry/errors": "workspace:*",
+    "@openfoundry/rid": "workspace:*",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "typescript": "~5.5.4",
+    "vitest": "^3.2.0"
+  },
+  "peerDependencies": {
+    "fastify": "^5.3.0"
+  },
+  "peerDependenciesMeta": {
+    "fastify": {
+      "optional": true
+    }
+  },
+  "license": "Apache-2.0"
+}

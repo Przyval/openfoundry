@@ -1,0 +1,52 @@
+# OpenFoundry CODEOWNERS
+# These owners are automatically requested for review on pull requests.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for the entire repository
+*                                       @openfoundry/core
+
+# Packages — shared libraries
+packages/ontology-schema/               @openfoundry/ontology
+packages/ontology-maker/                @openfoundry/ontology
+packages/ontology-generator/            @openfoundry/ontology
+packages/ontology-ir/                   @openfoundry/ontology
+packages/conjure-codegen/               @openfoundry/ontology
+packages/conjure-compiler/              @openfoundry/ontology
+packages/conjure-ir/                    @openfoundry/ontology
+packages/client/                        @openfoundry/sdk
+packages/object-set/                    @openfoundry/sdk
+packages/sdk/                           @openfoundry/sdk
+packages/auth-tokens/                   @openfoundry/platform
+packages/permissions/                   @openfoundry/platform
+packages/markings/                      @openfoundry/platform
+packages/errors/                        @openfoundry/platform
+packages/rid/                           @openfoundry/platform
+packages/config/                        @openfoundry/platform
+packages/health/                        @openfoundry/platform
+packages/logging/                       @openfoundry/platform
+packages/tracing/                       @openfoundry/platform
+packages/ui/                            @openfoundry/frontend
+
+# Services
+services/svc-gateway/                   @openfoundry/platform
+services/svc-multipass/                 @openfoundry/platform
+services/svc-ontology/                  @openfoundry/ontology
+services/svc-objects/                   @openfoundry/core
+services/svc-actions/                   @openfoundry/core
+services/svc-datasets/                  @openfoundry/core
+services/svc-compass/                   @openfoundry/core
+services/svc-admin/                     @openfoundry/platform
+services/svc-functions/                 @openfoundry/core
+services/svc-webhooks/                  @openfoundry/core
+services/svc-media/                     @openfoundry/core
+services/svc-sentinel/                  @openfoundry/platform
+
+# Apps
+apps/app-console/                       @openfoundry/frontend
+apps/app-docs/                          @openfoundry/frontend
+apps/app-workshop/                      @openfoundry/frontend
+
+# Infrastructure and CI
+.github/                                @openfoundry/platform
+deploy/                                 @openfoundry/platform
+db/                                     @openfoundry/platform

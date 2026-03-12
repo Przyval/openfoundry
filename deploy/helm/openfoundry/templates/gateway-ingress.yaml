@@ -1,0 +1,39 @@
+{{- if .Values.gateway.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "openfoundry.fullname" . }}-gateway
+  labels:
+    {{- include "openfoundry.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+  {{- with .Values.gateway.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.gateway.ingress.className }}
+  ingressClassName: {{ .Values.gateway.ingress.className }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.gateway.ingress.host }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "openfoundry.fullname" . }}-gateway
+                port:
+                  number: {{ .Values.gateway.port }}
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "openfoundry.fullname" . }}-gateway
+                port:
+                  number: {{ .Values.gateway.port }}
+  {{- if .Values.gateway.ingress.tls }}
+  tls:
+    {{- toYaml .Values.gateway.ingress.tls | nindent 4 }}
+  {{- end }}
+{{- end }}

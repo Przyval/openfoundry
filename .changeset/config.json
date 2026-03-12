@@ -1,0 +1,31 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [],
+  "linked": [
+    ["@openfoundry/ontology-schema", "@openfoundry/ontology-maker", "@openfoundry/ontology-ir", "@openfoundry/ontology-generator"],
+    ["@openfoundry/conjure-ir", "@openfoundry/conjure-codegen"],
+    ["@openfoundry/client", "@openfoundry/errors", "@openfoundry/auth-tokens"]
+  ],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": [
+    "@openfoundry/app-console",
+    "@openfoundry/app-docs",
+    "@openfoundry/app-workshop",
+    "@openfoundry/svc-gateway",
+    "@openfoundry/svc-multipass",
+    "@openfoundry/svc-ontology",
+    "@openfoundry/svc-objects",
+    "@openfoundry/svc-actions",
+    "@openfoundry/svc-datasets",
+    "@openfoundry/svc-compass",
+    "@openfoundry/svc-admin",
+    "@openfoundry/svc-functions",
+    "@openfoundry/svc-webhooks",
+    "@openfoundry/svc-media",
+    "@openfoundry/svc-sentinel"
+  ]
+}

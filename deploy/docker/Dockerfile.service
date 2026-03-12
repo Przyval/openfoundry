@@ -1,0 +1,93 @@
+###############################################################################
+# OpenFoundry — Multi-stage Node.js Service Dockerfile
+#
+# Build any service in the monorepo:
+#   docker build \
+#     -f deploy/docker/Dockerfile.service \
+#     --build-arg SERVICE=api-gateway \
+#     -t openfoundry/api-gateway .
+###############################################################################
+
+# ---------------------------------------------------------------------------
+# Stage 1: prune the monorepo to only the target service and its deps
+# ---------------------------------------------------------------------------
+FROM node:22-alpine AS pruner
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN npm install -g turbo
+
+WORKDIR /app
+
+COPY . .
+
+ARG SERVICE
+RUN turbo prune --scope="${SERVICE}" --docker
+
+# ---------------------------------------------------------------------------
+# Stage 2: install dependencies for the pruned workspace
+# ---------------------------------------------------------------------------
+FROM node:22-alpine AS installer
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+# First install deps using only package.json files (better layer caching)
+COPY --from=pruner /app/out/json/ .
+COPY --from=pruner /app/out/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+# Then copy full source and build
+COPY --from=pruner /app/out/full/ .
+COPY tsconfig.base.json turbo.json ./
+
+ARG SERVICE
+RUN npx turbo run build --filter="${SERVICE}"
+
+# ---------------------------------------------------------------------------
+# Stage 3: production-only dependencies
+# ---------------------------------------------------------------------------
+FROM node:22-alpine AS prod-deps
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+COPY --from=pruner /app/out/json/ .
+COPY --from=pruner /app/out/pnpm-lock.yaml ./
+
+RUN pnpm install --frozen-lockfile --prod
+
+# ---------------------------------------------------------------------------
+# Stage 4: minimal runtime image
+# ---------------------------------------------------------------------------
+FROM node:22-alpine AS runtime
+
+RUN addgroup -g 1001 -S openfoundry && \
+    adduser -S openfoundry -u 1001 -G openfoundry
+
+WORKDIR /app
+
+# Copy production node_modules
+COPY --from=prod-deps --chown=openfoundry:openfoundry /app/ .
+
+# Copy built output for the target service
+ARG SERVICE
+COPY --from=installer --chown=openfoundry:openfoundry \
+    /app/services/${SERVICE}/dist/ ./services/${SERVICE}/dist/
+
+# Copy shared package builds
+COPY --from=installer --chown=openfoundry:openfoundry \
+    /app/packages/ ./packages/
+
+USER openfoundry
+
+ENV NODE_ENV=production
+ENV SERVICE=${SERVICE}
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:3000/health || exit 1
+
+CMD node services/${SERVICE}/dist/index.js

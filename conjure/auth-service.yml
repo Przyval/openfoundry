@@ -1,0 +1,172 @@
+types:
+  definitions:
+    default-package: com.openfoundry.api.auth
+    objects:
+      TokenRequest:
+        docs: OAuth2 token request supporting authorization_code, client_credentials, and refresh_token grants
+        fields:
+          grant_type: string
+          client_id: optional<string>
+          client_secret: optional<string>
+          code: optional<string>
+          redirect_uri: optional<string>
+          code_verifier: optional<string>
+          refresh_token: optional<string>
+          scope: optional<string>
+
+      TokenResponse:
+        docs: OAuth2 token response
+        fields:
+          access_token: string
+          token_type: string
+          expires_in: integer
+          refresh_token: optional<string>
+          scope: string
+
+      AuthorizeRequest:
+        docs: OAuth2 authorization request query parameters
+        fields:
+          response_type: string
+          client_id: string
+          redirect_uri: optional<string>
+          scope: optional<string>
+          state: optional<string>
+          code_challenge: optional<string>
+          code_challenge_method: optional<CodeChallengeMethod>
+
+      AuthorizeResponse:
+        fields:
+          code: string
+          state: optional<string>
+
+      CodeChallengeMethod:
+        values:
+          - S256
+          - plain
+
+      RevokeRequest:
+        docs: OAuth2 token revocation request per RFC 7009
+        fields:
+          token: string
+          token_type_hint: optional<TokenTypeHint>
+
+      RevokeResponse:
+        fields:
+          revoked: boolean
+
+      TokenTypeHint:
+        values:
+          - access_token
+          - refresh_token
+
+      UserInfo:
+        docs: OpenID Connect UserInfo response
+        fields:
+          sub: string
+          org: optional<string>
+          scope: optional<string>
+          sid: optional<string>
+          svc: optional<string>
+
+      OAuthClient:
+        docs: Registered OAuth2 client
+        fields:
+          client_id: string
+          client_secret: optional<string>
+          redirect_uris: list<string>
+          grant_types: list<string>
+          scopes: list<string>
+
+      OpenIdConfiguration:
+        docs: OpenID Connect Discovery document
+        fields:
+          issuer: string
+          authorization_endpoint: string
+          token_endpoint: string
+          revocation_endpoint: string
+          userinfo_endpoint: string
+          response_types_supported: list<string>
+          grant_types_supported: list<string>
+          subject_types_supported: list<string>
+          id_token_signing_alg_values_supported: list<string>
+          scopes_supported: list<string>
+          token_endpoint_auth_methods_supported: list<string>
+          code_challenge_methods_supported: list<string>
+
+services:
+  AuthService:
+    name: Auth Service (Multipass)
+    package: com.openfoundry.api.auth
+    base-path: /
+    default-auth: none
+    endpoints:
+      token:
+        http: POST /multipass/api/oauth2/token
+        docs: |
+          OAuth2 token endpoint. Supports grant types:
+          - authorization_code: Exchange an auth code for tokens (with optional PKCE verification)
+          - client_credentials: Authenticate as a service client
+          - refresh_token: Rotate a refresh token for new access and refresh tokens
+        args:
+          body:
+            type: TokenRequest
+            param-type: body
+        returns: TokenResponse
+
+      revoke:
+        http: POST /multipass/api/oauth2/revoke
+        docs: |
+          Revoke a token per RFC 7009.
+          Always returns 200 regardless of whether the token existed.
+        args:
+          body:
+            type: RevokeRequest
+            param-type: body
+        returns: RevokeResponse
+
+      authorize:
+        http: GET /multipass/api/oauth2/authorize
+        docs: |
+          OAuth2 authorization endpoint.
+          Supports PKCE with S256 and plain code challenge methods.
+          In the mock implementation this returns the authorization code directly.
+        args:
+          response_type:
+            type: string
+            param-type: query
+          client_id:
+            type: string
+            param-type: query
+          redirect_uri:
+            type: optional<string>
+            param-type: query
+          scope:
+            type: optional<string>
+            param-type: query
+          state:
+            type: optional<string>
+            param-type: query
+          code_challenge:
+            type: optional<string>
+            param-type: query
+          code_challenge_method:
+            type: optional<CodeChallengeMethod>
+            param-type: query
+        returns: AuthorizeResponse
+
+      userinfo:
+        http: GET /multipass/api/userinfo
+        docs: |
+          OpenID Connect UserInfo endpoint.
+          Requires a valid Bearer token in the Authorization header.
+          Returns claims about the authenticated user.
+        auth: header
+        returns: UserInfo
+
+      openIdConfiguration:
+        http: GET /.well-known/openid-configuration
+        docs: |
+          OpenID Connect Discovery endpoint.
+          Returns the provider metadata including supported endpoints,
+          grant types, scopes, and signing algorithms.
+        returns: OpenIdConfiguration

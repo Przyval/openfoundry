@@ -1,0 +1,120 @@
+###############################################################################
+# OpenFoundry — Development Docker Compose
+# Usage:  docker compose -f deploy/docker-compose.dev.yml up -d
+###############################################################################
+
+name: openfoundry-dev
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16 with pgvector
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: openfoundry
+      POSTGRES_PASSWORD: openfoundry_dev
+      POSTGRES_DB: openfoundry
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      # Run migrations on first boot
+      - ../db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openfoundry"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    shm_size: 256mb
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 — caching, sessions, pub/sub
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Traefik — reverse proxy / API gateway
+  # ---------------------------------------------------------------------------
+  traefik:
+    image: traefik:v3.2
+    restart: unless-stopped
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--log.level=INFO"
+      - "--accesslog=true"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8888:8080"   # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      - "traefik.enable=true"
+
+  # ---------------------------------------------------------------------------
+  # MinIO — S3-compatible object storage for media/attachments
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: openfoundry
+      MINIO_ROOT_PASSWORD: openfoundry_dev
+    ports:
+      - "9002:9000"   # S3 API
+      - "9003:9001"   # MinIO Console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # MinIO bootstrap — creates default bucket on first start
+  # ---------------------------------------------------------------------------
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 openfoundry openfoundry_dev;
+      mc mb --ignore-existing local/openfoundry-media;
+      mc anonymous set download local/openfoundry-media;
+      exit 0;
+      "
+
+volumes:
+  pg_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local

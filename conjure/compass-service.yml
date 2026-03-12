@@ -1,0 +1,150 @@
+types:
+  imports:
+    CommonTypes:
+      base-type: any
+      external:
+        java: com.openfoundry.api
+      from: common-types.yml
+  definitions:
+    default-package: com.openfoundry.api.compass
+    objects:
+      Rid:
+        alias: string
+
+      PageToken:
+        alias: string
+
+      ResourceType:
+        docs: The type of a filesystem resource
+        values:
+          - FOLDER
+          - PROJECT
+          - DATASET
+          - ONTOLOGY
+          - FILE
+
+      Resource:
+        docs: A resource in the Compass filesystem hierarchy
+        fields:
+          rid: Rid
+          type: ResourceType
+          name: string
+          path: string
+          parentRid: optional<Rid>
+          description: optional<string>
+          createdAt: datetime
+          updatedAt: datetime
+          createdBy: optional<string>
+          markings: optional<list<string>>
+
+      CreateResourceRequest:
+        fields:
+          type: ResourceType
+          name: string
+          parentRid: optional<Rid>
+          description: optional<string>
+          createdBy: optional<string>
+          markings: optional<list<string>>
+
+      UpdateResourceRequest:
+        fields:
+          name: optional<string>
+          parentRid: optional<Rid>
+          description: optional<string>
+          markings: optional<list<string>>
+
+      ListResourcesResponse:
+        fields:
+          data: list<Resource>
+          nextPageToken: optional<PageToken>
+
+services:
+  CompassService:
+    name: Compass Service
+    package: com.openfoundry.api.compass
+    base-path: /api/v2
+    default-auth: header
+    endpoints:
+      listRootResources:
+        http: GET /resources
+        docs: List root-level resources with pagination
+        args:
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListResourcesResponse
+
+      createResource:
+        http: POST /resources
+        docs: Create a new resource (folder, project, dataset, ontology, or file)
+        args:
+          body:
+            type: CreateResourceRequest
+            param-type: body
+        returns: Resource
+
+      searchResources:
+        http: GET /resources/search
+        docs: Search resources by name
+        args:
+          q:
+            type: string
+            param-type: query
+            docs: Search query string matched against resource names
+        returns: list<Resource>
+
+      getResourceByPath:
+        http: GET /resources/byPath
+        docs: Look up a resource by its full path
+        args:
+          path:
+            type: string
+            param-type: query
+        returns: Resource
+
+      getResource:
+        http: GET /resources/{resourceRid}
+        docs: Get a resource by its RID
+        args:
+          resourceRid:
+            type: Rid
+            param-type: path
+        returns: Resource
+
+      updateResource:
+        http: PUT /resources/{resourceRid}
+        docs: Update a resource (rename, move, update description or markings)
+        args:
+          resourceRid:
+            type: Rid
+            param-type: path
+          body:
+            type: UpdateResourceRequest
+            param-type: body
+        returns: Resource
+
+      deleteResource:
+        http: DELETE /resources/{resourceRid}
+        docs: Delete a resource and all its children
+        args:
+          resourceRid:
+            type: Rid
+            param-type: path
+
+      listChildren:
+        http: GET /resources/{resourceRid}/children
+        docs: List child resources of a given resource with pagination
+        args:
+          resourceRid:
+            type: Rid
+            param-type: path
+          pageSize:
+            type: optional<integer>
+            param-type: query
+          pageToken:
+            type: optional<PageToken>
+            param-type: query
+        returns: ListResourcesResponse
