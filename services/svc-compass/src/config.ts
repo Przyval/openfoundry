@@ -33,7 +33,7 @@ function envInt(key: string, fallback: number): number {
 
 export function loadConfig(): CompassServiceConfig {
   return {
-    port: envInt("PORT", 8085),
+    port: envInt("PORT", 8086),
     host: env("HOST", "0.0.0.0"),
     logLevel: env("LOG_LEVEL", "info"),
     nodeEnv: env("NODE_ENV", "development"),

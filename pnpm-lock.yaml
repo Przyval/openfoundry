@@ -48,6 +48,9 @@ importers:
       '@openfoundry/sdk-oauth':
         specifier: workspace:*
         version: link:../../packages/sdk/sdk-oauth
+      '@openfoundry/ui-components':
+        specifier: workspace:*
+        version: link:../../packages/ui/components
       react:
         specifier: ^18.3.0
         version: 18.3.1
@@ -265,7 +268,11 @@ importers:
         specifier: workspace:*
         version: link:../rid
 
-  packages/health: {}
+  packages/health:
+    dependencies:
+      fastify:
+        specifier: ^5.3.0
+        version: 5.8.2
 
   packages/logging:
     dependencies:
@@ -731,13 +738,22 @@ importers:
       '@openfoundry/errors':
         specifier: workspace:*
         version: link:../../packages/errors
+      '@openfoundry/pagination':
+        specifier: workspace:*
+        version: link:../../packages/pagination
       '@openfoundry/rid':
         specifier: workspace:*
         version: link:../../packages/rid
       fastify:
         specifier: ^5.3.0
         version: 5.8.2
+      pg:
+        specifier: ^8.13.0
+        version: 8.20.0
     devDependencies:
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.18.0
       tsx:
         specifier: ^4.0.0
         version: 4.21.0
@@ -839,6 +855,9 @@ importers:
       '@openfoundry/errors':
         specifier: workspace:*
         version: link:../../packages/errors
+      '@openfoundry/health':
+        specifier: workspace:*
+        version: link:../../packages/health
       '@openfoundry/rid':
         specifier: workspace:*
         version: link:../../packages/rid

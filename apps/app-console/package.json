@@ -17,6 +17,7 @@
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "@openfoundry/sdk-oauth": "workspace:*",
+    "@openfoundry/ui-components": "workspace:*",
     "react-router-dom": "^7.0.0"
   },
   "devDependencies": {
