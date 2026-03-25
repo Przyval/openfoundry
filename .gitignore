@@ -38,4 +38,9 @@ packages/api-types/src/generated/
 
 # Docker volumes
 deploy/data/
+
+# QA reports (not needed in repo)
 .gstack/
+
+# Temp data
+/tmp/

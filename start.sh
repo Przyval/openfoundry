@@ -6,6 +6,14 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
+# Parse flags
+RESEED=false
+for arg in "$@"; do
+  case "$arg" in
+    --reseed) RESEED=true ;;
+  esac
+done
+
 echo "╔══════════════════════════════════════╗"
 echo "║      OpenFoundry — Starting Up       ║"
 echo "╚══════════════════════════════════════╝"
@@ -74,8 +82,19 @@ fi
 
 # Seed data
 echo ""
-echo "→ Seeding pest control data..."
-bash "$ROOT/scripts/seed-pest-control.sh" 2>&1 | grep -E "ontology|types|Inserting|links|Done|Error" | head -20
+if [ "$RESEED" = true ]; then
+  echo "→ --reseed flag set, clearing persisted data..."
+  rm -f /tmp/openfoundry-data/ontology-store.json
+  rm -f /tmp/openfoundry-data/object-store.json
+  rm -f /tmp/openfoundry-data/link-store.json
+  echo "→ Seeding pest control data..."
+  bash "$ROOT/scripts/seed-pest-control.sh" 2>&1 | grep -E "ontology|types|Inserting|links|Done|Error" | head -20
+elif [ -f /tmp/openfoundry-data/ontology-store.json ] && [ -s /tmp/openfoundry-data/ontology-store.json ]; then
+  echo "→ Data persisted from previous run, skipping seed"
+else
+  echo "→ Seeding pest control data..."
+  bash "$ROOT/scripts/seed-pest-control.sh" 2>&1 | grep -E "ontology|types|Inserting|links|Done|Error" | head -20
+fi
 
 # Start frontend
 echo ""
