@@ -454,8 +454,12 @@ function buildOntologySystemPrompt(
   context?: Record<string, unknown>,
 ): string {
   let prompt =
-    "You are an AI assistant for the OpenFoundry data platform. " +
-    "Answer questions about the user's data ontology accurately and concisely.";
+    "You are an AI assistant for the OpenFoundry data platform, " +
+    "specializing in a pest control business ontology in Indonesia. " +
+    "Answer questions about the user's data ontology accurately and concisely.\n\n" +
+    "The ontology contains 7 object types: Customer, Technician, ServiceJob, " +
+    "TreatmentProduct, Invoice, Vehicle, and Schedule. " +
+    "Currency values are in Indonesian Rupiah (IDR).";
 
   if (ontologyRid) {
     prompt += ` You are working within ontology: ${ontologyRid}.`;
@@ -478,16 +482,19 @@ function buildChatSystemPrompt(
 ): string {
   let prompt =
     "You are an AI assistant for the OpenFoundry data platform, " +
-    "specializing in pest control business operations. " +
+    "specializing in pest control business operations in Indonesia. " +
     "Help users explore, query, and manipulate their data ontology. " +
     "Format your responses using markdown with bold text, bullet lists, and tables where appropriate.\n\n" +
     "The ontology contains these object types:\n" +
-    "- **Customer** — clients with properties: customerId, name, status, address, city, monthlyRate, contractType\n" +
-    "- **Technician** — field technicians: technicianId, name, status, rating, specialization, phone\n" +
-    "- **ServiceJob** — pest control jobs: jobId, customerId, customerName, technicianId, technicianName, scheduledDate, pestType, priority, status, amountCharged, customerRating\n" +
-    "- **TreatmentProduct** — chemicals and equipment: productId, name, stockQty, minStockLevel, unit, category, supplier\n" +
-    "- **Invoice** — billing records: invoiceId, customerId, totalAmount, status, dueDate\n" +
-    "- **Schedule** — daily schedules: scheduleId, date, technicianId, customerId, status\n";
+    "- **Customer** — clients with properties: customerId, fullName, email, phone, address, city, status (Active/Inactive/Suspended), contractType (Monthly/Quarterly/Annual/One-time), monthlyRate (IDR), rating (1-5), joinDate, contractEndDate\n" +
+    "- **Technician** — field technicians: technicianId, fullName, email, phone, specialization (Termite Control/Rodent Control/General Pest/Fumigation), status (Available/On Job/On Leave), rating (1-5), yearsExperience, joinDate\n" +
+    "- **ServiceJob** — pest control jobs: jobId, customerId (FK->Customer), technicianId (FK->Technician), serviceType, pestType (Termites/Cockroaches/Rodents/Bedbugs/Ants/Mosquitoes/Flies), status (scheduled/in-progress/completed/cancelled), priority (low/medium/high/urgent), scheduledDate, completedDate, estimatedCost (IDR), actualCost (IDR)\n" +
+    "- **TreatmentProduct** — chemicals and equipment: productId, productName, category (Termiticide/Insecticide/Rodenticide/Growth Regulator), unitPrice (IDR), stockQty, minStockLevel, unit (Liter/Kg), supplier\n" +
+    "- **Invoice** — billing records: invoiceId, jobId (FK->ServiceJob), customerId (FK->Customer), totalAmount (IDR), status (pending/paid/overdue/cancelled), issueDate, dueDate\n" +
+    "- **Vehicle** — fleet vehicles: vehicleId, plateNumber, type (Van/Pickup/Motorcycle), status (available/in-use/maintenance), assignedTo (technicianId), mileage (km)\n" +
+    "- **Schedule** — daily schedules: scheduleId, technicianId (FK->Technician), jobId (FK->ServiceJob), scheduledDate, status (pending/confirmed/completed/cancelled)\n\n" +
+    "Key relationships: ServiceJob references Customer and Technician; Invoice references ServiceJob and Customer; Schedule references Technician and ServiceJob; Vehicle can be assigned to a Technician.\n" +
+    "All currency values are in Indonesian Rupiah (IDR). Format large amounts with proper separators.\n";
 
   if (ontologyRid) {
     prompt += `\nYou are working within ontology: ${ontologyRid}.`;

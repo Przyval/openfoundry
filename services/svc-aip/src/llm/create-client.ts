@@ -3,6 +3,7 @@ import { OpenAiClient } from "./openai-client.js";
 import { AnthropicClient } from "./anthropic-client.js";
 import { OllamaClient } from "./ollama-client.js";
 import { MockLlmClient } from "./mock-client.js";
+import { OntologyAwareLlmClient } from "./real-client.js";
 
 // ---------------------------------------------------------------------------
 // Supported provider names
@@ -48,36 +49,58 @@ function detectProvider(): LlmProvider {
  * When no `provider` is given, the factory inspects environment variables to
  * choose the right backend:
  *
- * - `OPENAI_API_KEY`    → OpenAI
- * - `ANTHROPIC_API_KEY` → Anthropic
- * - `OLLAMA_URL`        → Ollama (local)
- * - (none)              → MockLlmClient (safe for tests / dev)
+ * - `OPENAI_API_KEY`    → OpenAI  (wrapped with ontology schema enrichment)
+ * - `ANTHROPIC_API_KEY` → Anthropic (wrapped with ontology schema enrichment)
+ * - `OLLAMA_URL`        → Ollama (wrapped with ontology schema enrichment)
+ * - (none)              → MockLlmClient (smart mock with canned data)
+ *
+ * Real LLM clients (OpenAI, Anthropic, Ollama) are automatically wrapped in
+ * an `OntologyAwareLlmClient` that injects the full pest control ontology
+ * schema into system prompts, so the LLM deeply understands the data model.
  */
 export function createLlmClient(options: CreateLlmClientOptions = {}): LlmClient {
   const provider = options.provider ?? detectProvider();
 
+  // Log the selected provider for visibility
+  const providerLabel = provider === "mock"
+    ? "mock (no API key configured)"
+    : `${provider} (real LLM)`;
+  console.log(`[LLM] Using provider: ${providerLabel}`);
+
   switch (provider) {
-    case "openai":
-      return new OpenAiClient({
+    case "openai": {
+      const model = options.model ?? "gpt-4o";
+      console.log(`[LLM] OpenAI model: ${model}`);
+      const inner = new OpenAiClient({
         baseUrl: options.baseUrl ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com",
         apiKey: options.apiKey ?? process.env.OPENAI_API_KEY ?? "",
-        model: options.model ?? "gpt-4o",
+        model,
         embeddingModel: options.embeddingModel ?? "text-embedding-3-small",
       });
+      return new OntologyAwareLlmClient(inner, `OpenAI (${model})`);
+    }
 
-    case "anthropic":
-      return new AnthropicClient({
+    case "anthropic": {
+      const model = options.model ?? "claude-sonnet-4-20250514";
+      console.log(`[LLM] Anthropic model: ${model}`);
+      const inner = new AnthropicClient({
         apiKey: options.apiKey ?? process.env.ANTHROPIC_API_KEY ?? "",
-        model: options.model ?? "claude-sonnet-4-20250514",
+        model,
         baseUrl: options.baseUrl ?? process.env.ANTHROPIC_BASE_URL,
       });
+      return new OntologyAwareLlmClient(inner, `Anthropic Claude (${model})`);
+    }
 
-    case "ollama":
-      return new OllamaClient({
+    case "ollama": {
+      const model = options.model ?? "llama3";
+      console.log(`[LLM] Ollama model: ${model}`);
+      const inner = new OllamaClient({
         baseUrl: options.baseUrl ?? process.env.OLLAMA_URL ?? "http://localhost:11434",
-        model: options.model ?? "llama3",
+        model,
         embeddingModel: options.embeddingModel ?? "llama3",
       });
+      return new OntologyAwareLlmClient(inner, `Ollama (${model})`);
+    }
 
     case "mock":
       return new MockLlmClient();

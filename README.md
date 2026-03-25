@@ -45,6 +45,44 @@ bash start.sh --reseed
 
 ---
 
+## Docker Deployment
+
+Run the entire platform in a single Docker container -- no Node.js or pnpm install required on your machine.
+
+```bash
+# Build and start (first run takes a few minutes to install deps)
+docker compose up --build
+
+# Then open http://localhost:3000
+# Login: admin / admin123
+```
+
+To pass API keys for real LLM integration in AIP Chat:
+
+```bash
+# Copy the example and fill in your keys
+cp .env.example .env
+# Edit .env to set ANTHROPIC_API_KEY or OPENAI_API_KEY
+
+# Docker Compose automatically reads .env
+docker compose up --build
+```
+
+To stop:
+
+```bash
+docker compose down
+```
+
+Data is persisted in a Docker volume (`openfoundry-data`). To reset and re-seed:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+---
+
 ## Working Features
 
 | Category | What Works |

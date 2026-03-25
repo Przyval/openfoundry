@@ -105,6 +105,13 @@ const CANNED_PRODUCTS = [
   { productId: "P004", name: "Gentrol IGR", stockQty: 30, minStockLevel: 10, unit: "Liter", category: "Growth Regulator", supplier: "Zoecon" },
 ];
 
+const CANNED_VEHICLES = [
+  { vehicleId: "V001", plateNumber: "B 1234 ABC", type: "Van", status: "available", assignedTo: null, mileage: 45200 },
+  { vehicleId: "V002", plateNumber: "B 5678 DEF", type: "Pickup", status: "in-use", assignedTo: "T001", mileage: 62800 },
+  { vehicleId: "V003", plateNumber: "B 9012 GHI", type: "Motorcycle", status: "in-use", assignedTo: "T003", mileage: 18500 },
+  { vehicleId: "V004", plateNumber: "B 3456 JKL", type: "Van", status: "maintenance", assignedTo: null, mileage: 89100 },
+];
+
 // ---------------------------------------------------------------------------
 // Smart response generator
 // ---------------------------------------------------------------------------
@@ -136,7 +143,10 @@ async function generateSmartResponse(
       "- **Customers** - client information and contracts\n" +
       "- **Technicians** - field staff profiles and ratings\n" +
       "- **Service Jobs** - scheduled and completed pest control jobs\n" +
-      "- **Treatment Products** - inventory and stock levels\n\n" +
+      "- **Treatment Products** - inventory and stock levels\n" +
+      "- **Vehicles** - fleet management and assignments\n" +
+      "- **Invoices** - billing and payment tracking\n" +
+      "- **Schedules** - daily technician scheduling\n\n" +
       "What would you like to know?"
     );
   }
@@ -160,6 +170,9 @@ async function generateSmartResponse(
       "- Total revenue\n" +
       "- Low stock products\n" +
       "- Show all products\n\n" +
+      "**Fleet & Vehicles**\n" +
+      "- Show all vehicles\n" +
+      "- Which vehicles are available?\n\n" +
       "**Overview**\n" +
       "- Give me a summary / dashboard overview"
     );
@@ -338,6 +351,33 @@ async function generateSmartResponse(
     );
   }
 
+  // --- Vehicles ---
+  if (has(q, "vehicle", "kendaraan", "fleet", "car", "van", "truck", "motorcycle", "plate")) {
+    let vehicles = await fetchObjects("Vehicle");
+    if (vehicles.length === 0) vehicles = CANNED_VEHICLES;
+    const available = vehicles.filter((v: any) => norm(v.status ?? "") === "available");
+    const inUse = vehicles.filter((v: any) => norm(v.status ?? "") === "in-use");
+    const maintenance = vehicles.filter((v: any) => norm(v.status ?? "") === "maintenance");
+    const table = mdTable(
+      ["ID", "Plate", "Type", "Status", "Assigned To", "Mileage (km)"],
+      vehicles.map((v: any) => [
+        v.vehicleId ?? "-",
+        v.plateNumber ?? "-",
+        v.type ?? "-",
+        v.status ?? "-",
+        v.assignedTo ?? "—",
+        v.mileage != null ? v.mileage.toLocaleString("id-ID") : "-",
+      ]),
+    );
+    return (
+      `**Fleet Overview:** ${vehicles.length} vehicles\n\n` +
+      `- **${available.length}** available\n` +
+      `- **${inUse.length}** in use\n` +
+      `- **${maintenance.length}** in maintenance\n\n` +
+      table
+    );
+  }
+
   // --- Products ---
   if (has(q, "product", "produk", "treatment", "inventory", "chemical")) {
     let products = await fetchObjects("TreatmentProduct");
@@ -380,22 +420,25 @@ async function generateSmartResponse(
 
   // --- Summary / overview ---
   if (has(q, "summary", "overview", "ringkasan", "dashboard", "stats", "statistik")) {
-    let [customers, technicians, jobs, products] = await Promise.all([
+    let [customers, technicians, jobs, products, vehicles] = await Promise.all([
       fetchObjects("Customer"),
       fetchObjects("Technician"),
       fetchObjects("ServiceJob"),
       fetchObjects("TreatmentProduct"),
+      fetchObjects("Vehicle"),
     ]);
     if (customers.length === 0) customers = CANNED_CUSTOMERS;
     if (technicians.length === 0) technicians = CANNED_TECHNICIANS;
     if (jobs.length === 0) jobs = CANNED_JOBS;
     if (products.length === 0) products = CANNED_PRODUCTS;
+    if (vehicles.length === 0) vehicles = CANNED_VEHICLES;
 
     const activeCustomers = customers.filter((c: any) => norm(c.status ?? "") === "active").length;
     const availableTechs = technicians.filter((t: any) => norm(t.status ?? "") === "available").length;
     const completedJobs = jobs.filter((j: any) => norm(j.status ?? "") === "completed");
     const totalRevenue = completedJobs.reduce((sum: number, j: any) => sum + (j.amountCharged ?? 0), 0);
     const lowStock = products.filter((p: any) => (p.stockQty ?? 0) < (p.minStockLevel ?? Infinity)).length;
+    const availableVehicles = vehicles.filter((v: any) => norm(v.status ?? "") === "available").length;
 
     return (
       `**Pest Control System Overview:**\n\n` +
@@ -404,7 +447,8 @@ async function generateSmartResponse(
       `| Technicians | ${technicians.length} total (${availableTechs} available) |\n` +
       `| Service Jobs | ${jobs.length} total (${completedJobs.length} completed) |\n` +
       `| Total Revenue | ${formatRupiah(totalRevenue)} |\n` +
-      `| Products | ${products.length} total (${lowStock} low stock) |\n\n` +
+      `| Products | ${products.length} total (${lowStock} low stock) |\n` +
+      `| Vehicles | ${vehicles.length} total (${availableVehicles} available) |\n\n` +
       `The system is running smoothly. ${lowStock > 0 ? `**${lowStock} product(s) need restocking.**` : "All stock levels are healthy."}`
     );
   }
@@ -417,6 +461,7 @@ async function generateSmartResponse(
     "- *\"What jobs are pending?\"*\n" +
     "- *\"Total revenue\"*\n" +
     "- *\"Low stock products\"*\n" +
+    "- *\"Show fleet vehicles\"*\n" +
     "- *\"Give me a summary\"*\n\n" +
     "Feel free to ask in English or Indonesian!"
   );

@@ -1,0 +1,16 @@
+services:
+  openfoundry:
+    build: .
+    ports:
+      - "3000:3000"   # Frontend (Vite)
+      - "8080:8080"   # Gateway API
+    volumes:
+      - openfoundry-data:/tmp/openfoundry-data  # Persist data across restarts
+    environment:
+      - NODE_ENV=production
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    restart: unless-stopped
+
+volumes:
+  openfoundry-data:

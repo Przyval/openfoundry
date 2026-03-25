@@ -483,7 +483,8 @@ const WELCOME_MESSAGE: ChatMessage = {
   role: "assistant",
   content:
     "Welcome to **AIP Chat** (AI Platform). I can help you query and explore your ontology data using natural language.\n\n" +
-    "Ask me anything about **customers**, **technicians**, **service jobs**, **products**, or **invoices**.\n\n" +
+    "Ask me anything about **customers**, **technicians**, **service jobs**, **products**, **invoices**, **vehicles**, or **schedules**.\n\n" +
+    "When an API key is configured (ANTHROPIC_API_KEY or OPENAI_API_KEY), I use a real LLM with full knowledge of your pest control ontology schema. Otherwise I use a smart mock that responds to common queries.\n\n" +
     "Type a question below or click one of the suggestions to get started.",
   timestamp: new Date(),
   model: "system",
