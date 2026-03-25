@@ -57,7 +57,14 @@ export async function proxyRequest(
 
   // Determine body — only send body for methods that typically carry one.
   const hasBody = !["GET", "HEAD", "OPTIONS"].includes(request.method);
-  const body = hasBody ? JSON.stringify(request.body) : undefined;
+  let body: string | undefined;
+  if (hasBody && request.body !== undefined && request.body !== null) {
+    // If the body is already a string (e.g. form-urlencoded or raw text),
+    // forward it as-is. Otherwise JSON-serialize the parsed object.
+    body = typeof request.body === "string"
+      ? request.body
+      : JSON.stringify(request.body);
+  }
 
   let upstream: Response;
   try {

@@ -51,6 +51,23 @@ export async function ontologyRoutes(
     return serializeOntology(ontology);
   });
 
+  // Full metadata — returns ontology with all type collections
+  app.get<{
+    Params: { ontologyRid: string };
+  }>("/ontologies/:ontologyRid/fullMetadata", {
+    preHandler: requirePermission("ontology:read"),
+  }, async (request) => {
+    const rid = request.params.ontologyRid;
+    const ontology = store.getOntology(rid);
+    return {
+      ...serializeOntology(ontology),
+      objectTypes: store.listObjectTypes(rid),
+      actionTypes: store.listActionTypes(rid),
+      linkTypes: store.listLinkTypes(rid),
+      interfaceTypes: store.listInterfaceTypes(rid),
+    };
+  });
+
   // Delete ontology
   app.delete<{
     Params: { ontologyRid: string };

@@ -197,6 +197,35 @@ function resolveApiObjectSet(
     return store.getObjectsByKeys(String(objectSetDef.objectType ?? ""), keys);
   }
 
+  if (type === "SEARCH_AROUND" || type === "SEARCHAROUND") {
+    const inner = objectSetDef.objectSet as Record<string, unknown> | undefined;
+    const sourceObjects = inner
+      ? resolveApiObjectSet(inner, store, linkStore)
+      : [];
+    const link = String(objectSetDef.link ?? "");
+    const result: StoredObject[] = [];
+    const seen = new Set<string>();
+    for (const source of sourceObjects) {
+      const targets = linkStore.getLinkedObjects(
+        source.objectType,
+        source.primaryKey,
+        link,
+      );
+      for (const target of targets) {
+        try {
+          const obj = store.getObject(target.targetObjectType, target.targetPrimaryKey);
+          if (!seen.has(obj.rid)) {
+            seen.add(obj.rid);
+            result.push(obj);
+          }
+        } catch {
+          // Skip objects that no longer exist
+        }
+      }
+    }
+    return result;
+  }
+
   // Fallback: try canonical resolver
   try {
     return resolveObjectSet(objectSetDef as unknown as ObjectSet, store, linkStore);
@@ -215,6 +244,7 @@ interface OntologyParams {
 
 interface LoadObjectsBody {
   objectSet: Record<string, unknown>;
+  select?: string[];
   pageSize?: number;
   pageToken?: string;
   orderBy?: OrderByClause[];
@@ -252,7 +282,7 @@ export async function objectSetRoutes(
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
-      const { objectSet: objectSetDef, pageSize = 100, pageToken, orderBy } = request.body;
+      const { objectSet: objectSetDef, select, pageSize = 100, pageToken, orderBy } = request.body;
 
       let objects = resolveApiObjectSet(objectSetDef, store, linkStore);
 
@@ -285,7 +315,20 @@ export async function objectSetRoutes(
 
       const slice = objects.slice(offset, offset + pageSize + 1);
       const hasMore = slice.length > pageSize;
-      const data = hasMore ? slice.slice(0, pageSize) : slice;
+      let data: StoredObject[] = hasMore ? slice.slice(0, pageSize) : slice;
+
+      // Apply select (property projection)
+      if (select && select.length > 0) {
+        data = data.map((obj) => {
+          const filtered: Record<string, unknown> = {};
+          for (const prop of select) {
+            if (prop in obj.properties) {
+              filtered[prop] = obj.properties[prop];
+            }
+          }
+          return { ...obj, properties: filtered };
+        });
+      }
 
       const result: {
         data: StoredObject[];

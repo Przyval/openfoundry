@@ -2,11 +2,13 @@ import { Menu, MenuDivider, MenuItem } from "@blueprintjs/core";
 import { useLocation, useNavigate } from "react-router-dom";
 
 /* ------------------------------------------------------------------ */
-/*  Navigation sections                                                */
+/*  Navigation sections — mirrors Palantir Foundry 5-pillar structure  */
 /* ------------------------------------------------------------------ */
 
 const PLATFORM_ITEMS = [
   { path: "/", label: "Dashboard", icon: "dashboard" as const },
+  { path: "/pest-control", label: "Pest Control", icon: "bug" as const },
+  { path: "/aip", label: "AIP Chat", icon: "chat" as const },
   { path: "/compass", label: "Compass", icon: "folder-open" as const },
   { path: "/notifications", label: "Notifications", icon: "notifications" as const },
 ];
@@ -14,12 +16,24 @@ const PLATFORM_ITEMS = [
 const DATA_ITEMS = [
   { path: "/ontology", label: "Ontology", icon: "diagram-tree" as const },
   { path: "/objects", label: "Object Explorer", icon: "cube" as const },
+  { path: "/graph", label: "Network Graph", icon: "graph" as const },
+  { path: "/contour", label: "Contour", icon: "horizontal-bar-chart" as const },
+  { path: "/lineage", label: "Data Lineage", icon: "flows" as const },
+  { path: "/data-health", label: "Data Health", icon: "heart" as const },
   { path: "/datasets", label: "Datasets", icon: "database" as const },
+  { path: "/data-connection", label: "Data Connection", icon: "exchange" as const },
+  { path: "/pipelines", label: "Pipelines", icon: "data-lineage" as const },
+];
+
+const BUILD_ITEMS = [
+  { path: "/workshop", label: "Workshop", icon: "applications" as const },
+  { path: "/workbook", label: "Code Workbook", icon: "code" as const },
+  { path: "/scenarios", label: "Scenarios", icon: "git-branch" as const },
+  { path: "/actions", label: "Actions", icon: "play" as const },
+  { path: "/functions", label: "Functions", icon: "function" as const },
 ];
 
 const AUTOMATION_ITEMS = [
-  { path: "/actions", label: "Actions", icon: "play" as const },
-  { path: "/functions", label: "Functions", icon: "function" as const },
   { path: "/monitors", label: "Monitors", icon: "eye-open" as const },
   { path: "/webhooks", label: "Webhooks", icon: "globe-network" as const },
 ];
@@ -66,6 +80,10 @@ export default function Sidebar() {
         {/* Data */}
         <MenuDivider title="Data" />
         {renderItems(DATA_ITEMS)}
+
+        {/* Build */}
+        <MenuDivider title="Build" />
+        {renderItems(BUILD_ITEMS)}
 
         {/* Automation */}
         <MenuDivider title="Automation" />

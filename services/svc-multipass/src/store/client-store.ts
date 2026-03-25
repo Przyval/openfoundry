@@ -26,12 +26,43 @@ const DEFAULT_DEV_CLIENT: OAuthClient = {
   scopes: ["api:read", "api:write"],
 };
 
+/**
+ * Confidential client for client_credentials grant, compatible with
+ * @osdk/client service-to-service authentication.
+ * Uses admin/admin123 and developer/dev123 as client_id/client_secret pairs.
+ */
+const CONFIDENTIAL_DEV_CLIENTS: OAuthClient[] = [
+  {
+    clientId: "admin",
+    clientSecret: "admin123",
+    clientName: "Admin Service Client",
+    isPublic: false,
+    redirectUris: [],
+    grantTypes: ["client_credentials"],
+    scopes: ["api:read", "api:write"],
+  },
+  {
+    clientId: "developer",
+    clientSecret: "dev123",
+    clientName: "Developer Service Client",
+    isPublic: false,
+    redirectUris: [],
+    grantTypes: ["client_credentials"],
+    scopes: ["api:read", "api:write"],
+  },
+];
+
 export class ClientStore {
   private readonly clients = new Map<string, OAuthClient>();
 
   constructor() {
     // Seed the default dev client
     this.clients.set(DEFAULT_DEV_CLIENT.clientId, DEFAULT_DEV_CLIENT);
+
+    // Seed confidential clients for client_credentials grant
+    for (const client of CONFIDENTIAL_DEV_CLIENTS) {
+      this.clients.set(client.clientId, client);
+    }
   }
 
   /**

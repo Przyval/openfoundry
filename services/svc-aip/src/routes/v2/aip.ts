@@ -265,6 +265,7 @@ export async function aipRoutes(
         role: "assistant" as const,
         content: response.message.content,
       },
+      model: response.model ?? "unknown",
       usage: {
         promptTokens: response.usage.promptTokens,
         completionTokens: response.usage.completionTokens,

@@ -11,6 +11,8 @@ import type {
   JoinConfig,
   SortConfig,
   DeduplicateConfig,
+  DeriveConfig,
+  LimitConfig,
 } from "./types.js";
 import { topologicalSort } from "./dag.js";
 
@@ -238,6 +240,27 @@ function applyDeduplicate(rows: Row[], config: DeduplicateConfig): Row[] {
   return results;
 }
 
+function applyDerive(rows: Row[], config: DeriveConfig): Row[] {
+  return rows.map((row) => {
+    const result: Row = { ...row };
+    for (const field of config.fields) {
+      try {
+        const fn = new Function("row", `return (${field.expression});`) as (
+          row: Row,
+        ) => unknown;
+        result[field.name] = fn(row);
+      } catch {
+        result[field.name] = null;
+      }
+    }
+    return result;
+  });
+}
+
+function applyLimit(rows: Row[], config: LimitConfig): Row[] {
+  return rows.slice(0, config.limit);
+}
+
 function applyCustom(rows: Row[], expression: string): Row[] {
   // Simple expression evaluator: filter rows where the expression evaluates truthy.
   // Supports field references via `row.fieldName` and basic comparisons.
@@ -398,6 +421,10 @@ export class PipelineExecutor {
           data,
           config as unknown as DeduplicateConfig,
         );
+      case "DERIVE":
+        return applyDerive(data, config as unknown as DeriveConfig);
+      case "LIMIT":
+        return applyLimit(data, config as unknown as LimitConfig);
       case "CUSTOM": {
         const expression = (config as Record<string, string>).expression ?? "true";
         return applyCustom(data, expression);

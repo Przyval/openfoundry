@@ -18,6 +18,9 @@ export type {
   SortField,
   DeduplicateConfig,
   CustomConfig,
+  DeriveConfig,
+  DeriveField,
+  LimitConfig,
 } from "./types.js";
 
 export { validateDag, topologicalSort } from "./dag.js";

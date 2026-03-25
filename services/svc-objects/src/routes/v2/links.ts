@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { LinkStore } from "../../store/link-store.js";
+import type { ObjectStore } from "../../store/object-store.js";
 import { requirePermission } from "@openfoundry/permissions";
 
 // ---------------------------------------------------------------------------
@@ -33,11 +34,12 @@ interface LinkQuery {
 
 export async function linkRoutes(
   app: FastifyInstance,
-  opts: { linkStore: LinkStore },
+  opts: { linkStore: LinkStore; objectStore: ObjectStore },
 ): Promise<void> {
-  const { linkStore } = opts;
+  const { linkStore, objectStore } = opts;
 
   // Get linked objects (paginated)
+  // Returns the actual linked objects (not just link metadata) as @osdk/client expects.
   app.get<{ Params: LinkParams; Querystring: LinkQuery }>(
     "/ontologies/:ontologyRid/objects/:objectType/:primaryKey/links/:linkType",
     {
@@ -46,13 +48,32 @@ export async function linkRoutes(
     async (request) => {
       const { objectType, primaryKey, linkType } = request.params;
       const { pageSize, pageToken } = request.query;
-      return linkStore.getLinks(
+
+      // Fetch the link metadata from the link store
+      const linkResult = linkStore.getLinks(
         objectType,
         primaryKey,
         linkType,
         pageSize ? Number(pageSize) : undefined,
         pageToken,
       );
+
+      // Resolve link metadata into actual object instances
+      const resolvedObjects = linkResult.data.map((link) => {
+        try {
+          return objectStore.getObject(link.targetObjectType, link.targetPrimaryKey);
+        } catch {
+          // Object may have been deleted after the link was created; skip it
+          return null;
+        }
+      }).filter((obj) => obj !== null);
+
+      return {
+        data: resolvedObjects,
+        ...(linkResult.nextPageToken
+          ? { nextPageToken: linkResult.nextPageToken }
+          : {}),
+      };
     },
   );
 

@@ -1,4 +1,6 @@
 import { notFound } from "@openfoundry/errors";
+import { writeFileSync, readFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +26,45 @@ export interface StoredLink {
 export class LinkStore {
   /** Map<compositeKey, StoredLink[]> */
   private readonly links = new Map<string, StoredLink[]>();
+  private readonly DATA_FILE = "/tmp/openfoundry-data/link-store.json";
+
+  constructor() {
+    this.loadFromDisk();
+  }
+
+  // -----------------------------------------------------------------------
+  // Persistence helpers
+  // -----------------------------------------------------------------------
+
+  private saveToDisk(): void {
+    try {
+      const dir = dirname(this.DATA_FILE);
+      mkdirSync(dir, { recursive: true });
+
+      const plain: Record<string, StoredLink[]> = Object.fromEntries(this.links);
+
+      const tmpFile = this.DATA_FILE + ".tmp";
+      writeFileSync(tmpFile, JSON.stringify(plain, null, 2), "utf-8");
+      renameSync(tmpFile, this.DATA_FILE);
+    } catch {
+      // Best-effort persistence — don't crash the service
+    }
+  }
+
+  private loadFromDisk(): void {
+    try {
+      if (!existsSync(this.DATA_FILE)) return;
+
+      const raw = readFileSync(this.DATA_FILE, "utf-8");
+      const plain = JSON.parse(raw) as Record<string, StoredLink[]>;
+
+      for (const [key, links] of Object.entries(plain)) {
+        this.links.set(key, links);
+      }
+    } catch {
+      // If file is missing or corrupt, start with empty store
+    }
+  }
 
   private key(objectType: string, primaryKey: string, linkType: string): string {
     return `${objectType}:${primaryKey}:${linkType}`;
@@ -60,6 +101,7 @@ export class LinkStore {
 
     existing.push(link);
     this.links.set(k, existing);
+    this.saveToDisk();
     return link;
   }
 
@@ -112,6 +154,7 @@ export class LinkStore {
     if (existing.length === 0) {
       this.links.delete(k);
     }
+    this.saveToDisk();
   }
 
   /**

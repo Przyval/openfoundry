@@ -54,6 +54,11 @@ export async function createServer(
     pipelineStore = options.pipelineStore ?? new PipelineStore();
   }
 
+  // Seed default pipeline definitions (no-op if pipelines already exist)
+  if (pipelineStore instanceof PipelineStore) {
+    pipelineStore.seedDefaults();
+  }
+
   const app = Fastify({
     logger: {
       level: config.logLevel,

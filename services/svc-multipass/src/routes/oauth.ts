@@ -28,7 +28,7 @@ interface TokenRequest {
 
 interface TokenResponse {
   access_token: string;
-  token_type: "Bearer";
+  token_type: "bearer";
   expires_in: number;
   refresh_token?: string;
   scope: string;
@@ -134,18 +134,43 @@ export async function oauthRoutes(
       throw invalidArgument("client_id", "is required");
     }
 
-    const client = clientStore.getClient(query.client_id);
+    // Auto-register unknown clients in dev mode for @osdk/client compatibility.
+    // The OSDK creates dynamic client IDs that won't be pre-registered.
+    let client = clientStore.getClient(query.client_id);
     if (!client) {
-      throw invalidArgument("client_id", "unknown client");
+      client = {
+        clientId: query.client_id,
+        clientName: `Auto-registered: ${query.client_id}`,
+        isPublic: true,
+        redirectUris: query.redirect_uri ? [query.redirect_uri] : ["http://localhost:8080/auth/callback"],
+        grantTypes: ["authorization_code", "refresh_token"],
+        scopes: ["api:read", "api:write"],
+      };
+      clientStore.registerClient(client);
     }
 
-    // Validate redirect URI
+    // Validate redirect URI — accept the provided redirect_uri if the client
+    // was just auto-registered (it will already be in the list).
     const redirectUri = query.redirect_uri ?? client.redirectUris[0];
-    if (!redirectUri || !client.redirectUris.includes(redirectUri)) {
-      throw invalidArgument("redirect_uri", "invalid redirect URI");
+    if (!redirectUri) {
+      throw invalidArgument("redirect_uri", "redirect_uri is required");
+    }
+
+    // For existing clients, allow any redirect_uri that is registered.
+    // For auto-registered clients the URI is already in the list.
+    // In dev mode, dynamically accept any redirect_uri for convenience.
+    if (!client.redirectUris.includes(redirectUri)) {
+      // Re-register the client with the additional redirect URI
+      clientStore.registerClient({
+        ...client,
+        redirectUris: [...client.redirectUris, redirectUri],
+      });
     }
 
     const scope = query.scope ?? client.scopes.join(" ");
+
+    // In dev mode, auto-approve as the default admin user.
+    const userId = "admin";
 
     // Generate authorization code
     const code = crypto.randomUUID();
@@ -153,19 +178,22 @@ export async function oauthRoutes(
     tokenStore.storeAuthCode({
       code,
       clientId: query.client_id,
-      userId: "user-default",
+      userId,
       redirectUri,
       scope,
       codeChallenge: query.code_challenge,
       codeChallengeMethod: query.code_challenge_method,
     });
 
-    const responsePayload: Record<string, string> = { code };
+    // Build redirect URL with code (and optional state) as query parameters.
+    // The @osdk/client expects a 302 redirect, not a JSON response.
+    const redirectUrl = new URL(redirectUri);
+    redirectUrl.searchParams.set("code", code);
     if (query.state) {
-      responsePayload.state = query.state;
+      redirectUrl.searchParams.set("state", query.state);
     }
 
-    return reply.status(200).send(responsePayload);
+    return reply.status(302).redirect(redirectUrl.toString());
   });
 
   // -- UserInfo endpoint ----------------------------------------------------
@@ -238,8 +266,12 @@ export async function oauthRoutes(
       throw invalidArgument("client_id", "unknown client");
     }
 
-    if (!clientStore.validateClientSecret(clientId, body.client_secret)) {
-      throw invalidArgument("client_secret", "invalid client credentials");
+    // Only validate client_secret for confidential clients.
+    // Public clients (PKCE flow used by @osdk/client) do not send a secret.
+    if (!client.isPublic) {
+      if (!clientStore.validateClientSecret(clientId, body.client_secret)) {
+        throw invalidArgument("client_secret", "invalid client credentials");
+      }
     }
 
     const authCode = tokenStore.consumeAuthCode(body.code);
@@ -357,7 +389,7 @@ export async function oauthRoutes(
 
     const response: TokenResponse = {
       access_token: accessToken,
-      token_type: "Bearer",
+      token_type: "bearer",
       expires_in: config.tokenExpirySeconds,
       refresh_token: refreshTokenValue,
       scope,

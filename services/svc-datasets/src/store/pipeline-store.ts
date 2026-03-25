@@ -50,6 +50,163 @@ export class PipelineStore {
   private readonly runs = new Map<string, PipelineRun>();
 
   // -----------------------------------------------------------------------
+  // Seed default pipelines for pest control domain
+  // -----------------------------------------------------------------------
+
+  seedDefaults(): void {
+    // Only seed if no pipelines exist yet
+    if (this.pipelines.size > 0) return;
+
+    const seedPipelines: CreatePipelineInput[] = [
+      {
+        name: "Revenue Report",
+        description:
+          "Filters paid invoices and aggregates total revenue per customer. " +
+          "Source: Invoice objects.",
+        inputDatasets: ["Invoice"],
+        outputDataset: "revenue-per-customer",
+        steps: [
+          {
+            id: "filter-paid",
+            name: "Filter Paid Invoices",
+            type: "FILTER" as PipelineStep["type"],
+            config: { field: "status", operator: "eq", value: "paid" },
+          },
+          {
+            id: "agg-revenue",
+            name: "Sum Revenue by Customer",
+            type: "AGGREGATE" as PipelineStep["type"],
+            config: {
+              groupBy: ["customerId"],
+              aggregations: [
+                {
+                  field: "totalAmount",
+                  function: "sum",
+                  alias: "totalRevenue",
+                },
+                {
+                  field: "totalAmount",
+                  function: "count",
+                  alias: "invoiceCount",
+                },
+              ],
+            },
+            dependsOn: ["filter-paid"],
+          },
+          {
+            id: "sort-revenue",
+            name: "Sort by Revenue (desc)",
+            type: "SORT" as PipelineStep["type"],
+            config: {
+              fields: [{ field: "totalRevenue", direction: "desc" }],
+            },
+            dependsOn: ["agg-revenue"],
+          },
+        ],
+        schedule: { type: "MANUAL" as const },
+      },
+      {
+        name: "Low Stock Alert",
+        description:
+          "Identifies treatment products whose current stock is below 1.5x " +
+          "their minimum stock level. Source: TreatmentProduct objects.",
+        inputDatasets: ["TreatmentProduct"],
+        outputDataset: "low-stock-alerts",
+        steps: [
+          {
+            id: "derive-threshold",
+            name: "Compute Reorder Threshold",
+            type: "DERIVE" as PipelineStep["type"],
+            config: {
+              fields: [
+                {
+                  name: "reorderThreshold",
+                  expression: "Number(row.minStockLevel || 0) * 1.5",
+                },
+              ],
+            },
+          },
+          {
+            id: "filter-low",
+            name: "Filter Low Stock",
+            type: "CUSTOM" as PipelineStep["type"],
+            config: {
+              expression:
+                "Number(row.stockQty || 0) < Number(row.reorderThreshold || 0)",
+            },
+            dependsOn: ["derive-threshold"],
+          },
+          {
+            id: "sort-stock",
+            name: "Sort by Stock Qty",
+            type: "SORT" as PipelineStep["type"],
+            config: {
+              fields: [{ field: "stockQty", direction: "asc" }],
+            },
+            dependsOn: ["filter-low"],
+          },
+        ],
+        schedule: { type: "MANUAL" as const },
+      },
+      {
+        name: "Technician Utilization",
+        description:
+          "Counts the number of service jobs assigned to each technician " +
+          "and calculates utilization percentage (assuming 20 max jobs/month). " +
+          "Source: ServiceJob objects.",
+        inputDatasets: ["ServiceJob"],
+        outputDataset: "technician-utilization",
+        steps: [
+          {
+            id: "agg-jobs",
+            name: "Count Jobs per Technician",
+            type: "AGGREGATE" as PipelineStep["type"],
+            config: {
+              groupBy: ["technicianId"],
+              aggregations: [
+                {
+                  field: "technicianId",
+                  function: "count",
+                  alias: "jobCount",
+                },
+              ],
+            },
+          },
+          {
+            id: "derive-util",
+            name: "Calculate Utilization %",
+            type: "DERIVE" as PipelineStep["type"],
+            config: {
+              fields: [
+                {
+                  name: "utilizationPct",
+                  expression:
+                    "Math.round((Number(row.jobCount || 0) / 20) * 100)",
+                },
+              ],
+            },
+            dependsOn: ["agg-jobs"],
+          },
+          {
+            id: "sort-util",
+            name: "Sort by Utilization (desc)",
+            type: "SORT" as PipelineStep["type"],
+            config: {
+              fields: [{ field: "utilizationPct", direction: "desc" }],
+            },
+            dependsOn: ["derive-util"],
+          },
+        ],
+        schedule: { type: "MANUAL" as const },
+      },
+    ];
+
+    for (const input of seedPipelines) {
+      this.createPipeline(input);
+    }
+  }
+
+  // -----------------------------------------------------------------------
   // Pipeline CRUD
   // -----------------------------------------------------------------------
 

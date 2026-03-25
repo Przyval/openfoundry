@@ -107,7 +107,7 @@ export async function createServer(
   await app.register(healthRoutes);
   await app.register(objectRoutes, { prefix: "/api/v2", store: store as ObjectStore });
   await app.register(objectSetRoutes, { prefix: "/api/v2", store: store as ObjectStore, linkStore });
-  await app.register(linkRoutes, { prefix: "/api/v2", linkStore });
+  await app.register(linkRoutes, { prefix: "/api/v2", linkStore, objectStore: store as ObjectStore });
 
   return app;
 }

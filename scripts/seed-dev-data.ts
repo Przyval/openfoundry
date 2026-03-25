@@ -310,6 +310,78 @@ async function seed() {
   });
   console.log(`✓ Created 1 function`);
 
+  // -----------------------------------------------------------------------
+  // 9. Pest control domain objects (for pipeline transforms)
+  // -----------------------------------------------------------------------
+
+  // Invoice objects
+  const customers = ["CUST-001", "CUST-002", "CUST-003", "CUST-004", "CUST-005"];
+  const invoiceStatuses = ["paid", "paid", "paid", "pending", "overdue"];
+  for (let i = 0; i < 20; i++) {
+    const custId = customers[i % customers.length];
+    const status = invoiceStatuses[i % invoiceStatuses.length];
+    await post(`/api/v2/ontologies/${ontology.rid}/objects/Invoice`, {
+      primaryKey: `INV-${String(i + 1).padStart(4, "0")}`,
+      properties: {
+        invoiceId: `INV-${String(i + 1).padStart(4, "0")}`,
+        customerId: custId,
+        totalAmount: 150 + Math.floor(Math.random() * 850),
+        status,
+        serviceDate: new Date(2025, i % 12, 1 + (i % 28)).toISOString(),
+        description: `Pest control service #${i + 1}`,
+      },
+    });
+  }
+  console.log(`✓ Created 20 Invoice objects`);
+
+  // TreatmentProduct objects
+  const products = [
+    { name: "Termiticide Pro", stockQty: 12, minStockLevel: 20, unit: "liters", price: 89.99 },
+    { name: "Rodent Bait Station", stockQty: 45, minStockLevel: 25, unit: "units", price: 34.50 },
+    { name: "Insect Growth Regulator", stockQty: 5, minStockLevel: 15, unit: "liters", price: 125.00 },
+    { name: "Pyrethrin Spray", stockQty: 8, minStockLevel: 10, unit: "cans", price: 42.00 },
+    { name: "Ant Gel Bait", stockQty: 100, minStockLevel: 30, unit: "tubes", price: 18.75 },
+    { name: "Mosquito Larvicide", stockQty: 3, minStockLevel: 12, unit: "kg", price: 67.00 },
+    { name: "Cockroach Fogger", stockQty: 22, minStockLevel: 20, unit: "cans", price: 29.99 },
+    { name: "Bed Bug Heat Treatment Kit", stockQty: 2, minStockLevel: 5, unit: "kits", price: 450.00 },
+  ];
+  for (let i = 0; i < products.length; i++) {
+    const p = products[i];
+    await post(`/api/v2/ontologies/${ontology.rid}/objects/TreatmentProduct`, {
+      primaryKey: `PROD-${String(i + 1).padStart(3, "0")}`,
+      properties: {
+        productId: `PROD-${String(i + 1).padStart(3, "0")}`,
+        name: p.name,
+        stockQty: p.stockQty,
+        minStockLevel: p.minStockLevel,
+        unit: p.unit,
+        unitPrice: p.price,
+      },
+    });
+  }
+  console.log(`✓ Created ${products.length} TreatmentProduct objects`);
+
+  // ServiceJob objects
+  const technicians = ["TECH-001", "TECH-002", "TECH-003", "TECH-004"];
+  const jobStatuses = ["completed", "completed", "in-progress", "scheduled"];
+  for (let i = 0; i < 30; i++) {
+    const techId = technicians[i % technicians.length];
+    const status = jobStatuses[i % jobStatuses.length];
+    await post(`/api/v2/ontologies/${ontology.rid}/objects/ServiceJob`, {
+      primaryKey: `JOB-${String(i + 1).padStart(4, "0")}`,
+      properties: {
+        jobId: `JOB-${String(i + 1).padStart(4, "0")}`,
+        technicianId: techId,
+        customerId: customers[i % customers.length],
+        status,
+        serviceType: ["termite", "rodent", "general", "mosquito"][i % 4],
+        scheduledDate: new Date(2025, i % 12, 1 + (i % 28)).toISOString(),
+        durationHours: 1 + (i % 4),
+      },
+    });
+  }
+  console.log(`✓ Created 30 ServiceJob objects`);
+
   console.log("\n✅ Seed complete!");
 }
 

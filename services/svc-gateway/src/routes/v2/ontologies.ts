@@ -5,9 +5,11 @@ import { proxyRequest } from "../../proxy.js";
  * Ontology v2 API routes.
  *
  * Routes under /api/v2/ontologies are split based on URL pattern:
- * - .../objects/... and .../objectSets/... -> svc-objects
- * - .../actions/.../apply or validate -> svc-actions
- * - Everything else -> svc-ontology
+ * - .../objects/... (including search, aggregate, links) -> svc-objects
+ * - .../objectSets/... (including loadObjects)            -> svc-objects
+ * - .../actions/.../apply or validate                     -> svc-actions
+ * - .../linkTypes, .../objectTypes, .../queryTypes, etc.  -> svc-ontology
+ * - Everything else                                       -> svc-ontology
  */
 export async function ontologyRoutes(app: FastifyInstance): Promise<void> {
   // List/get ontologies (no RID)
@@ -20,7 +22,10 @@ export async function ontologyRoutes(app: FastifyInstance): Promise<void> {
     const url = request.url;
 
     // /ontologies/{rid}/objects/... -> svc-objects
+    //   Covers: GET objects, GET object by PK, POST search, POST aggregate,
+    //           GET links (objects/:type/:pk/links/:linkType)
     // /ontologies/{rid}/objectSets/... -> svc-objects
+    //   Covers: POST loadObjects
     if (/\/ontologies\/[^/]+\/objects(\/|$)/.test(url) ||
         /\/ontologies\/[^/]+\/objectSets(\/|$)/.test(url)) {
       return proxyRequest(request, reply, app.config.services.objects);
@@ -32,6 +37,7 @@ export async function ontologyRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Everything else -> svc-ontology
+    //   Covers: GET linkTypes, GET objectTypes, GET queryTypes, GET ontology by RID, etc.
     return proxyRequest(request, reply, app.config.services.ontology);
   });
 }

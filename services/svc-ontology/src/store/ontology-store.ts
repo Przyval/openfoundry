@@ -7,6 +7,8 @@ import type {
 } from "@openfoundry/ontology-schema";
 import { generateRid } from "@openfoundry/rid";
 import { notFound, conflict } from "@openfoundry/errors";
+import { writeFileSync, readFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Stored ontology shape
@@ -51,6 +53,72 @@ export interface CreateOntologyInput {
 
 export class OntologyStore {
   private readonly ontologies = new Map<string, StoredOntology>();
+  private readonly DATA_FILE = "/tmp/openfoundry-data/ontology-store.json";
+
+  constructor() {
+    this.loadFromDisk();
+  }
+
+  // -----------------------------------------------------------------------
+  // Persistence helpers
+  // -----------------------------------------------------------------------
+
+  private saveToDisk(): void {
+    try {
+      const dir = dirname(this.DATA_FILE);
+      mkdirSync(dir, { recursive: true });
+
+      const plain: Record<string, unknown> = {};
+      for (const [rid, ont] of this.ontologies) {
+        plain[rid] = {
+          rid: ont.rid,
+          apiName: ont.apiName,
+          displayName: ont.displayName,
+          description: ont.description,
+          version: ont.version,
+          objectTypes: Object.fromEntries(ont.objectTypes),
+          actionTypes: Object.fromEntries(ont.actionTypes),
+          linkTypes: Object.fromEntries(ont.linkTypes),
+          interfaceTypes: Object.fromEntries(ont.interfaceTypes),
+          queryTypes: Object.fromEntries(ont.queryTypes),
+          sharedPropertyTypes: Object.fromEntries(ont.sharedPropertyTypes),
+        };
+      }
+
+      const tmpFile = this.DATA_FILE + ".tmp";
+      writeFileSync(tmpFile, JSON.stringify(plain, null, 2), "utf-8");
+      renameSync(tmpFile, this.DATA_FILE);
+    } catch {
+      // Best-effort persistence — don't crash the service
+    }
+  }
+
+  private loadFromDisk(): void {
+    try {
+      if (!existsSync(this.DATA_FILE)) return;
+
+      const raw = readFileSync(this.DATA_FILE, "utf-8");
+      const plain = JSON.parse(raw) as Record<string, any>;
+
+      for (const [rid, ont] of Object.entries(plain)) {
+        this.ontologies.set(rid, {
+          rid: ont.rid,
+          apiName: ont.apiName,
+          displayName: ont.displayName,
+          description: ont.description,
+          version: ont.version,
+          objectTypes: new Map(Object.entries(ont.objectTypes ?? {})),
+          actionTypes: new Map(Object.entries(ont.actionTypes ?? {})),
+          linkTypes: new Map(Object.entries(ont.linkTypes ?? {})),
+          interfaceTypes: new Map(Object.entries(ont.interfaceTypes ?? {})),
+          queryTypes: new Map(Object.entries(ont.queryTypes ?? {})),
+          sharedPropertyTypes: new Map(Object.entries(ont.sharedPropertyTypes ?? {})),
+        });
+      }
+    } catch {
+      // If file is missing or corrupt, start with empty store
+    }
+  }
 
   // -----------------------------------------------------------------------
   // Ontology CRUD
@@ -80,6 +148,7 @@ export class OntologyStore {
     };
 
     this.ontologies.set(rid, ontology);
+    this.saveToDisk();
     return ontology;
   }
 
@@ -100,6 +169,7 @@ export class OntologyStore {
       throw notFound("Ontology", rid);
     }
     this.ontologies.delete(rid);
+    this.saveToDisk();
   }
 
   // -----------------------------------------------------------------------
@@ -118,6 +188,7 @@ export class OntologyStore {
       );
     }
     ontology.objectTypes.set(def.apiName, def);
+    this.saveToDisk();
     return def;
   }
 
@@ -148,6 +219,7 @@ export class OntologyStore {
       throw notFound("ObjectType", apiName);
     }
     ontology.objectTypes.set(apiName, def);
+    this.saveToDisk();
     return def;
   }
 
@@ -157,6 +229,7 @@ export class OntologyStore {
       throw notFound("ObjectType", apiName);
     }
     ontology.objectTypes.delete(apiName);
+    this.saveToDisk();
   }
 
   // -----------------------------------------------------------------------
@@ -175,6 +248,7 @@ export class OntologyStore {
       );
     }
     ontology.actionTypes.set(def.apiName, def);
+    this.saveToDisk();
     return def;
   }
 
@@ -205,6 +279,7 @@ export class OntologyStore {
       throw notFound("ActionType", apiName);
     }
     ontology.actionTypes.set(apiName, def);
+    this.saveToDisk();
     return def;
   }
 
@@ -214,6 +289,7 @@ export class OntologyStore {
       throw notFound("ActionType", apiName);
     }
     ontology.actionTypes.delete(apiName);
+    this.saveToDisk();
   }
 
   // -----------------------------------------------------------------------
@@ -232,6 +308,7 @@ export class OntologyStore {
       );
     }
     ontology.linkTypes.set(def.apiName, def);
+    this.saveToDisk();
     return def;
   }
 
@@ -274,6 +351,7 @@ export class OntologyStore {
       throw notFound("LinkType", apiName);
     }
     ontology.linkTypes.delete(apiName);
+    this.saveToDisk();
   }
 
   // -----------------------------------------------------------------------
@@ -292,6 +370,7 @@ export class OntologyStore {
       );
     }
     ontology.interfaceTypes.set(def.apiName, def);
+    this.saveToDisk();
     return def;
   }
 
@@ -318,6 +397,7 @@ export class OntologyStore {
       throw notFound("InterfaceType", apiName);
     }
     ontology.interfaceTypes.delete(apiName);
+    this.saveToDisk();
   }
 
   // -----------------------------------------------------------------------
@@ -336,6 +416,7 @@ export class OntologyStore {
       );
     }
     ontology.queryTypes.set(def.apiName, def);
+    this.saveToDisk();
     return def;
   }
 
@@ -362,6 +443,7 @@ export class OntologyStore {
       throw notFound("QueryType", apiName);
     }
     ontology.queryTypes.delete(apiName);
+    this.saveToDisk();
   }
 
   // -----------------------------------------------------------------------
@@ -380,6 +462,7 @@ export class OntologyStore {
       );
     }
     ontology.sharedPropertyTypes.set(def.apiName, def);
+    this.saveToDisk();
     return def;
   }
 
@@ -406,5 +489,6 @@ export class OntologyStore {
       throw notFound("SharedPropertyType", apiName);
     }
     ontology.sharedPropertyTypes.delete(apiName);
+    this.saveToDisk();
   }
 }

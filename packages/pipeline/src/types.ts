@@ -32,7 +32,9 @@ export type PipelineStepType =
   | "JOIN"
   | "SORT"
   | "DEDUPLICATE"
-  | "CUSTOM";
+  | "CUSTOM"
+  | "DERIVE"
+  | "LIMIT";
 
 export interface PipelineSchedule {
   type: "MANUAL" | "INTERVAL" | "CRON" | "ON_UPDATE";
@@ -130,4 +132,20 @@ export interface DeduplicateConfig {
 
 export interface CustomConfig {
   expression: string;
+}
+
+export interface DeriveField {
+  /** Name of the new column to create. */
+  name: string;
+  /** JavaScript expression evaluated per row. Field refs via `row.fieldName`. */
+  expression: string;
+}
+
+export interface DeriveConfig {
+  fields: DeriveField[];
+}
+
+export interface LimitConfig {
+  /** Maximum number of rows to keep. */
+  limit: number;
 }

@@ -4,6 +4,7 @@ import { OpenFoundryApiError } from "@openfoundry/errors";
 import { type MultipassConfig, loadConfig } from "./config.js";
 import { healthRoutes } from "./routes/health.js";
 import { oauthRoutes, type OAuthRoutesOptions } from "./routes/oauth.js";
+import { authRoutes, type AuthRoutesOptions } from "./routes/auth.js";
 
 // ---------------------------------------------------------------------------
 // Server factory
@@ -56,6 +57,31 @@ export async function createServer(
     exposedHeaders: ["X-Request-Id"],
   });
 
+  // -- Form body parser (OAuth2 token endpoint requires application/x-www-form-urlencoded) --
+  app.addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    function (_request, payload, done) {
+      let body = "";
+      payload.on("data", (chunk: Buffer) => {
+        body += chunk.toString();
+      });
+      payload.on("end", () => {
+        try {
+          const parsed: Record<string, string> = {};
+          for (const pair of body.split("&")) {
+            const [key, value] = pair.split("=");
+            if (key) {
+              parsed[decodeURIComponent(key)] = decodeURIComponent(value ?? "");
+            }
+          }
+          done(null, parsed);
+        } catch (err) {
+          done(err as Error, undefined);
+        }
+      });
+    },
+  );
+
   // -- Request ID ---------------------------------------------------------
   app.addHook("onSend", async (request, reply) => {
     if (!reply.hasHeader("x-request-id")) {
@@ -107,6 +133,7 @@ export async function createServer(
     config,
     ...options.oauthOptions,
   } as OAuthRoutesOptions);
+  await app.register(authRoutes, { config } as AuthRoutesOptions);
 
   return app;
 }

@@ -7,6 +7,8 @@ import {
   decodePageToken,
   type PageToken,
 } from "@openfoundry/pagination";
+import { writeFileSync, readFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -199,6 +201,48 @@ export function evaluateAggregation(
 export class ObjectStore {
   /** Map<objectType, Map<primaryKey, StoredObject>> */
   private readonly objects = new Map<string, Map<string, StoredObject>>();
+  private readonly DATA_FILE = "/tmp/openfoundry-data/object-store.json";
+
+  constructor() {
+    this.loadFromDisk();
+  }
+
+  // -----------------------------------------------------------------------
+  // Persistence helpers
+  // -----------------------------------------------------------------------
+
+  private saveToDisk(): void {
+    try {
+      const dir = dirname(this.DATA_FILE);
+      mkdirSync(dir, { recursive: true });
+
+      const plain: Record<string, Record<string, StoredObject>> = {};
+      for (const [objectType, typeMap] of this.objects) {
+        plain[objectType] = Object.fromEntries(typeMap);
+      }
+
+      const tmpFile = this.DATA_FILE + ".tmp";
+      writeFileSync(tmpFile, JSON.stringify(plain, null, 2), "utf-8");
+      renameSync(tmpFile, this.DATA_FILE);
+    } catch {
+      // Best-effort persistence — don't crash the service
+    }
+  }
+
+  private loadFromDisk(): void {
+    try {
+      if (!existsSync(this.DATA_FILE)) return;
+
+      const raw = readFileSync(this.DATA_FILE, "utf-8");
+      const plain = JSON.parse(raw) as Record<string, Record<string, StoredObject>>;
+
+      for (const [objectType, entries] of Object.entries(plain)) {
+        this.objects.set(objectType, new Map(Object.entries(entries)));
+      }
+    } catch {
+      // If file is missing or corrupt, start with empty store
+    }
+  }
 
   private getTypeMap(objectType: string): Map<string, StoredObject> {
     let map = this.objects.get(objectType);
@@ -233,6 +277,7 @@ export class ObjectStore {
       updatedAt: now,
     };
     typeMap.set(primaryKey, obj);
+    this.saveToDisk();
     return obj;
   }
 
@@ -257,6 +302,7 @@ export class ObjectStore {
       updatedAt: new Date().toISOString(),
     };
     this.getTypeMap(objectType).set(primaryKey, updated);
+    this.saveToDisk();
     return updated;
   }
 
@@ -266,6 +312,7 @@ export class ObjectStore {
       throw notFound("Object", `${objectType}:${primaryKey}`);
     }
     typeMap.delete(primaryKey);
+    this.saveToDisk();
   }
 
   listObjects(objectType: string, options: ListOptions = {}): ListResult {

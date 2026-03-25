@@ -16,6 +16,9 @@ export interface ActionsConfig {
 
   /** PostgreSQL connection string.  When set, the PG store is used instead of in-memory. */
   readonly databaseUrl?: string;
+
+  /** Base URL of the Objects service (svc-objects) for action handlers to call. */
+  readonly objectsServiceUrl: string;
 }
 
 function env(key: string, fallback: string): string {
@@ -39,5 +42,6 @@ export function loadConfig(): ActionsConfig {
     logLevel: env("LOG_LEVEL", "info"),
     nodeEnv: env("NODE_ENV", "development"),
     databaseUrl: process.env.DATABASE_URL || undefined,
+    objectsServiceUrl: env("OBJECTS_SERVICE_URL", "http://localhost:8082"),
   };
 }

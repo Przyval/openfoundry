@@ -9,6 +9,7 @@ import { PgActionRegistry } from "./store/pg-action-registry.js";
 import { PgActionLog } from "./store/pg-action-log.js";
 import { healthRoutes } from "./routes/health.js";
 import { actionRoutes } from "./routes/v2/actions.js";
+import { registerPestControlActions } from "./handlers/index.js";
 
 // ---------------------------------------------------------------------------
 // Server factory
@@ -112,6 +113,9 @@ export async function createServer(
       statusCode: 500,
     });
   });
+
+  // -- Register pest-control business actions ------------------------------
+  await registerPestControlActions(registry, config.objectsServiceUrl);
 
   // -- Routes -------------------------------------------------------------
   await app.register(healthRoutes);

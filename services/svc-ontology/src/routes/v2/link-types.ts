@@ -10,6 +10,22 @@ export async function linkTypeRoutes(
 ): Promise<void> {
   const { store } = opts;
 
+  // List ALL link types for an ontology
+  // GET /api/v2/ontologies/:ontologyRid/linkTypes
+  app.get<{
+    Params: { ontologyRid: string };
+    Querystring: { pageSize?: string; pageToken?: string };
+  }>(
+    "/ontologies/:ontologyRid/linkTypes",
+    {
+      preHandler: requirePermission("ontology:read"),
+    },
+    async (request) => {
+      const all = store.listLinkTypes(request.params.ontologyRid);
+      return paginateArray(all, request.query);
+    },
+  );
+
   // List link types for a specific object type
   app.get<{
     Params: { ontologyRid: string; objectTypeApiName: string };
