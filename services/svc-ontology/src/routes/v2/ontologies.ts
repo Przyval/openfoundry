@@ -41,13 +41,21 @@ export async function ontologyRoutes(
     return serializeOntology(ontology);
   });
 
-  // Get ontology by RID
+  // Get ontology by RID or apiName
   app.get<{
     Params: { ontologyRid: string };
   }>("/ontologies/:ontologyRid", {
     preHandler: requirePermission("ontology:read"),
   }, async (request) => {
-    const ontology = store.getOntology(request.params.ontologyRid);
+    const param = request.params.ontologyRid;
+
+    // If it doesn't look like a RID, search by apiName
+    if (!param.startsWith("ri.")) {
+      const match = store.listOntologies().find((o) => o.apiName === param);
+      if (match) return serializeOntology(match);
+    }
+
+    const ontology = store.getOntology(param);
     return serializeOntology(ontology);
   });
 

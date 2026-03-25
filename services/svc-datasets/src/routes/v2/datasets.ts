@@ -130,14 +130,33 @@ export async function datasetRoutes(
   // Open transaction
   app.post<{
     Params: { datasetRid: string };
-    Body: { branchRid: string; type: "UPDATE" | "APPEND" | "SNAPSHOT" };
+    Querystring: { branchName?: string };
+    Body: {
+      branchRid?: string;
+      type?: "UPDATE" | "APPEND" | "SNAPSHOT";
+      transactionType?: "UPDATE" | "APPEND" | "SNAPSHOT";
+    };
   }>("/datasets/:datasetRid/transactions", {
     preHandler: requirePermission("datasets:write"),
   }, async (request, reply) => {
-    const transaction = datasetStore.openTransaction(
-      request.params.datasetRid,
-      request.body,
-    );
+    const { datasetRid } = request.params;
+    let { branchRid, type } = request.body;
+
+    // SDK compat: accept transactionType as alias for type
+    if (!type && request.body.transactionType) {
+      type = request.body.transactionType;
+    }
+
+    // SDK compat: resolve branchName query param to branchRid
+    if (!branchRid && request.query.branchName) {
+      const branch = datasetStore.getBranch(datasetRid, request.query.branchName);
+      branchRid = branch.rid;
+    }
+
+    const transaction = datasetStore.openTransaction(datasetRid, {
+      branchRid: branchRid!,
+      type: type!,
+    });
     reply.status(201);
     return transaction;
   });

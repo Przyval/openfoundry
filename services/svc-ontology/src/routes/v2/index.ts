@@ -6,6 +6,7 @@ import { actionTypeRoutes } from "./action-types.js";
 import { linkTypeRoutes } from "./link-types.js";
 import { interfaceTypeRoutes } from "./interface-types.js";
 import { sharedPropertyTypeRoutes } from "./shared-property-types.js";
+import { queryTypeRoutes } from "./query-types.js";
 
 export async function v2Routes(
   app: FastifyInstance,
@@ -19,4 +20,5 @@ export async function v2Routes(
   await app.register(linkTypeRoutes, routeOpts);
   await app.register(interfaceTypeRoutes, routeOpts);
   await app.register(sharedPropertyTypeRoutes, routeOpts);
+  await app.register(queryTypeRoutes, routeOpts);
 }

@@ -106,7 +106,8 @@ interface AggregateBody {
 // Convert OSDK SearchFilter → WhereClause (compatible with query engine)
 // ---------------------------------------------------------------------------
 
-function searchFilterToWhere(f: SearchFilter): WhereClause {
+function searchFilterToWhere(f: SearchFilter): WhereClause | undefined {
+  if (!f || !f.type) return undefined;
   const t = f.type.toLowerCase();
 
   // Logical combinators: and, or hold sub-filters in f.value (array)
@@ -328,12 +329,14 @@ export async function objectRoutes(
       // Apply where filter
       if (where) {
         const whereClause = searchFilterToWhere(where);
-        objects = objects.filter((obj) =>
-          queryEngine.evaluateWhere(
-            obj as unknown as Record<string, unknown>,
-            whereClause,
-          ),
-        );
+        if (whereClause) {
+          objects = objects.filter((obj) =>
+            queryEngine.evaluateWhere(
+              obj as unknown as Record<string, unknown>,
+              whereClause,
+            ),
+          );
+        }
       }
 
       // Apply ordering
@@ -393,12 +396,14 @@ export async function objectRoutes(
       // Apply optional where filter
       if (where) {
         const whereClause = searchFilterToWhere(where);
-        objects = objects.filter((obj) =>
-          queryEngine.evaluateWhere(
-            obj as unknown as Record<string, unknown>,
-            whereClause,
-          ),
-        );
+        if (whereClause) {
+          objects = objects.filter((obj) =>
+            queryEngine.evaluateWhere(
+              obj as unknown as Record<string, unknown>,
+              whereClause,
+            ),
+          );
+        }
       }
 
       // Normalise aggregation defs for the query engine
