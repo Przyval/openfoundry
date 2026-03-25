@@ -1,3 +1,4 @@
+import { useCallback, useRef } from "react";
 import { Menu, MenuDivider, MenuItem } from "@blueprintjs/core";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -48,14 +49,46 @@ const ADMIN_ITEMS = [
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
+const ALL_ITEMS = [
+  ...PLATFORM_ITEMS,
+  ...DATA_ITEMS,
+  ...BUILD_ITEMS,
+  ...AUTOMATION_ITEMS,
+  ...ADMIN_ITEMS,
+];
+
 export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const menuRef = useRef<HTMLUListElement>(null);
 
   const isActive = (path: string) =>
     path === "/"
       ? location.pathname === "/"
       : location.pathname.startsWith(path);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      e.preventDefault();
+
+      const currentIdx = ALL_ITEMS.findIndex((item) => isActive(item.path));
+      let nextIdx: number;
+      if (e.key === "ArrowDown") {
+        nextIdx = currentIdx < ALL_ITEMS.length - 1 ? currentIdx + 1 : 0;
+      } else {
+        nextIdx = currentIdx > 0 ? currentIdx - 1 : ALL_ITEMS.length - 1;
+      }
+      navigate(ALL_ITEMS[nextIdx].path);
+
+      // Focus the next menu item
+      const menuItems = menuRef.current?.querySelectorAll<HTMLElement>("[role='menuitem']");
+      if (menuItems && menuItems[nextIdx]) {
+        menuItems[nextIdx].focus();
+      }
+    },
+    [navigate, location.pathname],
+  );
 
   const renderItems = (
     items: Array<{ path: string; label: string; icon: string }>,
@@ -66,13 +99,14 @@ export default function Sidebar() {
         icon={item.icon as any}
         text={item.label}
         active={isActive(item.path)}
+        aria-current={isActive(item.path) ? "page" : undefined}
         onClick={() => navigate(item.path)}
       />
     ));
 
   return (
-    <aside className="app-sidebar">
-      <Menu>
+    <aside className="app-sidebar" role="navigation" aria-label="Main navigation">
+      <Menu ulRef={menuRef} onKeyDown={handleKeyDown}>
         {/* Platform */}
         <MenuDivider title="Platform" />
         {renderItems(PLATFORM_ITEMS)}

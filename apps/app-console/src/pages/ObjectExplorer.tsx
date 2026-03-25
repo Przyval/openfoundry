@@ -198,6 +198,13 @@ export default function ObjectExplorer() {
   );
   const ontologies = ontologiesData?.data ?? [];
 
+  // -- Auto-select ontology when there's exactly one --------------------------
+  useEffect(() => {
+    if (ontologies.length === 1 && !ontologyRid) {
+      setOntologyRid(ontologies[0].rid);
+    }
+  }, [ontologies, ontologyRid]);
+
   // -- Fetch full metadata for object types ---------------------------------
   const { data: fullMetadata, loading: metadataLoading } = useApi<FullMetadataResponse>(
     ontologyRid ? `/api/v2/ontologies/${ontologyRid}/fullMetadata` : "",
@@ -658,6 +665,7 @@ export default function ObjectExplorer() {
     <>
       <PageHeader
         title="Object Explorer"
+        subtitle="Browse and search objects across your ontology"
         actions={
           <ButtonGroup>
             <Button

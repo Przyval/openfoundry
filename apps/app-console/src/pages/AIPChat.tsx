@@ -688,6 +688,7 @@ export default function AIPChat() {
     <>
       <PageHeader
         title="AIP Chat"
+        subtitle="Query your data using natural language"
         actions={
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {/* Ontology selector */}
@@ -786,6 +787,7 @@ export default function AIPChat() {
               <Card
                 key={agent.rid}
                 interactive
+                aria-label={`${agent.displayName} agent — ${agent.description}`}
                 style={{
                   background: "#293742",
                   padding: "10px 14px",
@@ -922,7 +924,7 @@ export default function AIPChat() {
           </div>
 
           {/* -------- Chat messages -------- */}
-          <div ref={chatAreaRef} style={styles.chatArea}>
+          <div ref={chatAreaRef} style={styles.chatArea} role="log" aria-live="polite" aria-label="Chat messages">
             {messages.map((msg) => (
               <div key={msg.id}>
                 {msg.role === "user" ? (
@@ -1026,17 +1028,18 @@ export default function AIPChat() {
               onKeyDown={handleKeyDown}
               disabled={thinking}
               leftIcon="search"
+              aria-label="Chat message input"
               style={{
                 background: "#1F2933",
                 borderRadius: 8,
               }}
               rightElement={
                 <Button
-                  icon="arrow-right"
+                  icon="send-message"
                   intent="primary"
-                  minimal
                   onClick={() => void handleSend()}
                   disabled={!input.trim() || thinking}
+                  aria-label="Send message"
                 />
               }
             />

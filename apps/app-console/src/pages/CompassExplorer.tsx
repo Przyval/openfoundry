@@ -710,6 +710,7 @@ export default function CompassExplorer() {
     <>
       <PageHeader
         title="Compass Explorer"
+        subtitle="Navigate and discover platform resources"
         actions={
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {useMock && (

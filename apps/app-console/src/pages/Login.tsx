@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Button,
@@ -21,6 +21,12 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const usernameRef = useRef<HTMLInputElement>(null);
+
+  // Focus username field on mount
+  useEffect(() => {
+    usernameRef.current?.focus();
+  }, []);
 
   const handleLocalLogin = useCallback(
     async (e: React.FormEvent) => {
@@ -64,7 +70,7 @@ export default function Login() {
         </H3>
 
         {error && (
-          <Callout intent="danger" icon="error" style={{ marginBottom: 16 }}>
+          <Callout intent="danger" icon="error" style={{ marginBottom: 16 }} aria-live="polite" role="alert">
             {error}
           </Callout>
         )}
@@ -83,14 +89,16 @@ export default function Login() {
         {IS_DEV && (
           <>
             <Divider style={{ margin: "20px 0" }} />
-            <form onSubmit={handleLocalLogin}>
+            <form onSubmit={handleLocalLogin} role="form" aria-label="Developer login form">
               <FormGroup label="Username" labelFor="username">
                 <InputGroup
                   id="username"
+                  inputRef={usernameRef}
                   placeholder="admin"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   leftIcon="person"
+                  aria-label="Username"
                   autoFocus
                 />
               </FormGroup>
@@ -102,6 +110,7 @@ export default function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   leftIcon="lock"
+                  aria-label="Password"
                 />
               </FormGroup>
               <Button

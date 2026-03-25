@@ -841,7 +841,7 @@ function TemplateGallery({ onSelect }: { onSelect: (t: Template) => void }) {
         </p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260, 1fr))", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
         {TEMPLATES.map((t) => (
           <Card
             key={t.id}
@@ -973,6 +973,7 @@ export default function Workshop() {
       <>
         <PageHeader
           title="Workshop"
+          subtitle="Build operational dashboards and applications"
           actions={<Tag intent={Intent.PRIMARY} large round icon="applications">App Builder</Tag>}
         />
         <TemplateGallery onSelect={handleSelectTemplate} />
@@ -985,6 +986,7 @@ export default function Workshop() {
     <>
       <PageHeader
         title="Workshop"
+        subtitle="Build operational dashboards and applications"
         actions={
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Button icon="arrow-left" minimal onClick={handleBackToGallery}>Templates</Button>

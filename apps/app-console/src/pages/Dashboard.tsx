@@ -96,6 +96,7 @@ export default function Dashboard() {
     <>
       <PageHeader
         title="Dashboard"
+        subtitle="Overview of your OpenFoundry platform — ontologies, objects, datasets, and more."
         actions={
           <Button minimal icon="refresh" text="Refresh" onClick={handleRefresh} />
         }
@@ -118,9 +119,10 @@ export default function Dashboard() {
               elevation={Elevation.TWO}
               interactive
               onClick={() => navigate(card.link)}
+              aria-label={`${counts[card.countKey]} ${card.title}`}
             >
               <Icon icon={card.icon} size={24} style={{ marginBottom: 8, color: "#5c7080" }} />
-              <div className="count">{counts[card.countKey]}</div>
+              <div className="count" role="status">{counts[card.countKey]}</div>
               <div style={{ color: "#5c7080", fontSize: "0.9rem" }}>{card.title}</div>
             </Card>
           ))}

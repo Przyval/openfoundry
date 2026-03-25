@@ -355,6 +355,43 @@ for DS in \
 done
 echo "  5 datasets created"
 
+# --- Create Functions ---
+echo "  Creating functions..."
+FUNCTIONS_SVC="${FUNCTIONS_SERVICE_URL:-http://localhost:8088}"
+FUNC_URL="$FUNCTIONS_SVC/api/v2/functions"
+
+curl -sf -X POST "$FUNC_URL" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiName":"getActiveCustomerCount",
+    "displayName":"Get Active Customer Count",
+    "description":"Returns the count of active customers in the pest control ontology",
+    "language":"typescript",
+    "code":"return objects.filter(o => o.properties.status === \"active\").length;"
+  }' > /dev/null
+
+curl -sf -X POST "$FUNC_URL" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiName":"getLowStockProducts",
+    "displayName":"Get Low Stock Products",
+    "description":"Returns treatment products where current stock is below the minimum stock level",
+    "language":"typescript",
+    "code":"return objects.filter(o => o.properties.stockQty < o.properties.minStockLevel).map(o => ({ name: o.properties.name, stock: o.properties.stockQty, min: o.properties.minStockLevel }));"
+  }' > /dev/null
+
+curl -sf -X POST "$FUNC_URL" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apiName":"calculateTechnicianUtilization",
+    "displayName":"Calculate Technician Utilization",
+    "description":"Calculates the percentage of technicians currently assigned to active jobs",
+    "language":"typescript",
+    "code":"const total = objects.length; const busy = objects.filter(o => o.properties.status === \"on-job\").length; return { total, busy, utilization: total > 0 ? Math.round((busy / total) * 100) : 0 };"
+  }' > /dev/null
+
+echo "  3 functions created"
+
 echo ""
 echo "Done! Pest Control data seeded:"
 echo "  - 1 Ontology (Pest Control Management)"
@@ -365,5 +402,6 @@ echo "  - 8 Customers, 5 Technicians, 8 Jobs, 8 Products, 6 Invoices, 4 Vehicles
 echo "  - 32 Links (8 Customer->Job, 6 Customer->Invoice, 8 Technician->Job, 4 Technician->Vehicle, 6 Job->Invoice)"
 echo "  - 5 Pipelines (Revenue Analysis, Technician Scorecard, Low Stock Alert, Churn Risk, Schedule Optimizer)"
 echo "  - 5 Datasets (raw-jobs, customer-master, product-inventory, revenue-daily, technician-performance)"
+echo "  - 3 Functions (getActiveCustomerCount, getLowStockProducts, calculateTechnicianUtilization)"
 echo ""
 echo "Ontology RID: $PEST_ONT"

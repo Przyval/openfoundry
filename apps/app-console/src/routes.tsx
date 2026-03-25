@@ -1,31 +1,45 @@
+import React, { Suspense } from "react";
 import type { RouteObject } from "react-router-dom";
+import { Spinner } from "@blueprintjs/core";
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
-import OntologyExplorer from "./pages/OntologyExplorer";
-import ObjectBrowser from "./pages/ObjectBrowser";
-import ObjectExplorer from "./pages/ObjectExplorer";
-import DatasetList from "./pages/DatasetList";
-import UserManagement from "./pages/UserManagement";
-import GroupManagement from "./pages/GroupManagement";
-import ActionExplorer from "./pages/ActionExplorer";
-import FunctionList from "./pages/FunctionList";
-import AuditLog from "./pages/AuditLog";
-import PestControlDashboard from "./pages/PestControlDashboard";
-import WebhookList from "./pages/WebhookList";
-import MonitorList from "./pages/MonitorList";
-import CompassExplorer from "./pages/CompassExplorer";
-import NotificationsPage from "./pages/NotificationsPage";
-import PipelineExplorer from "./pages/PipelineExplorer";
-import NetworkGraph from "./pages/NetworkGraph";
-import Workshop from "./pages/Workshop";
-import Contour from "./pages/Contour";
-import DataConnection from "./pages/DataConnection";
-import DataLineage from "./pages/DataLineage";
-import CodeWorkbook from "./pages/CodeWorkbook";
-import Scenarios from "./pages/Scenarios";
-import AIPChat from "./pages/AIPChat";
-import DataHealth from "./pages/DataHealth";
 import ProtectedRoute from "./components/ProtectedRoute";
+
+/* -------------------------------------------------------------------
+ * Lazy-loaded pages — keeps the initial bundle small by code-splitting
+ * heavy pages into separate chunks loaded on demand.
+ * ---------------------------------------------------------------- */
+const OntologyExplorer = React.lazy(() => import("./pages/OntologyExplorer"));
+const ObjectBrowser = React.lazy(() => import("./pages/ObjectBrowser"));
+const ObjectExplorer = React.lazy(() => import("./pages/ObjectExplorer"));
+const DatasetList = React.lazy(() => import("./pages/DatasetList"));
+const UserManagement = React.lazy(() => import("./pages/UserManagement"));
+const GroupManagement = React.lazy(() => import("./pages/GroupManagement"));
+const ActionExplorer = React.lazy(() => import("./pages/ActionExplorer"));
+const FunctionList = React.lazy(() => import("./pages/FunctionList"));
+const AuditLog = React.lazy(() => import("./pages/AuditLog"));
+const PestControlDashboard = React.lazy(() => import("./pages/PestControlDashboard"));
+const WebhookList = React.lazy(() => import("./pages/WebhookList"));
+const MonitorList = React.lazy(() => import("./pages/MonitorList"));
+const CompassExplorer = React.lazy(() => import("./pages/CompassExplorer"));
+const NotificationsPage = React.lazy(() => import("./pages/NotificationsPage"));
+const PipelineExplorer = React.lazy(() => import("./pages/PipelineExplorer"));
+const NetworkGraph = React.lazy(() => import("./pages/NetworkGraph"));
+const Workshop = React.lazy(() => import("./pages/Workshop"));
+const Contour = React.lazy(() => import("./pages/Contour"));
+const DataConnection = React.lazy(() => import("./pages/DataConnection"));
+const DataLineage = React.lazy(() => import("./pages/DataLineage"));
+const CodeWorkbook = React.lazy(() => import("./pages/CodeWorkbook"));
+const Scenarios = React.lazy(() => import("./pages/Scenarios"));
+const AIPChat = React.lazy(() => import("./pages/AIPChat"));
+const DataHealth = React.lazy(() => import("./pages/DataHealth"));
+
+/* Shared loading fallback */
+const PageSpinner = (
+  <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
+    <Spinner size={40} />
+  </div>
+);
 
 /**
  * Wraps an element in a ProtectedRoute so unauthenticated users are
@@ -35,39 +49,48 @@ function protect(element: React.ReactNode): React.ReactNode {
   return <ProtectedRoute>{element}</ProtectedRoute>;
 }
 
+/** Wrap a lazy component in Suspense + ProtectedRoute. */
+function lazyProtect(Component: React.LazyExoticComponent<React.ComponentType<any>>): React.ReactNode {
+  return protect(
+    <Suspense fallback={PageSpinner}>
+      <Component />
+    </Suspense>,
+  );
+}
+
 const routes: RouteObject[] = [
   // Public
   { path: "login", element: <Login /> },
 
-  // Protected
+  // Protected — Dashboard is eagerly loaded for fast first paint
   { index: true, element: protect(<Dashboard />) },
-  { path: "ontology", element: protect(<OntologyExplorer />) },
+  { path: "ontology", element: lazyProtect(OntologyExplorer) },
   {
     path: "ontology/:ontologyRid/objects/:objectType",
-    element: protect(<ObjectBrowser />),
+    element: lazyProtect(ObjectBrowser),
   },
-  { path: "objects", element: protect(<ObjectExplorer />) },
-  { path: "datasets", element: protect(<DatasetList />) },
-  { path: "actions", element: protect(<ActionExplorer />) },
-  { path: "functions", element: protect(<FunctionList />) },
-  { path: "monitors", element: protect(<MonitorList />) },
-  { path: "compass", element: protect(<CompassExplorer />) },
-  { path: "notifications", element: protect(<NotificationsPage />) },
-  { path: "webhooks", element: protect(<WebhookList />) },
-  { path: "admin/users", element: protect(<UserManagement />) },
-  { path: "admin/groups", element: protect(<GroupManagement />) },
-  { path: "admin/audit", element: protect(<AuditLog />) },
-  { path: "pipelines", element: protect(<PipelineExplorer />) },
-  { path: "graph", element: protect(<NetworkGraph />) },
-  { path: "workshop", element: protect(<Workshop />) },
-  { path: "contour", element: protect(<Contour />) },
-  { path: "data-connection", element: protect(<DataConnection />) },
-  { path: "pest-control", element: protect(<PestControlDashboard />) },
-  { path: "lineage", element: protect(<DataLineage />) },
-  { path: "workbook", element: protect(<CodeWorkbook />) },
-  { path: "scenarios", element: protect(<Scenarios />) },
-  { path: "aip", element: protect(<AIPChat />) },
-  { path: "data-health", element: protect(<DataHealth />) },
+  { path: "objects", element: lazyProtect(ObjectExplorer) },
+  { path: "datasets", element: lazyProtect(DatasetList) },
+  { path: "actions", element: lazyProtect(ActionExplorer) },
+  { path: "functions", element: lazyProtect(FunctionList) },
+  { path: "monitors", element: lazyProtect(MonitorList) },
+  { path: "compass", element: lazyProtect(CompassExplorer) },
+  { path: "notifications", element: lazyProtect(NotificationsPage) },
+  { path: "webhooks", element: lazyProtect(WebhookList) },
+  { path: "admin/users", element: lazyProtect(UserManagement) },
+  { path: "admin/groups", element: lazyProtect(GroupManagement) },
+  { path: "admin/audit", element: lazyProtect(AuditLog) },
+  { path: "pipelines", element: lazyProtect(PipelineExplorer) },
+  { path: "graph", element: lazyProtect(NetworkGraph) },
+  { path: "workshop", element: lazyProtect(Workshop) },
+  { path: "contour", element: lazyProtect(Contour) },
+  { path: "data-connection", element: lazyProtect(DataConnection) },
+  { path: "pest-control", element: lazyProtect(PestControlDashboard) },
+  { path: "lineage", element: lazyProtect(DataLineage) },
+  { path: "workbook", element: lazyProtect(CodeWorkbook) },
+  { path: "scenarios", element: lazyProtect(Scenarios) },
+  { path: "aip", element: lazyProtect(AIPChat) },
+  { path: "data-health", element: lazyProtect(DataHealth) },
 ];
 
 export default routes;

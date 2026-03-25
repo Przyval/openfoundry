@@ -259,7 +259,7 @@ export default function ActionExplorer() {
 
   return (
     <>
-      <PageHeader title="Action Explorer" />
+      <PageHeader title="Action Explorer" subtitle="Execute business actions on your ontology data" />
 
       {/* Toolbar */}
       <div className="toolbar">

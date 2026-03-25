@@ -39,6 +39,18 @@ export interface UpdateUserInput {
 export class UserStore {
   private readonly users = new Map<string, StoredUser>();
 
+  constructor() {
+    // Seed dev users so the User Management page isn't empty (ISSUE-003)
+    const devUsers: CreateUserInput[] = [
+      { username: "admin", email: "admin@openfoundry.local", displayName: "Admin User", attributes: { role: "admin" } },
+      { username: "developer", email: "developer@openfoundry.local", displayName: "Developer User", attributes: { role: "developer" } },
+      { username: "analyst", email: "analyst@openfoundry.local", displayName: "Analyst User", attributes: { role: "analyst" } },
+    ];
+    for (const u of devUsers) {
+      this.createUser(u);
+    }
+  }
+
   createUser(input: CreateUserInput): StoredUser {
     // Check for duplicate username
     for (const u of this.users.values()) {
