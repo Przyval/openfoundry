@@ -522,7 +522,6 @@ export default function AIPChat() {
     (async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/v2/aip/agents`, {
-          method: "POST",
           headers: authHeaders(),
         });
         if (res.ok) {

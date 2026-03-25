@@ -330,9 +330,9 @@ export async function aipRoutes(
   });
 
   // -----------------------------------------------------------------------
-  // POST /aip/agents — List available AI agents
+  // GET /aip/agents — List available AI agents
   // -----------------------------------------------------------------------
-  app.post("/aip/agents", async (_request, reply) => {
+  app.get("/aip/agents", async (_request, reply) => {
     const agents = [
       {
         rid: "ri.aip.main.agent.ontology-explorer",
