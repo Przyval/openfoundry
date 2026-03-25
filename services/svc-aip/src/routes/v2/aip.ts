@@ -46,8 +46,38 @@ interface SemanticSearchBody {
 
 interface ChatBody {
   messages: Array<{ role: string; content: string }>;
+  model?: string;
   ontologyRid?: string;
+  sessionId?: string;
   tools?: string[];
+}
+
+interface SessionEntry {
+  messages: Array<{ role: string; content: string }>;
+  ontologyRid?: string;
+  model?: string;
+  updatedAt: number;
+}
+
+// ---------------------------------------------------------------------------
+// In-memory session store (conversation history)
+// ---------------------------------------------------------------------------
+
+const sessions = new Map<string, SessionEntry>();
+
+// Evict stale sessions every 10 minutes (sessions older than 1 hour)
+const SESSION_TTL_MS = 60 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, session] of sessions) {
+    if (now - session.updatedAt > SESSION_TTL_MS) {
+      sessions.delete(id);
+    }
+  }
+}, 10 * 60 * 1000).unref();
+
+function generateSessionId(): string {
+  return `ses-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -238,21 +268,40 @@ export async function aipRoutes(
   });
 
   // -----------------------------------------------------------------------
-  // POST /aip/chat — Multi-turn chat with ontology context
+  // POST /aip/chat — Multi-turn chat with ontology context + sessions
   // -----------------------------------------------------------------------
   app.post<{ Body: ChatBody }>("/aip/chat", async (request, reply) => {
-    const { messages, ontologyRid, tools } =
+    const { messages, model: _requestedModel, ontologyRid, sessionId: incomingSessionId, tools } =
       request.body ?? ({} as ChatBody);
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       throw invalidArgument("messages", "must be a non-empty array");
     }
 
-    // Build the system message with ontology context
-    const systemContent = buildChatSystemPrompt(ontologyRid, tools);
+    // Session handling — restore or create
+    const sessionId = incomingSessionId ?? generateSessionId();
+    let session = sessions.get(sessionId);
+
+    if (!session) {
+      session = {
+        messages: [],
+        ontologyRid,
+        updatedAt: Date.now(),
+      };
+      sessions.set(sessionId, session);
+    }
+
+    // Append incoming user messages to session history
+    for (const m of messages) {
+      session.messages.push({ role: m.role, content: m.content });
+    }
+    session.updatedAt = Date.now();
+
+    // Build the full message list: system + session history
+    const systemContent = buildChatSystemPrompt(ontologyRid ?? session.ontologyRid, tools);
     const chatMessages: ChatMessage[] = [
       { role: "system", content: systemContent },
-      ...messages.map((m) => ({
+      ...session.messages.map((m) => ({
         role: m.role as ChatMessage["role"],
         content: m.content,
       })),
@@ -260,18 +309,140 @@ export async function aipRoutes(
 
     const response = await llmClient.chat(chatMessages);
 
+    // Append assistant response to session history
+    session.messages.push({
+      role: "assistant",
+      content: response.message.content,
+    });
+
     return reply.status(200).send({
       message: {
         role: "assistant" as const,
         content: response.message.content,
       },
       model: response.model ?? "unknown",
+      sessionId,
       usage: {
         promptTokens: response.usage.promptTokens,
         completionTokens: response.usage.completionTokens,
       },
     });
   });
+
+  // -----------------------------------------------------------------------
+  // POST /aip/agents — List available AI agents
+  // -----------------------------------------------------------------------
+  app.post("/aip/agents", async (_request, reply) => {
+    const agents = [
+      {
+        rid: "ri.aip.main.agent.ontology-explorer",
+        displayName: "Ontology Explorer",
+        description:
+          "Explores and queries the pest control ontology. Can retrieve customer, technician, job, and product data.",
+        capabilities: [
+          "ontology-query",
+          "data-summarization",
+          "natural-language-search",
+        ],
+        status: "active",
+        icon: "database",
+      },
+      {
+        rid: "ri.aip.main.agent.scheduling-assistant",
+        displayName: "Scheduling Assistant",
+        description:
+          "Helps manage and optimize technician schedules. Can suggest optimal job assignments based on location, specialization, and availability.",
+        capabilities: [
+          "schedule-optimization",
+          "technician-matching",
+          "conflict-detection",
+        ],
+        status: "active",
+        icon: "calendar",
+      },
+      {
+        rid: "ri.aip.main.agent.inventory-manager",
+        displayName: "Inventory Manager",
+        description:
+          "Monitors treatment product stock levels and generates restock alerts. Can forecast usage based on upcoming jobs.",
+        capabilities: [
+          "stock-monitoring",
+          "restock-alerts",
+          "usage-forecasting",
+        ],
+        status: "active",
+        icon: "box",
+      },
+      {
+        rid: "ri.aip.main.agent.revenue-analyst",
+        displayName: "Revenue Analyst",
+        description:
+          "Analyses revenue data, generates reports, and identifies trends across customers, jobs, and time periods.",
+        capabilities: [
+          "revenue-analysis",
+          "trend-detection",
+          "report-generation",
+        ],
+        status: "active",
+        icon: "chart",
+      },
+      {
+        rid: "ri.aip.main.agent.code-generator",
+        displayName: "Code Generator",
+        description:
+          "Generates TypeScript functions from natural language descriptions for use in the Functions workflow.",
+        capabilities: [
+          "code-generation",
+          "typescript",
+          "function-scaffolding",
+        ],
+        status: "active",
+        icon: "code",
+      },
+    ];
+
+    return reply.status(200).send({ data: agents });
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /aip/sessions/:sessionId — Retrieve session conversation history
+  // -----------------------------------------------------------------------
+  app.get<{ Params: { sessionId: string } }>(
+    "/aip/sessions/:sessionId",
+    async (request, reply) => {
+      const { sessionId } = request.params;
+      const session = sessions.get(sessionId);
+
+      if (!session) {
+        return reply.status(404).send({
+          errorCode: "NOT_FOUND",
+          errorName: "SessionNotFound",
+          errorInstanceId: crypto.randomUUID(),
+          parameters: { sessionId },
+          statusCode: 404,
+        });
+      }
+
+      return reply.status(200).send({
+        sessionId,
+        messages: session.messages,
+        ontologyRid: session.ontologyRid,
+        model: session.model,
+      });
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // DELETE /aip/sessions/:sessionId — Clear a session
+  // -----------------------------------------------------------------------
+  app.delete<{ Params: { sessionId: string } }>(
+    "/aip/sessions/:sessionId",
+    async (request, reply) => {
+      const { sessionId } = request.params;
+      sessions.delete(sessionId);
+      return reply.status(204).send();
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -306,15 +477,24 @@ function buildChatSystemPrompt(
   tools?: string[],
 ): string {
   let prompt =
-    "You are an AI assistant for the OpenFoundry data platform. " +
-    "Help users explore, query, and manipulate their data ontology.";
+    "You are an AI assistant for the OpenFoundry data platform, " +
+    "specializing in pest control business operations. " +
+    "Help users explore, query, and manipulate their data ontology. " +
+    "Format your responses using markdown with bold text, bullet lists, and tables where appropriate.\n\n" +
+    "The ontology contains these object types:\n" +
+    "- **Customer** — clients with properties: customerId, name, status, address, city, monthlyRate, contractType\n" +
+    "- **Technician** — field technicians: technicianId, name, status, rating, specialization, phone\n" +
+    "- **ServiceJob** — pest control jobs: jobId, customerId, customerName, technicianId, technicianName, scheduledDate, pestType, priority, status, amountCharged, customerRating\n" +
+    "- **TreatmentProduct** — chemicals and equipment: productId, name, stockQty, minStockLevel, unit, category, supplier\n" +
+    "- **Invoice** — billing records: invoiceId, customerId, totalAmount, status, dueDate\n" +
+    "- **Schedule** — daily schedules: scheduleId, date, technicianId, customerId, status\n";
 
   if (ontologyRid) {
-    prompt += ` You are working within ontology: ${ontologyRid}.`;
+    prompt += `\nYou are working within ontology: ${ontologyRid}.`;
   }
 
   if (tools && tools.length > 0) {
-    prompt += ` You have access to these tools: ${tools.join(", ")}.`;
+    prompt += `\nYou have access to these tools: ${tools.join(", ")}.`;
   }
 
   return prompt;

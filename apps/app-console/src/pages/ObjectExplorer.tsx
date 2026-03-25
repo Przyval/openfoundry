@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
   ButtonGroup,
+  Callout,
   Card,
   Divider,
   FormGroup,
   HTMLSelect,
   HTMLTable,
   InputGroup,
+  Intent,
   NonIdealState,
   Spinner,
   Tab,
@@ -64,6 +66,20 @@ interface FilterRule {
   field: string;
   operator: string;
   value: string;
+}
+
+interface LinkTypeDef {
+  apiName: string;
+  displayName?: string;
+  objectTypeApiName?: string;
+}
+
+interface LinkTypeListResponse {
+  data: LinkTypeDef[];
+}
+
+interface LinkedObjectsResponse {
+  data: OntologyObject[];
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +178,13 @@ export default function ObjectExplorer() {
   const [loading, setLoading] = useState(false);
   const [aggData, setAggData] = useState<AggregationGroup[] | null>(null);
   const [objectTypeCounts, setObjectTypeCounts] = useState<Record<string, number>>({});
+
+  // -- Selected object detail view ------------------------------------------
+  const [selectedObject, setSelectedObject] = useState<OntologyObject | null>(null);
+  const [linkTypes, setLinkTypes] = useState<LinkTypeDef[]>([]);
+  const [linkedObjectsMap, setLinkedObjectsMap] = useState<Record<string, OntologyObject[]>>({});
+  const [linkTypesLoading, setLinkTypesLoading] = useState(false);
+  const [linkedObjectsLoading, setLinkedObjectsLoading] = useState<Record<string, boolean>>({});
 
   // -- Column sorting (client-side click on header) -------------------------
   const [tableSortCol, setTableSortCol] = useState<string | null>(null);
@@ -408,6 +431,94 @@ export default function ObjectExplorer() {
     void fetchAggregations();
   }, [fetchAggregations]);
 
+  // -- Fetch link types when an object is selected --------------------------
+  useEffect(() => {
+    if (!selectedObject || !ontologyRid) {
+      setLinkTypes([]);
+      setLinkedObjectsMap({});
+      return;
+    }
+
+    let cancelled = false;
+    setLinkTypesLoading(true);
+
+    async function fetchLinkTypes() {
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/api/v2/ontologies/${ontologyRid}/objectTypes/${selectedObject!.objectType}/outgoingLinkTypes`,
+          {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+          },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as LinkTypeListResponse;
+        if (!cancelled) {
+          setLinkTypes(data.data ?? []);
+        }
+      } catch {
+        if (!cancelled) setLinkTypes([]);
+      } finally {
+        if (!cancelled) setLinkTypesLoading(false);
+      }
+    }
+
+    void fetchLinkTypes();
+    return () => { cancelled = true; };
+  }, [selectedObject, ontologyRid]);
+
+  const fetchLinkedObjects = useCallback(
+    async (linkTypeApiName: string) => {
+      if (!selectedObject || !ontologyRid) return;
+
+      setLinkedObjectsLoading((prev) => ({ ...prev, [linkTypeApiName]: true }));
+
+      try {
+        const pk = encodeURIComponent(selectedObject.primaryKey);
+        const res = await fetch(
+          `${API_BASE_URL}/api/v2/ontologies/${ontologyRid}/objects/${selectedObject.objectType}/${pk}/links/${linkTypeApiName}`,
+          {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+          },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as LinkedObjectsResponse;
+        setLinkedObjectsMap((prev) => ({ ...prev, [linkTypeApiName]: data.data ?? [] }));
+      } catch {
+        setLinkedObjectsMap((prev) => ({ ...prev, [linkTypeApiName]: [] }));
+      } finally {
+        setLinkedObjectsLoading((prev) => ({ ...prev, [linkTypeApiName]: false }));
+      }
+    },
+    [selectedObject, ontologyRid],
+  );
+
+  // Auto-fetch linked objects for each link type once they're loaded
+  useEffect(() => {
+    if (linkTypes.length === 0 || !selectedObject) return;
+    for (const lt of linkTypes) {
+      if (!(lt.apiName in linkedObjectsMap)) {
+        void fetchLinkedObjects(lt.apiName);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkTypes, selectedObject]);
+
+  const handleSelectObject = useCallback((obj: OntologyObject) => {
+    setSelectedObject(obj);
+    setLinkedObjectsMap({});
+    setLinkTypes([]);
+  }, []);
+
+  const handleBackToTable = useCallback(() => {
+    setSelectedObject(null);
+    setLinkedObjectsMap({});
+    setLinkTypes([]);
+  }, []);
+
   // -- Handlers ------------------------------------------------------------
   const addFilter = () =>
     setFilters((prev) => [...prev, { field: "", operator: "eq", value: "" }]);
@@ -572,6 +683,9 @@ export default function ObjectExplorer() {
               setPageTokens([]);
               setClientFilter("");
               setTableSortCol(null);
+              setSelectedObject(null);
+              setLinkedObjectsMap({});
+              setLinkTypes([]);
             }}
           >
             <option value="">-- Select Ontology --</option>
@@ -627,6 +741,9 @@ export default function ObjectExplorer() {
                 setSearchQuery("");
                 setTableSortCol(null);
                 setSortField("");
+                setSelectedObject(null);
+                setLinkedObjectsMap({});
+                setLinkTypes([]);
               }}
               renderActiveTabPanelOnly
             >
@@ -672,7 +789,148 @@ export default function ObjectExplorer() {
 
           {/* Main content area */}
           <div style={{ flex: 1, minWidth: 0 }}>
-            {!objectType ? (
+            {selectedObject ? (
+              /* ---- Object Detail Panel ---- */
+              <div>
+                <Button
+                  icon="arrow-left"
+                  text="Back to list"
+                  minimal
+                  onClick={handleBackToTable}
+                  style={{ marginBottom: 12 }}
+                />
+
+                <Card style={{ padding: 16, marginBottom: 16 }}>
+                  <h3 style={{ margin: "0 0 4px" }}>
+                    {selectedObject.objectType}{" "}
+                    <Tag minimal round intent="primary" style={{ verticalAlign: "middle" }}>
+                      {selectedObject.primaryKey}
+                    </Tag>
+                  </h3>
+
+                  <h4 style={{ margin: "16px 0 8px" }}>Properties</h4>
+                  <HTMLTable bordered compact striped style={{ width: "100%" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ width: 200 }}>Property</th>
+                        <th>Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(selectedObject.properties).map(([key, value]) => (
+                        <tr key={key}>
+                          <td>
+                            <code style={{ fontSize: "0.85rem" }}>{key}</code>
+                          </td>
+                          <td>
+                            {value === null || value === undefined ? (
+                              <span style={{ color: "#999", fontStyle: "italic" }}>null</span>
+                            ) : isStatusField(key) && renderStatusTag(value) ? (
+                              renderStatusTag(value)
+                            ) : integerFields.has(key) || numericFieldSet.has(key) ? (
+                              formatInteger(value)
+                            ) : (
+                              String(value)
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </HTMLTable>
+                </Card>
+
+                {/* Linked Objects Section */}
+                <Card style={{ padding: 16 }}>
+                  <h4 style={{ margin: "0 0 12px" }}>Linked Objects</h4>
+
+                  {linkTypesLoading ? (
+                    <Spinner size={30} />
+                  ) : linkTypes.length === 0 ? (
+                    <Callout intent={Intent.NONE} icon="info-sign">
+                      No outgoing link types found for this object type.
+                    </Callout>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                      {linkTypes.map((lt) => {
+                        const linked = linkedObjectsMap[lt.apiName];
+                        const isLoading = linkedObjectsLoading[lt.apiName];
+
+                        return (
+                          <div key={lt.apiName}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                              <strong>{lt.displayName || lt.apiName}</strong>
+                              <Tag minimal round>
+                                {linked ? linked.length : "..."}
+                              </Tag>
+                              <Button
+                                minimal
+                                small
+                                icon="refresh"
+                                onClick={() => fetchLinkedObjects(lt.apiName)}
+                              />
+                            </div>
+
+                            {isLoading ? (
+                              <Spinner size={20} />
+                            ) : linked && linked.length === 0 ? (
+                              <p style={{ color: "#888", margin: 0, fontSize: "0.85rem" }}>
+                                No linked objects.
+                              </p>
+                            ) : linked ? (
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                                  gap: 8,
+                                }}
+                              >
+                                {linked.map((linkedObj) => {
+                                  // Show up to 4 property previews
+                                  const previewProps = Object.entries(linkedObj.properties).slice(0, 4);
+                                  return (
+                                    <Card
+                                      key={linkedObj.rid}
+                                      interactive
+                                      elevation={0}
+                                      style={{ padding: "10px 12px", cursor: "pointer" }}
+                                      onClick={() => handleSelectObject(linkedObj)}
+                                    >
+                                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                                        <Tag minimal intent="primary" style={{ fontSize: "0.8rem" }}>
+                                          {linkedObj.objectType}
+                                        </Tag>
+                                        <code style={{ fontSize: "0.75rem", color: "#5c7080" }}>
+                                          {linkedObj.primaryKey}
+                                        </code>
+                                      </div>
+                                      {previewProps.map(([k, v]) => (
+                                        <div
+                                          key={k}
+                                          style={{ fontSize: "0.8rem", color: "#555", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                                        >
+                                          <span style={{ color: "#888" }}>{k}:</span>{" "}
+                                          {v === null || v === undefined ? (
+                                            <span style={{ fontStyle: "italic", color: "#aaa" }}>null</span>
+                                          ) : (
+                                            String(v)
+                                          )}
+                                        </div>
+                                      ))}
+                                    </Card>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
+
+                            {lt !== linkTypes[linkTypes.length - 1] && <Divider style={{ margin: "12px 0 0" }} />}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </Card>
+              </div>
+            ) : !objectType ? (
               <NonIdealState
                 icon="select"
                 title="Select an object type"
@@ -910,7 +1168,11 @@ export default function ObjectExplorer() {
                         </thead>
                         <tbody>
                           {sortedObjects.map((row) => (
-                            <tr key={row.rid}>
+                            <tr
+                              key={row.rid}
+                              onClick={() => handleSelectObject(row)}
+                              style={{ cursor: "pointer" }}
+                            >
                               {columns.map((col) => (
                                 <td
                                   key={col.key}

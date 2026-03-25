@@ -38,3 +38,4 @@ packages/api-types/src/generated/
 
 # Docker volumes
 deploy/data/
+.gstack/

@@ -874,8 +874,12 @@ function TemplateGallery({ onSelect }: { onSelect: (t: Template) => void }) {
 /* ------------------------------------------------------------------ */
 
 export default function Workshop() {
-  const [activeTemplate, setActiveTemplate] = useState<Template | null>(null);
-  const [widgets, setWidgets] = useState<WidgetDef[]>([]);
+  /* Auto-load Pest Control Operations module on first visit */
+  const defaultTemplate = TEMPLATES.find((t) => t.id === "pest-control") ?? null;
+  const [activeTemplate, setActiveTemplate] = useState<Template | null>(defaultTemplate);
+  const [widgets, setWidgets] = useState<WidgetDef[]>(
+    () => defaultTemplate?.widgets.map((w) => ({ ...w, id: wid() })) ?? [],
+  );
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
   const [data, setData] = useState<OntologyDataCache>({});
   const [loading, setLoading] = useState(false);
@@ -894,6 +898,7 @@ export default function Workshop() {
     }
   }, []);
 
+  /* Auto-fetch data on mount when template is pre-loaded */
   useEffect(() => {
     if (activeTemplate) {
       void loadData();

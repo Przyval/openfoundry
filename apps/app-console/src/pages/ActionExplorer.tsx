@@ -356,6 +356,10 @@ export default function ActionExplorer() {
                       minimal
                       small
                       icon={isExpanded ? "chevron-up" : "chevron-down"}
+                      onClick={(e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        toggleExpand(action.apiName);
+                      }}
                     />
                   </div>
                 </div>
@@ -372,7 +376,7 @@ export default function ActionExplorer() {
                   </p>
                 )}
 
-                <Collapse isOpen={isExpanded}>
+                <Collapse isOpen={isExpanded} keepChildrenMounted>
                   <div style={{ marginTop: 12 }}>
                     {/* Parameters table */}
                     {paramEntries.length === 0 ? (

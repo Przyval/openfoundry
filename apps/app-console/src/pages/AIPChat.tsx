@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   Colors,
+  HTMLSelect,
   HTMLTable,
   Icon,
   InputGroup,
@@ -18,20 +19,28 @@ import { API_BASE_URL } from "../config";
 
 interface ChatMessage {
   id: string;
-  role: "user" | "aip";
+  role: "user" | "assistant";
   content: string;
-  /** If present, render as an HTML table instead of markdown-ish text. */
-  table?: { headers: string[]; rows: string[][] };
+  /** Markdown tables parsed from response. */
+  tables?: Array<{ headers: string[]; rows: string[][] }>;
   timestamp: Date;
+  model?: string;
 }
 
-interface OntologyObject {
-  properties: Record<string, unknown>;
+interface AipChatResponse {
+  message: { role: string; content: string };
+  model?: string;
+  sessionId?: string;
+  usage?: { promptTokens: number; completionTokens: number };
 }
 
-interface LoadObjectsResponse {
-  data: OntologyObject[];
-  totalCount?: number;
+interface AipAgent {
+  rid: string;
+  displayName: string;
+  description: string;
+  capabilities: string[];
+  status: string;
+  icon: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -42,756 +51,318 @@ function msgId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function formatRupiah(amount: number): string {
-  return "Rp " + amount.toLocaleString("id-ID");
-}
-
-function thinkingDelay(): Promise<void> {
-  const ms = 500 + Math.random() * 1000; // 500-1500ms
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = localStorage.getItem("token");
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
 }
 
 /** Discover the pest-control ontology RID (cached). */
 let _cachedRid: string | null = null;
-async function getOntologyRid(): Promise<string | null> {
-  if (_cachedRid) return _cachedRid;
-  try {
-    const token = localStorage.getItem("token");
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(`${API_BASE_URL}/api/v2/ontologies`, { headers });
-    if (!res.ok) return null;
-    const body = await res.json();
-    const ont = (body?.data ?? []).find(
-      (o: any) =>
-        o.displayName?.toLowerCase().includes("pest") ||
-        o.apiName?.toLowerCase().includes("pest"),
-    );
-    if (ont) {
-      _cachedRid = ont.rid;
-      return ont.rid;
-    }
-    // fallback: use the first ontology available
-    if (body?.data?.length > 0) {
-      _cachedRid = body.data[0].rid;
-      return _cachedRid;
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
+let _allOntologies: Array<{ rid: string; displayName: string; apiName: string }> = [];
 
-async function loadObjects(objectType: string): Promise<any[]> {
-  const rid = await getOntologyRid();
-  if (!rid) return [];
+async function fetchOntologies(): Promise<
+  Array<{ rid: string; displayName: string; apiName: string }>
+> {
+  if (_allOntologies.length > 0) return _allOntologies;
   try {
-    const token = localStorage.getItem("token");
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(
-      `${API_BASE_URL}/api/v2/ontologies/${rid}/objectSets/loadObjects`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          objectSet: { type: "base", objectType },
-          select: [],
-        }),
-      },
-    );
+    const res = await fetch(`${API_BASE_URL}/api/v2/ontologies`, {
+      headers: authHeaders(),
+    });
     if (!res.ok) return [];
-    const data: LoadObjectsResponse = await res.json();
-    return (data?.data ?? []).map((o) => o.properties ?? o);
+    const body = await res.json();
+    _allOntologies = (body?.data ?? []).map((o: any) => ({
+      rid: o.rid,
+      displayName: o.displayName ?? o.apiName ?? "Untitled",
+      apiName: o.apiName ?? "",
+    }));
+    return _allOntologies;
   } catch {
     return [];
   }
 }
 
-/* ------------------------------------------------------------------ */
-/*  svc-aip LLM Backend                                                */
-/* ------------------------------------------------------------------ */
-
-interface AipChatResponse {
-  message: { role: string; content: string };
-  model?: string;
-  usage?: { promptTokens: number; completionTokens: number };
-}
-
-/**
- * Try calling the svc-aip chat endpoint for a real LLM-powered response.
- *
- * Returns the assistant message content on success, or `null` if the service
- * is unavailable, running in mock mode, or any error occurs — letting the
- * caller fall back to the local pattern-matching engine.
- */
-async function tryAipService(
-  query: string,
-  conversationHistory: Array<{ role: string; content: string }>,
-): Promise<string | null> {
-  try {
-    const token = localStorage.getItem("token");
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-
-    const ontologyRid = await getOntologyRid();
-
-    // Build messages array with conversation history + new user message
-    const messages = [
-      ...conversationHistory,
-      { role: "user", content: query },
-    ];
-
-    const res = await fetch(`${API_BASE_URL}/api/v2/aip/chat`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        messages,
-        ontologyRid: ontologyRid ?? undefined,
-      }),
-    });
-
-    if (!res.ok) return null;
-
-    const data: AipChatResponse = await res.json();
-
-    // If the service is running in mock mode, fall back to pattern matching
-    // which provides richer, data-driven responses from the actual ontology.
-    if (data.model === "mock") return null;
-
-    return data.message?.content ?? null;
-  } catch {
-    // svc-aip unreachable or errored — fall back silently
-    return null;
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/*  Smart Query Engine (pattern-matching fallback)                     */
-/* ------------------------------------------------------------------ */
-
-interface QueryResult {
-  content: string;
-  table?: { headers: string[]; rows: string[][] };
-}
-
-/** Normalise a query string for matching. */
-function norm(s: string): string {
-  return s.toLowerCase().trim();
-}
-
-function matchesAny(q: string, patterns: string[]): boolean {
-  return patterns.some((p) => q.includes(p));
-}
-
-async function processQuery(query: string): Promise<QueryResult> {
-  const q = norm(query);
-
-  // --- Customer count ---
-  if (
-    matchesAny(q, [
-      "jumlah customer",
-      "berapa customer",
-      "how many customer",
-      "customer count",
-      "total customer",
-      "jumlah pelanggan",
-      "berapa pelanggan",
-    ])
-  ) {
-    const customers = await loadObjects("Customer");
-    const active = customers.filter(
-      (c: any) => c.status?.toLowerCase() === "active",
-    );
-    return {
-      content:
-        `Terdapat **${customers.length} customers** dalam sistem, ` +
-        `**${active.length}** berstatus aktif dan **${customers.length - active.length}** tidak aktif.`,
-    };
-  }
-
-  // --- Show all technicians ---
-  if (
-    matchesAny(q, [
-      "tampilkan technician",
-      "tampilkan teknisi",
-      "show technician",
-      "list technician",
-      "semua teknisi",
-      "daftar teknisi",
-      "all technician",
-    ])
-  ) {
-    const techs = await loadObjects("Technician");
-    if (techs.length === 0)
-      return { content: "Tidak ada data Technician yang ditemukan." };
-    return {
-      content: `Berikut adalah **${techs.length} technicians** yang terdaftar:`,
-      table: {
-        headers: ["ID", "Nama", "Status", "Rating", "Spesialisasi"],
-        rows: techs.map((t: any) => [
-          t.technicianId ?? "-",
-          t.name ?? "-",
-          t.status ?? "-",
-          t.rating != null ? String(t.rating) : "-",
-          t.specialization ?? "-",
-        ]),
-      },
-    };
-  }
-
-  // --- Best / top technician ---
-  if (
-    matchesAny(q, [
-      "teknisi terbaik",
-      "teknisi rating tertinggi",
-      "best technician",
-      "top technician",
-      "highest rated",
-      "rating tertinggi",
-      "teknisi rating",
-    ])
-  ) {
-    const techs = await loadObjects("Technician");
-    if (techs.length === 0)
-      return { content: "Tidak ada data Technician yang ditemukan." };
-    const sorted = [...techs].sort(
-      (a: any, b: any) => (b.rating ?? 0) - (a.rating ?? 0),
-    );
-    const best = sorted[0];
-    return {
-      content:
-        `Teknisi dengan rating tertinggi: **${best.name}** dengan rating **${best.rating}** ` +
-        `(spesialisasi: ${best.specialization ?? "-"}).`,
-      table: {
-        headers: ["#", "Nama", "Rating", "Status", "Spesialisasi"],
-        rows: sorted.slice(0, 5).map((t: any, i: number) => [
-          String(i + 1),
-          t.name ?? "-",
-          t.rating != null ? String(t.rating) : "-",
-          t.status ?? "-",
-          t.specialization ?? "-",
-        ]),
-      },
-    };
-  }
-
-  // --- Pending / incomplete jobs ---
-  if (
-    matchesAny(q, [
-      "job belum selesai",
-      "job pending",
-      "pekerjaan belum",
-      "belum selesai",
-      "pending job",
-      "incomplete job",
-      "unfinished job",
-      "open job",
-      "job yang belum",
-      "in progress",
-      "in-progress",
-      "scheduled job",
-      "job aktif",
-      "active job",
-    ])
-  ) {
-    const jobs = await loadObjects("ServiceJob");
-    const pending = jobs.filter(
-      (j: any) =>
-        j.status?.toLowerCase() !== "completed" &&
-        j.status?.toLowerCase() !== "cancelled",
-    );
-    if (pending.length === 0)
-      return { content: "Semua job sudah selesai! Tidak ada job pending." };
-    return {
-      content: `Terdapat **${pending.length} job** yang belum selesai:`,
-      table: {
-        headers: [
-          "Job ID",
-          "Customer",
-          "Technician",
-          "Tanggal",
-          "Jenis Hama",
-          "Prioritas",
-          "Status",
-        ],
-        rows: pending.map((j: any) => [
-          j.jobId ?? "-",
-          j.customerName ?? j.customerId ?? "-",
-          j.technicianName ?? j.technicianId ?? "-",
-          j.scheduledDate ?? "-",
-          j.pestType ?? "-",
-          j.priority ?? "-",
-          j.status ?? "-",
-        ]),
-      },
-    };
-  }
-
-  // --- Total revenue ---
-  if (
-    matchesAny(q, [
-      "total revenue",
-      "total pendapatan",
-      "total pemasukan",
-      "revenue",
-      "omset",
-      "omzet",
-      "income",
-      "earnings",
-      "total amount",
-    ])
-  ) {
-    const jobs = await loadObjects("ServiceJob");
-    const completed = jobs.filter(
-      (j: any) => j.status?.toLowerCase() === "completed",
-    );
-    const total = completed.reduce(
-      (sum: number, j: any) => sum + (j.amountCharged ?? 0),
-      0,
-    );
-    const count = completed.length;
-
-    // Try Invoice objects too
-    const invoices = await loadObjects("Invoice");
-    if (invoices.length > 0) {
-      const invTotal = invoices.reduce(
-        (sum: number, inv: any) => sum + (inv.totalAmount ?? inv.amount ?? 0),
-        0,
-      );
-      return {
-        content:
-          `Total revenue dari **${invoices.length} invoices**: **${formatRupiah(invTotal)}**\n\n` +
-          `Tambahan dari completed jobs: **${count} job** selesai dengan total **${formatRupiah(total)}**.`,
-      };
-    }
-
-    return {
-      content:
-        `Total revenue dari **${count} completed jobs**: **${formatRupiah(total)}**.\n\n` +
-        `Rata-rata per job: **${formatRupiah(count > 0 ? Math.round(total / count) : 0)}**.`,
-    };
-  }
-
-  // --- Low stock ---
-  if (
-    matchesAny(q, [
-      "stok rendah",
-      "low stock",
-      "stock rendah",
-      "stok kurang",
-      "stock kurang",
-      "perlu restock",
-      "need restock",
-      "stok habis",
-      "out of stock",
-      "stok menipis",
-      "produk stok",
-    ])
-  ) {
-    const products = await loadObjects("TreatmentProduct");
-    const low = products.filter(
-      (p: any) => (p.stockQty ?? 0) < (p.minStockLevel ?? Infinity),
-    );
-    if (low.length === 0)
-      return {
-        content:
-          "Semua produk memiliki stok yang cukup. Tidak ada produk dengan stok rendah.",
-      };
-    return {
-      content: `Terdapat **${low.length} produk** dengan stok di bawah level minimum:`,
-      table: {
-        headers: [
-          "ID",
-          "Nama Produk",
-          "Stok Saat Ini",
-          "Min. Stok",
-          "Satuan",
-          "Kategori",
-        ],
-        rows: low.map((p: any) => [
-          p.productId ?? "-",
-          p.name ?? "-",
-          String(p.stockQty ?? 0),
-          String(p.minStockLevel ?? "-"),
-          p.unit ?? "-",
-          p.category ?? "-",
-        ]),
-      },
-    };
-  }
-
-  // --- Today's schedule ---
-  if (
-    matchesAny(q, [
-      "jadwal hari ini",
-      "today schedule",
-      "today's schedule",
-      "schedule today",
-      "jadwal today",
-      "hari ini",
-      "agenda hari ini",
-      "job hari ini",
-    ])
-  ) {
-    const today = new Date().toISOString().slice(0, 10);
-    const jobs = await loadObjects("ServiceJob");
-    const todayJobs = jobs.filter((j: any) => j.scheduledDate === today);
-
-    // Also try Schedule objects
-    const schedules = await loadObjects("Schedule");
-    const todaySchedules = schedules.filter(
-      (s: any) => s.date === today || s.scheduledDate === today,
-    );
-
-    if (todayJobs.length === 0 && todaySchedules.length === 0) {
-      return {
-        content: `Tidak ada jadwal untuk hari ini (${today}).`,
-      };
-    }
-
-    const rows = todayJobs.map((j: any) => [
-      j.scheduledTime ?? "-",
-      j.jobId ?? "-",
-      j.customerName ?? j.customerId ?? "-",
-      j.technicianName ?? j.technicianId ?? "-",
-      j.pestType ?? "-",
-      j.priority ?? "-",
-      j.status ?? "-",
-    ]);
-
-    // Append schedule objects if any
-    todaySchedules.forEach((s: any) => {
-      rows.push([
-        s.time ?? s.scheduledTime ?? "-",
-        s.scheduleId ?? "-",
-        s.customerName ?? s.customerId ?? "-",
-        s.technicianName ?? s.technicianId ?? "-",
-        s.type ?? s.serviceType ?? "-",
-        s.priority ?? "-",
-        s.status ?? "-",
-      ]);
-    });
-
-    return {
-      content: `Jadwal hari ini (${today}): **${rows.length} kegiatan**`,
-      table: {
-        headers: [
-          "Waktu",
-          "ID",
-          "Customer",
-          "Technician",
-          "Jenis",
-          "Prioritas",
-          "Status",
-        ],
-        rows,
-      },
-    };
-  }
-
-  // --- Customer by city / filter ---
-  const cityMatch = q.match(
-    /customer\s+(?:di|dari|in|from|at)\s+(\w[\w\s]*)/i,
+async function getDefaultOntologyRid(): Promise<string | null> {
+  if (_cachedRid) return _cachedRid;
+  const ontologies = await fetchOntologies();
+  const pest = ontologies.find(
+    (o) =>
+      o.displayName?.toLowerCase().includes("pest") ||
+      o.apiName?.toLowerCase().includes("pest"),
   );
-  if (cityMatch) {
-    const city = cityMatch[1].trim().toLowerCase();
-    const customers = await loadObjects("Customer");
-    const filtered = customers.filter(
-      (c: any) =>
-        (c.address ?? "").toLowerCase().includes(city) ||
-        (c.city ?? "").toLowerCase().includes(city),
-    );
-    if (filtered.length === 0)
-      return {
-        content: `Tidak ditemukan customer di **${cityMatch[1].trim()}**.`,
-      };
-    return {
-      content: `Ditemukan **${filtered.length} customer** di **${cityMatch[1].trim()}**:`,
-      table: {
-        headers: ["ID", "Nama", "Status", "Alamat", "Rate Bulanan"],
-        rows: filtered.map((c: any) => [
-          c.customerId ?? "-",
-          c.name ?? "-",
-          c.status ?? "-",
-          c.address ?? c.city ?? "-",
-          c.monthlyRate != null ? formatRupiah(c.monthlyRate) : "-",
-        ]),
-      },
-    };
+  if (pest) {
+    _cachedRid = pest.rid;
+    return pest.rid;
   }
-
-  // --- Show all customers ---
-  if (
-    matchesAny(q, [
-      "tampilkan customer",
-      "tampilkan pelanggan",
-      "show customer",
-      "list customer",
-      "semua customer",
-      "daftar customer",
-      "all customer",
-      "daftar pelanggan",
-      "semua pelanggan",
-    ])
-  ) {
-    const customers = await loadObjects("Customer");
-    if (customers.length === 0)
-      return { content: "Tidak ada data Customer yang ditemukan." };
-    return {
-      content: `Berikut adalah **${customers.length} customers** yang terdaftar:`,
-      table: {
-        headers: ["ID", "Nama", "Status", "Alamat", "Rate Bulanan"],
-        rows: customers.map((c: any) => [
-          c.customerId ?? "-",
-          c.name ?? "-",
-          c.status ?? "-",
-          c.address ?? "-",
-          c.monthlyRate != null ? formatRupiah(c.monthlyRate) : "-",
-        ]),
-      },
-    };
+  if (ontologies.length > 0) {
+    _cachedRid = ontologies[0].rid;
+    return _cachedRid;
   }
-
-  // --- Show all products ---
-  if (
-    matchesAny(q, [
-      "tampilkan produk",
-      "show product",
-      "list product",
-      "semua produk",
-      "daftar produk",
-      "all product",
-      "treatment product",
-    ])
-  ) {
-    const products = await loadObjects("TreatmentProduct");
-    if (products.length === 0)
-      return { content: "Tidak ada data TreatmentProduct yang ditemukan." };
-    return {
-      content: `Berikut adalah **${products.length} produk** treatment:`,
-      table: {
-        headers: [
-          "ID",
-          "Nama",
-          "Stok",
-          "Min. Stok",
-          "Satuan",
-          "Kategori",
-          "Supplier",
-        ],
-        rows: products.map((p: any) => [
-          p.productId ?? "-",
-          p.name ?? "-",
-          String(p.stockQty ?? 0),
-          String(p.minStockLevel ?? "-"),
-          p.unit ?? "-",
-          p.category ?? "-",
-          p.supplier ?? "-",
-        ]),
-      },
-    };
-  }
-
-  // --- Show all jobs ---
-  if (
-    matchesAny(q, [
-      "tampilkan job",
-      "show job",
-      "list job",
-      "semua job",
-      "daftar job",
-      "all job",
-      "semua pekerjaan",
-      "show all service",
-    ])
-  ) {
-    const jobs = await loadObjects("ServiceJob");
-    if (jobs.length === 0)
-      return { content: "Tidak ada data ServiceJob yang ditemukan." };
-    return {
-      content: `Berikut adalah **${jobs.length} service jobs**:`,
-      table: {
-        headers: [
-          "Job ID",
-          "Customer",
-          "Technician",
-          "Tanggal",
-          "Jenis Hama",
-          "Prioritas",
-          "Status",
-          "Amount",
-        ],
-        rows: jobs.map((j: any) => [
-          j.jobId ?? "-",
-          j.customerName ?? j.customerId ?? "-",
-          j.technicianName ?? j.technicianId ?? "-",
-          j.scheduledDate ?? "-",
-          j.pestType ?? "-",
-          j.priority ?? "-",
-          j.status ?? "-",
-          j.amountCharged != null ? formatRupiah(j.amountCharged) : "-",
-        ]),
-      },
-    };
-  }
-
-  // --- Completed jobs ---
-  if (
-    matchesAny(q, [
-      "job selesai",
-      "job completed",
-      "completed job",
-      "pekerjaan selesai",
-      "job yang sudah",
-    ])
-  ) {
-    const jobs = await loadObjects("ServiceJob");
-    const completed = jobs.filter(
-      (j: any) => j.status?.toLowerCase() === "completed",
-    );
-    if (completed.length === 0)
-      return { content: "Belum ada job yang selesai." };
-    return {
-      content: `Terdapat **${completed.length} job** yang sudah selesai:`,
-      table: {
-        headers: [
-          "Job ID",
-          "Customer",
-          "Technician",
-          "Tanggal",
-          "Jenis Hama",
-          "Rating",
-          "Amount",
-        ],
-        rows: completed.map((j: any) => [
-          j.jobId ?? "-",
-          j.customerName ?? j.customerId ?? "-",
-          j.technicianName ?? j.technicianId ?? "-",
-          j.scheduledDate ?? "-",
-          j.pestType ?? "-",
-          j.customerRating != null ? String(j.customerRating) : "-",
-          j.amountCharged != null ? formatRupiah(j.amountCharged) : "-",
-        ]),
-      },
-    };
-  }
-
-  // --- Summary / overview ---
-  if (
-    matchesAny(q, [
-      "ringkasan",
-      "summary",
-      "overview",
-      "rangkuman",
-      "statistik",
-      "stats",
-      "dashboard",
-    ])
-  ) {
-    const [customers, technicians, jobs, products] = await Promise.all([
-      loadObjects("Customer"),
-      loadObjects("Technician"),
-      loadObjects("ServiceJob"),
-      loadObjects("TreatmentProduct"),
-    ]);
-    const activeCustomers = customers.filter(
-      (c: any) => c.status?.toLowerCase() === "active",
-    ).length;
-    const completedJobs = jobs.filter(
-      (j: any) => j.status?.toLowerCase() === "completed",
-    );
-    const totalRevenue = completedJobs.reduce(
-      (sum: number, j: any) => sum + (j.amountCharged ?? 0),
-      0,
-    );
-    const availableTechs = technicians.filter(
-      (t: any) => t.status?.toLowerCase() === "available",
-    ).length;
-    const lowStockProducts = products.filter(
-      (p: any) => (p.stockQty ?? 0) < (p.minStockLevel ?? Infinity),
-    ).length;
-
-    return {
-      content:
-        `**Ringkasan Sistem Pest Control:**\n\n` +
-        `- **Customers:** ${customers.length} total (${activeCustomers} aktif)\n` +
-        `- **Technicians:** ${technicians.length} total (${availableTechs} available)\n` +
-        `- **Service Jobs:** ${jobs.length} total (${completedJobs.length} selesai)\n` +
-        `- **Total Revenue:** ${formatRupiah(totalRevenue)}\n` +
-        `- **Treatment Products:** ${products.length} total (${lowStockProducts} stok rendah)`,
-    };
-  }
-
-  // --- Help ---
-  if (matchesAny(q, ["help", "bantuan", "bisa apa", "apa saja", "what can"])) {
-    return {
-      content:
-        `Saya bisa membantu Anda dengan query berikut:\n\n` +
-        `- **Customers:** "Berapa jumlah customer?", "Tampilkan semua customer", "Customer di Jakarta"\n` +
-        `- **Technicians:** "Tampilkan semua teknisi", "Siapa teknisi terbaik?"\n` +
-        `- **Service Jobs:** "Job yang belum selesai", "Jadwal hari ini", "Job selesai"\n` +
-        `- **Revenue:** "Total revenue", "Total pendapatan"\n` +
-        `- **Products:** "Produk stok rendah", "Tampilkan semua produk"\n` +
-        `- **Overview:** "Ringkasan", "Summary"`,
-    };
-  }
-
-  // --- Default fallback ---
-  return {
-    content:
-      "Maaf, saya belum bisa memproses query tersebut. Coba tanyakan tentang **customers**, **technicians**, **jobs**, **products**, **invoices**, atau **schedules**.\n\nKetik **help** untuk melihat contoh query yang didukung.",
-  };
+  return null;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Markdown-ish renderer (bold, lists, newlines)                      */
+/*  Parse markdown tables from content                                 */
 /* ------------------------------------------------------------------ */
 
-function renderMarkdown(text: string): React.ReactNode {
-  // Split into lines for list handling
-  const lines = text.split("\n");
+interface ParsedContent {
+  text: string;
+  tables: Array<{ headers: string[]; rows: string[][] }>;
+}
+
+function parseMarkdownTables(content: string): ParsedContent {
+  const lines = content.split("\n");
+  const textLines: string[] = [];
+  const tables: Array<{ headers: string[]; rows: string[][] }> = [];
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Detect table start: line with | and next line with |---|
+    if (
+      line.trim().startsWith("|") &&
+      i + 1 < lines.length &&
+      lines[i + 1].trim().match(/^\|[\s\-:|]+\|$/)
+    ) {
+      // Parse header
+      const headers = line
+        .split("|")
+        .map((c) => c.trim())
+        .filter(Boolean);
+      i += 2; // skip header + separator
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].trim().startsWith("|")) {
+        const row = lines[i]
+          .split("|")
+          .map((c) => c.trim())
+          .filter(Boolean);
+        rows.push(row);
+        i++;
+      }
+      tables.push({ headers, rows });
+      // Add a placeholder so we know where to insert the table
+      textLines.push(`__TABLE_${tables.length - 1}__`);
+    } else {
+      textLines.push(line);
+      i++;
+    }
+  }
+
+  return { text: textLines.join("\n"), tables };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Markdown renderer (bold, italic, code, lists, headings, links)     */
+/* ------------------------------------------------------------------ */
+
+function renderInlineMarkdown(
+  text: string,
+  keyPrefix: string,
+): React.ReactNode[] {
+  // Process: **bold**, *italic*, `code`, [link](url)
+  const parts = text.split(
+    /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g,
+  );
+  return parts.map((part, idx) => {
+    const key = `${keyPrefix}-${idx}`;
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return (
+        <strong key={key} style={{ color: "#E1E8ED" }}>
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith("*") && part.endsWith("*") && !part.startsWith("**")) {
+      return (
+        <em key={key} style={{ color: "#D8E1E8" }}>
+          {part.slice(1, -1)}
+        </em>
+      );
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return (
+        <code
+          key={key}
+          style={{
+            background: "#1A2530",
+            padding: "1px 5px",
+            borderRadius: 3,
+            fontSize: "0.88em",
+            color: "#48AFF0",
+          }}
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (linkMatch) {
+      return (
+        <a
+          key={key}
+          href={linkMatch[2]}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: "#48AFF0" }}
+        >
+          {linkMatch[1]}
+        </a>
+      );
+    }
+    return <span key={key}>{part}</span>;
+  });
+}
+
+function renderMarkdown(
+  content: string,
+  tables?: Array<{ headers: string[]; rows: string[][] }>,
+): React.ReactNode {
+  const parsed = tables
+    ? { text: content, tables }
+    : parseMarkdownTables(content);
+  const lines = parsed.text.split("\n");
   const elements: React.ReactNode[] = [];
 
   lines.forEach((line, lineIdx) => {
+    // Table placeholder
+    const tableMatch = line.match(/^__TABLE_(\d+)__$/);
+    if (tableMatch) {
+      const tableIdx = parseInt(tableMatch[1], 10);
+      const table = parsed.tables[tableIdx];
+      if (table) {
+        elements.push(
+          <div
+            key={`table-${lineIdx}`}
+            style={{ marginTop: 8, marginBottom: 8, overflowX: "auto" }}
+          >
+            <HTMLTable
+              bordered
+              condensed
+              striped
+              style={{
+                width: "100%",
+                fontSize: "0.82rem",
+                background: "#263238",
+              }}
+            >
+              <thead>
+                <tr>
+                  {table.headers.map((h, i) => (
+                    <th
+                      key={i}
+                      style={{
+                        color: "#A7B6C2",
+                        fontWeight: 600,
+                        padding: "6px 10px",
+                        borderBottom: "1px solid #5C7080",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {table.rows.map((row, ri) => (
+                  <tr key={ri}>
+                    {row.map((cell, ci) => (
+                      <td
+                        key={ci}
+                        style={{
+                          padding: "5px 10px",
+                          color: "#E1E8ED",
+                          borderBottom: "1px solid #394B59",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </HTMLTable>
+          </div>,
+        );
+      }
+      return;
+    }
+
+    // Empty line
     if (line.trim() === "") {
       elements.push(<br key={`br-${lineIdx}`} />);
       return;
     }
 
+    // Heading ##
+    const h2Match = line.match(/^##\s+(.+)/);
+    if (h2Match) {
+      elements.push(
+        <div
+          key={`line-${lineIdx}`}
+          style={{ fontWeight: 700, fontSize: "1.05rem", marginTop: 6, marginBottom: 2, color: "#F5F8FA" }}
+        >
+          {renderInlineMarkdown(h2Match[1], `l${lineIdx}`)}
+        </div>,
+      );
+      return;
+    }
+
+    // Heading ###
+    const h3Match = line.match(/^###\s+(.+)/);
+    if (h3Match) {
+      elements.push(
+        <div
+          key={`line-${lineIdx}`}
+          style={{ fontWeight: 600, fontSize: "0.98rem", marginTop: 4, marginBottom: 2, color: "#E1E8ED" }}
+        >
+          {renderInlineMarkdown(h3Match[1], `l${lineIdx}`)}
+        </div>,
+      );
+      return;
+    }
+
+    // Bullet list
     const isBullet = line.trim().startsWith("- ");
-    const displayLine = isBullet ? line.trim().slice(2) : line;
-
-    // Parse bold (**text**) within a line
-    const parts = displayLine.split(/(\*\*[^*]+\*\*)/g);
-    const rendered = parts.map((part, partIdx) => {
-      if (part.startsWith("**") && part.endsWith("**")) {
-        return (
-          <strong key={`${lineIdx}-${partIdx}`}>
-            {part.slice(2, -2)}
-          </strong>
-        );
-      }
-      return <span key={`${lineIdx}-${partIdx}`}>{part}</span>;
-    });
-
     if (isBullet) {
+      const displayLine = line.trim().slice(2);
       elements.push(
         <div
           key={`line-${lineIdx}`}
           style={{ display: "flex", gap: 6, paddingLeft: 8, marginBottom: 2 }}
         >
-          <span style={{ flexShrink: 0 }}>•</span>
-          <span>{rendered}</span>
+          <span style={{ flexShrink: 0, color: "#5C7080" }}>&#x2022;</span>
+          <span>{renderInlineMarkdown(displayLine, `l${lineIdx}`)}</span>
         </div>,
       );
-    } else {
-      elements.push(
-        <div key={`line-${lineIdx}`} style={{ marginBottom: 2 }}>
-          {rendered}
-        </div>,
-      );
+      return;
     }
+
+    // Numbered list
+    const numMatch = line.trim().match(/^(\d+)\.\s+(.+)/);
+    if (numMatch) {
+      elements.push(
+        <div
+          key={`line-${lineIdx}`}
+          style={{ display: "flex", gap: 6, paddingLeft: 8, marginBottom: 2 }}
+        >
+          <span style={{ flexShrink: 0, color: "#5C7080", minWidth: 16, textAlign: "right" }}>
+            {numMatch[1]}.
+          </span>
+          <span>{renderInlineMarkdown(numMatch[2], `l${lineIdx}`)}</span>
+        </div>,
+      );
+      return;
+    }
+
+    // Regular line
+    elements.push(
+      <div key={`line-${lineIdx}`} style={{ marginBottom: 2 }}>
+        {renderInlineMarkdown(line, `l${lineIdx}`)}
+      </div>,
+    );
   });
 
   return <>{elements}</>;
@@ -831,7 +402,7 @@ const styles = {
     wordBreak: "break-word" as const,
   } as React.CSSProperties,
 
-  aipBubble: {
+  assistantBubble: {
     alignSelf: "flex-start" as const,
     background: "#30404D",
     color: "#F5F8FA",
@@ -860,14 +431,14 @@ const styles = {
     gap: 8,
   } as React.CSSProperties,
 
-  poweredBadge: {
+  modelBadge: {
     display: "inline-flex",
     alignItems: "center",
     gap: 4,
     marginTop: 8,
     fontSize: "0.7rem",
     color: "#8A9BA8",
-    opacity: 0.7,
+    opacity: 0.8,
   } as React.CSSProperties,
 
   thinkingDots: {
@@ -880,12 +451,6 @@ const styles = {
     alignSelf: "flex-start" as const,
     color: "#A7B6C2",
     fontSize: "0.9rem",
-  } as React.CSSProperties,
-
-  tableWrapper: {
-    marginTop: 8,
-    overflowX: "auto" as const,
-    maxWidth: "100%",
   } as React.CSSProperties,
 
   timestamp: {
@@ -901,12 +466,12 @@ const styles = {
 /* ------------------------------------------------------------------ */
 
 const SUGGESTIONS = [
-  "Berapa jumlah customer aktif?",
-  "Tampilkan job yang belum selesai",
-  "Siapa teknisi terbaik?",
-  "Total revenue bulan ini",
-  "Produk dengan stok rendah",
-  "Jadwal hari ini",
+  "How many active customers?",
+  "Show pending jobs",
+  "Who is the best technician?",
+  "Total revenue",
+  "Low stock products",
+  "Give me a summary",
 ];
 
 /* ------------------------------------------------------------------ */
@@ -915,10 +480,13 @@ const SUGGESTIONS = [
 
 const WELCOME_MESSAGE: ChatMessage = {
   id: "welcome",
-  role: "aip",
+  role: "assistant",
   content:
-    "Selamat datang di **AIP (AI Platform)**. Saya bisa membantu Anda meng-query data ontology menggunakan bahasa natural.\n\nTanyakan apa saja tentang **customers**, **technicians**, **jobs**, **products**, atau **invoices**.\n\nKetik pertanyaan Anda di bawah atau klik salah satu saran di atas input.",
+    "Welcome to **AIP Chat** (AI Platform). I can help you query and explore your ontology data using natural language.\n\n" +
+    "Ask me anything about **customers**, **technicians**, **service jobs**, **products**, or **invoices**.\n\n" +
+    "Type a question below or click one of the suggestions to get started.",
   timestamp: new Date(),
+  model: "system",
 };
 
 /* ------------------------------------------------------------------ */
@@ -929,8 +497,43 @@ export default function AIPChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [activeModel, setActiveModel] = useState<string | null>(null);
+  const [ontologies, setOntologies] = useState<
+    Array<{ rid: string; displayName: string }>
+  >([]);
+  const [selectedOntologyRid, setSelectedOntologyRid] = useState<string>("");
+  const [agents, setAgents] = useState<AipAgent[]>([]);
+  const [showAgents, setShowAgents] = useState(false);
+
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  /* Load ontologies and agents on mount */
+  useEffect(() => {
+    (async () => {
+      const onts = await fetchOntologies();
+      setOntologies(onts);
+      const defaultRid = await getDefaultOntologyRid();
+      if (defaultRid) setSelectedOntologyRid(defaultRid);
+    })();
+
+    // Fetch agents
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/v2/aip/agents`, {
+          method: "POST",
+          headers: authHeaders(),
+        });
+        if (res.ok) {
+          const body = await res.json();
+          setAgents(body?.data ?? []);
+        }
+      } catch {
+        // agents not available
+      }
+    })();
+  }, []);
 
   /* Auto-scroll to bottom */
   const scrollToBottom = useCallback(() => {
@@ -963,50 +566,53 @@ export default function AIPChat() {
       setThinking(true);
 
       try {
-        // Build conversation history for svc-aip (exclude welcome message, tables, etc.)
-        const conversationHistory = messages
-          .filter((m) => m.id !== "welcome")
-          .map((m) => ({
-            role: m.role === "user" ? "user" : "assistant",
-            content: m.content,
-          }));
+        const res = await fetch(`${API_BASE_URL}/api/v2/aip/chat`, {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({
+            messages: [{ role: "user", content: query }],
+            ontologyRid: selectedOntologyRid || undefined,
+            sessionId: sessionId ?? undefined,
+          }),
+        });
 
-        // Try the real LLM service first; falls back to null if unavailable or mock
-        const [llmResponse] = await Promise.all([
-          tryAipService(query, conversationHistory),
-          thinkingDelay(),
-        ]);
-
-        let aipMsg: ChatMessage;
-
-        if (llmResponse) {
-          // Real LLM response from svc-aip
-          aipMsg = {
-            id: msgId(),
-            role: "aip",
-            content: llmResponse,
-            timestamp: new Date(),
-          };
-        } else {
-          // Fallback to pattern-matching engine
-          const result = await processQuery(query);
-          aipMsg = {
-            id: msgId(),
-            role: "aip",
-            content: result.content,
-            table: result.table,
-            timestamp: new Date(),
-          };
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
         }
 
-        setMessages((prev) => [...prev, aipMsg]);
+        const data: AipChatResponse = await res.json();
+
+        // Track model and session
+        if (data.model) setActiveModel(data.model);
+        if (data.sessionId) setSessionId(data.sessionId);
+
+        const content = data.message?.content ?? "No response received.";
+
+        // Parse any markdown tables from the content
+        const parsed = parseMarkdownTables(content);
+
+        const assistantMsg: ChatMessage = {
+          id: msgId(),
+          role: "assistant",
+          content: parsed.text,
+          tables:
+            parsed.tables.length > 0 ? parsed.tables : undefined,
+          timestamp: new Date(),
+          model: data.model,
+        };
+
+        setMessages((prev) => [...prev, assistantMsg]);
       } catch {
+        // If svc-aip is unreachable, show a helpful error
         const errMsg: ChatMessage = {
           id: msgId(),
-          role: "aip",
+          role: "assistant",
           content:
-            "Terjadi kesalahan saat memproses query. Silakan coba lagi.",
+            "I was unable to reach the AIP service. Please make sure **svc-aip** is running on port 8092.\n\n" +
+            "You can start it with:\n" +
+            "```\ncd services/svc-aip && pnpm dev\n```",
           timestamp: new Date(),
+          model: "error",
         };
         setMessages((prev) => [...prev, errMsg]);
       } finally {
@@ -1014,7 +620,7 @@ export default function AIPChat() {
         inputRef.current?.focus();
       }
     },
-    [input, thinking, messages],
+    [input, thinking, selectedOntologyRid, sessionId],
   );
 
   const handleKeyDown = useCallback(
@@ -1035,14 +641,45 @@ export default function AIPChat() {
   );
 
   const handleClearChat = useCallback(() => {
+    // If there's a session, clear it on the backend too
+    if (sessionId) {
+      fetch(`${API_BASE_URL}/api/v2/aip/sessions/${sessionId}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      }).catch(() => {});
+    }
+
     setMessages([
-      {
-        ...WELCOME_MESSAGE,
-        id: msgId(),
-        timestamp: new Date(),
-      },
+      { ...WELCOME_MESSAGE, id: msgId(), timestamp: new Date() },
     ]);
-  }, []);
+    setSessionId(null);
+    setActiveModel(null);
+  }, [sessionId]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Model display name                                               */
+  /* ---------------------------------------------------------------- */
+
+  function modelDisplayName(model?: string | null): string {
+    if (!model || model === "system") return "";
+    if (model === "error") return "Offline";
+    if (model === "mock-smart") return "Smart Mock (Ontology-Aware)";
+    if (model === "mock") return "Mock";
+    if (model.includes("gpt")) return `OpenAI ${model}`;
+    if (model.includes("claude")) return `Anthropic ${model}`;
+    return model;
+  }
+
+  function modelIntent(
+    model?: string | null,
+  ): "none" | "primary" | "success" | "warning" | "danger" {
+    if (!model) return "none";
+    if (model === "error") return "danger";
+    if (model.startsWith("mock")) return "warning";
+    if (model.includes("gpt")) return "success";
+    if (model.includes("claude")) return "primary";
+    return "none";
+  }
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
@@ -1054,18 +691,64 @@ export default function AIPChat() {
         title="AIP Chat"
         actions={
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {/* Ontology selector */}
+            {ontologies.length > 0 && (
+              <HTMLSelect
+                minimal
+                value={selectedOntologyRid}
+                onChange={(e) => setSelectedOntologyRid(e.target.value)}
+                style={{
+                  background: "#30404D",
+                  color: "#F5F8FA",
+                  border: "1px solid #5C7080",
+                  borderRadius: 4,
+                  fontSize: "0.85rem",
+                }}
+              >
+                <option value="">All Ontologies</option>
+                {ontologies.map((o) => (
+                  <option key={o.rid} value={o.rid}>
+                    {o.displayName}
+                  </option>
+                ))}
+              </HTMLSelect>
+            )}
+
+            {/* Model indicator */}
+            {activeModel && activeModel !== "system" && (
+              <Tag
+                icon="predictive-analysis"
+                minimal
+                intent={modelIntent(activeModel)}
+                round
+              >
+                {modelDisplayName(activeModel)}
+              </Tag>
+            )}
+
+            {/* Agents toggle */}
+            <Button
+              icon="people"
+              text="Agents"
+              minimal
+              small
+              active={showAgents}
+              onClick={() => setShowAgents((v) => !v)}
+            />
+
+            {/* Connection status */}
             <Tag
               icon="globe-network"
               minimal
               intent="success"
               round
-              large
             >
-              Ontology Connected
+              Connected
             </Tag>
+
             <Button
               icon="trash"
-              text="Clear Chat"
+              text="Clear"
               minimal
               small
               onClick={handleClearChat}
@@ -1073,6 +756,95 @@ export default function AIPChat() {
           </div>
         }
       />
+
+      {/* Agent cards panel */}
+      {showAgents && agents.length > 0 && (
+        <Card
+          style={{
+            marginBottom: 12,
+            background: "#1F2933",
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              fontSize: "0.9rem",
+              fontWeight: 600,
+              color: "#A7B6C2",
+              marginBottom: 10,
+            }}
+          >
+            Available AI Agents
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+              gap: 10,
+            }}
+          >
+            {agents.map((agent) => (
+              <Card
+                key={agent.rid}
+                interactive
+                style={{
+                  background: "#293742",
+                  padding: "10px 14px",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  void handleSend(
+                    `Tell me about the ${agent.displayName} capabilities`,
+                  );
+                  setShowAgents(false);
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 4,
+                  }}
+                >
+                  <Icon
+                    icon={agent.icon as any}
+                    size={14}
+                    color="#2B95D6"
+                  />
+                  <span
+                    style={{
+                      fontWeight: 600,
+                      color: "#F5F8FA",
+                      fontSize: "0.88rem",
+                    }}
+                  >
+                    {agent.displayName}
+                  </span>
+                  <Tag
+                    minimal
+                    round
+                    intent={agent.status === "active" ? "success" : "none"}
+                    style={{ fontSize: "0.7rem", marginLeft: "auto" }}
+                  >
+                    {agent.status}
+                  </Tag>
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.78rem",
+                    color: "#A7B6C2",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {agent.description}
+                </div>
+              </Card>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <Card
         style={{
@@ -1087,7 +859,8 @@ export default function AIPChat() {
           <div
             style={{
               padding: "12px 24px",
-              background: "linear-gradient(135deg, #1F4B99 0%, #2B95D6 100%)",
+              background:
+                "linear-gradient(135deg, #1F4B99 0%, #2B95D6 100%)",
               display: "flex",
               alignItems: "center",
               gap: 12,
@@ -1102,13 +875,35 @@ export default function AIPChat() {
                   fontSize: "1rem",
                 }}
               >
-                AIP — AI Platform
+                AIP -- AI Platform
               </div>
-              <div style={{ color: "rgba(255,255,255,0.7)", fontSize: "0.75rem" }}>
+              <div
+                style={{
+                  color: "rgba(255,255,255,0.7)",
+                  fontSize: "0.75rem",
+                }}
+              >
                 Natural Language Ontology Interface
+                {selectedOntologyRid
+                  ? ` | ${ontologies.find((o) => o.rid === selectedOntologyRid)?.displayName ?? "Selected"}`
+                  : ""}
               </div>
             </div>
             <div style={{ flex: 1 }} />
+            {sessionId && (
+              <Tag
+                minimal
+                round
+                style={{
+                  background: "rgba(255,255,255,0.1)",
+                  color: "rgba(255,255,255,0.6)",
+                  border: "none",
+                  fontSize: "0.7rem",
+                }}
+              >
+                Session active
+              </Tag>
+            )}
             <Tag
               minimal
               round
@@ -1135,69 +930,40 @@ export default function AIPChat() {
                   /* User bubble */
                   <div style={styles.userBubble}>{msg.content}</div>
                 ) : (
-                  /* AIP bubble */
-                  <div style={styles.aipBubble}>
-                    {renderMarkdown(msg.content)}
+                  /* Assistant bubble */
+                  <div style={styles.assistantBubble}>
+                    {renderMarkdown(msg.content, msg.tables)}
 
-                    {msg.table && (
-                      <div style={styles.tableWrapper}>
-                        <HTMLTable
-                          bordered
-                          condensed
-                          striped
-                          style={{
-                            marginTop: 8,
-                            width: "100%",
-                            fontSize: "0.82rem",
-                            background: "#263238",
-                          }}
-                        >
-                          <thead>
-                            <tr>
-                              {msg.table.headers.map((h, i) => (
-                                <th
-                                  key={i}
-                                  style={{
-                                    color: "#A7B6C2",
-                                    fontWeight: 600,
-                                    padding: "6px 10px",
-                                    borderBottom: "1px solid #5C7080",
-                                    whiteSpace: "nowrap",
-                                  }}
-                                >
-                                  {h}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {msg.table.rows.map((row, ri) => (
-                              <tr key={ri}>
-                                {row.map((cell, ci) => (
-                                  <td
-                                    key={ci}
-                                    style={{
-                                      padding: "5px 10px",
-                                      color: "#E1E8ED",
-                                      borderBottom: "1px solid #394B59",
-                                      whiteSpace: "nowrap",
-                                    }}
-                                  >
-                                    {cell}
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </HTMLTable>
+                    {/* Model badge */}
+                    {msg.model && msg.model !== "system" && (
+                      <div style={styles.modelBadge}>
+                        <Icon
+                          icon={
+                            msg.model === "error"
+                              ? "error"
+                              : msg.model?.startsWith("mock")
+                                ? "lab-test"
+                                : "predictive-analysis"
+                          }
+                          size={10}
+                        />
+                        {modelDisplayName(msg.model)}
                       </div>
                     )}
 
-                    {/* Powered by Ontology badge */}
-                    <div style={styles.poweredBadge}>
-                      <Icon icon="database" size={10} />
-                      Powered by Ontology
-                    </div>
+                    {/* Ontology badge for non-error messages */}
+                    {msg.model !== "error" && msg.id !== "welcome" && (
+                      <div
+                        style={{
+                          ...styles.modelBadge,
+                          marginTop: 2,
+                          opacity: 0.6,
+                        }}
+                      >
+                        <Icon icon="database" size={10} />
+                        Powered by Ontology
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1205,10 +971,11 @@ export default function AIPChat() {
                 <div
                   style={{
                     ...styles.timestamp,
-                    textAlign: msg.role === "user" ? "right" : "left",
+                    textAlign:
+                      msg.role === "user" ? "right" : "left",
                   }}
                 >
-                  {msg.timestamp.toLocaleTimeString("id-ID", {
+                  {msg.timestamp.toLocaleTimeString("en-US", {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}
@@ -1220,7 +987,7 @@ export default function AIPChat() {
             {thinking && (
               <div style={styles.thinkingDots}>
                 <Spinner size={16} intent="primary" />
-                <span>AIP sedang berpikir...</span>
+                <span>AIP is thinking...</span>
               </div>
             )}
           </div>
@@ -1254,7 +1021,7 @@ export default function AIPChat() {
               inputRef={inputRef as any}
               fill
               large
-              placeholder="Tanyakan sesuatu tentang data Anda..."
+              placeholder="Ask something about your data..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
