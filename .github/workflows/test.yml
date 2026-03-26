@@ -1,0 +1,78 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start services in background
+        run: |
+          # Start all backend services (skip frontend for CI)
+          SERVICES=(svc-ontology svc-objects svc-multipass svc-admin svc-actions svc-datasets svc-functions svc-aip svc-gateway)
+          for svc in "${SERVICES[@]}"; do
+            pnpm --filter "@openfoundry/${svc}" run dev > "/tmp/${svc}.log" 2>&1 &
+            echo "Starting ${svc}..."
+          done
+
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for gateway to be ready..."
+          GATEWAY_URL="http://localhost:8080"
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+          until curl -sf "${GATEWAY_URL}/api/v2/ontologies" > /dev/null 2>&1; do
+            ATTEMPT=$((ATTEMPT + 1))
+            if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+              echo "Gateway did not become ready after ${MAX_ATTEMPTS} attempts"
+              echo "--- Service logs ---"
+              for svc in svc-ontology svc-objects svc-multipass svc-admin svc-actions svc-datasets svc-functions svc-aip svc-gateway; do
+                echo "=== ${svc} ==="
+                tail -20 "/tmp/${svc}.log" 2>/dev/null || true
+              done
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "Gateway is ready!"
+
+      - name: Seed test data
+        run: |
+          # Attempt to seed pest-control data if script exists
+          if [ -f scripts/seed-pest-control.sh ]; then
+            bash scripts/seed-pest-control.sh || echo "Seed script had warnings (non-fatal)"
+          fi
+
+      - name: Run integration tests
+        run: npx vitest run tests/integration/ --reporter=verbose
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-logs
+          path: /tmp/svc-*.log
+          retention-days: 7

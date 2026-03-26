@@ -23,3 +23,13 @@ export {
 // Audit
 export { AuditLogger, type AuditEntry } from "./audit-logger.js";
 export { auditHook } from "./audit-hook.js";
+
+// Standalone pg client (singleton pool from DATABASE_URL)
+export {
+  getPool,
+  query as pgQuery,
+  closeSharedPool,
+} from "./pg-client.js";
+
+// Generic JSONB-backed store
+export { PgStore } from "./pg-store.js";

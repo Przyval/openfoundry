@@ -31,9 +31,11 @@ export async function createServer(
   if (options.store) {
     store = options.store;
   } else if (config.databaseUrl) {
+    console.log("Using PostgreSQL storage (DATABASE_URL is set)");
     const pool = createPool({ connectionString: config.databaseUrl });
     store = new PgOntologyStore(pool);
   } else {
+    console.log("Using JSON file storage (DATABASE_URL is not set)");
     store = new OntologyStore();
   }
 
