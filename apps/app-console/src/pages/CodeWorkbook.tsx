@@ -49,16 +49,6 @@ interface OntologyMeta {
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const OBJECT_TYPES = [
-  "ServiceJob",
-  "Customer",
-  "Technician",
-  "TreatmentProduct",
-  "Invoice",
-  "Vehicle",
-  "Schedule",
-];
-
 const CELL_META: Record<CellType, { label: string; icon: IconName; color: string }> = {
   code: { label: "JavaScript", icon: "code", color: Colors.BLUE3 },
   sql: { label: "SQL", icon: "database", color: Colors.GREEN3 },

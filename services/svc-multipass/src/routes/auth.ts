@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { invalidArgument } from "@openfoundry/errors";
 import { createToken, buildTokenInput } from "@openfoundry/auth-tokens";
 import { generateRid } from "@openfoundry/rid";
-import { importPKCS8, importSPKI } from "jose";
+import { importPKCS8, type CryptoKey } from "jose";
 import type { MultipassConfig } from "../config.js";
 
 const scryptAsync = promisify(scrypt);
@@ -19,7 +19,7 @@ async function hashPassword(password: string): Promise<string> {
   return `${salt}:${derived.toString("hex")}`;
 }
 
-async function verifyPassword(password: string, hash: string): Promise<boolean> {
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
   const [salt, key] = hash.split(":");
   if (!salt || !key) return false;
   try {
@@ -146,7 +146,7 @@ export async function authRoutes(
   app.post<{
     Body: { username: string; password: string; email?: string; displayName?: string; orgName?: string };
   }>("/api/v2/auth/signup", async (request, reply) => {
-    const { username, password, email, displayName, orgName } = request.body ?? {};
+    const { username, password, displayName } = request.body ?? {};
 
     if (!username || username.length < 3) {
       throw invalidArgument("username", "must be at least 3 characters");
@@ -167,8 +167,8 @@ export async function authRoutes(
       });
     }
 
-    // Hash the password
-    const passwordHash = await hashPassword(password);
+    // Hash the password (persisted in Phase 2 — see TODO above)
+    await hashPassword(password);
 
     // Create organization for this tenant
     const orgRid = generateRid("multipass", "org").toString();

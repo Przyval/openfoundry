@@ -8,7 +8,7 @@ import {
   type PageToken,
 } from "@openfoundry/pagination";
 import { writeFileSync, readFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Types

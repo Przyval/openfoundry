@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { importPKCS8, importSPKI } from "jose";
+import { importPKCS8, importSPKI, type CryptoKey } from "jose";
 import { createToken, buildTokenInput, validateToken } from "@openfoundry/auth-tokens";
 import { invalidArgument } from "@openfoundry/errors";
 import { generateRid } from "@openfoundry/rid";

@@ -1,6 +1,6 @@
 import { notFound } from "@openfoundry/errors";
 import { writeFileSync, readFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Types

@@ -537,7 +537,7 @@ export default function DataLineage() {
                 <polygon points="0 0, 10 3.5, 0 7" fill="#2B95D6" />
               </marker>
               {/* Column header backgrounds */}
-              {COLUMN_ORDER.map((cat, i) => {
+              {COLUMN_ORDER.map((cat) => {
                 const meta = CATEGORY_META[cat];
                 return (
                   <linearGradient

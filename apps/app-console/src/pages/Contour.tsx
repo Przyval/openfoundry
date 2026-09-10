@@ -34,11 +34,6 @@ interface OntologyMeta {
   displayName: string;
 }
 
-interface AggBucket {
-  group: Record<string, any>;
-  metrics: { name: string; value: number }[];
-}
-
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
@@ -179,32 +174,6 @@ async function loadObjects(
     if (!res.ok) return [];
     const body = await res.json();
     return (body?.data ?? []).map((o: any) => o.properties ?? o);
-  } catch {
-    return [];
-  }
-}
-
-async function aggregateObjects(
-  ontologyRid: string,
-  objectType: string,
-  groupByField: string,
-): Promise<AggBucket[]> {
-  try {
-    const res = await fetch(
-      `${API_BASE_URL}/api/v2/ontologies/${ontologyRid}/objectSets/aggregate`,
-      {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({
-          objectSet: { type: "base", objectType },
-          groupBy: [{ field: groupByField, type: "exact" }],
-          aggregation: [{ type: "count" }],
-        }),
-      },
-    );
-    if (!res.ok) return [];
-    const body = await res.json();
-    return body?.data ?? [];
   } catch {
     return [];
   }

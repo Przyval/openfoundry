@@ -8,7 +8,7 @@ import type {
 import { generateRid } from "@openfoundry/rid";
 import { notFound, conflict } from "@openfoundry/errors";
 import { writeFileSync, readFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Stored ontology shape
