@@ -395,6 +395,10 @@ Filters: Action [All ▼]  User [All ▼]  From [____]  To [____]
 │ 10:03:00 │ admin │ EXECUTE│ complete-job │ ri.actions.main..│
 ```
 
+Audit trail hanya terisi kalau services jalan dengan `DATABASE_URL`.
+Tanpa database (mode demo default `bash start.sh`) tidak ada yang menulis entry, dan halaman ini
+menampilkan "Audit log unavailable" alih-alih tabel kosong yang menyesatkan.
+
 ---
 
 ## AIP Chat (AI Assistant)
@@ -541,6 +545,8 @@ GET  /api/v2/ontologies                          List semua ontology
 GET  /api/v2/ontologies/:rid                     Detail ontology
 GET  /api/v2/ontologies/:rid/objectTypes          List object types
 GET  /api/v2/ontologies/:rid/objectTypes/:name    Detail object type
+GET  /api/v2/ontologies/:rid/objectTypes/:name/outgoingLinkTypes
+                                                  Link types keluar dari object type
 GET  /api/v2/ontologies/:rid/linkTypes            List link types
 GET  /api/v2/ontologies/:rid/actionTypes          List action types
 ```
@@ -591,7 +597,10 @@ POST /api/v2/admin/users              Create user
 PUT  /api/v2/admin/users/:id          Update user
 GET  /api/v2/admin/groups             List groups
 POST /api/v2/admin/groups             Create group
-GET  /api/v2/admin/audit              Audit log (filtered)
+GET  /api/v2/admin/groups/:id/groupMembers        List member group
+POST /api/v2/admin/groups/:id/groupMembers/add    Tambah member (principalIds)
+POST /api/v2/admin/groups/:id/groupMembers/remove Hapus member (principalIds)
+GET  /api/v2/admin/audit              Audit log (filtered, butuh DATABASE_URL)
 ```
 
 ### Health & Monitoring
