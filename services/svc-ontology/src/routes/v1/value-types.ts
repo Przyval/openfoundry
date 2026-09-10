@@ -60,10 +60,24 @@ function structValueType(def: PropertyDef): string {
   return `Struct<{${fields ? ` ${fields} ` : ""}}>`;
 }
 
+/**
+ * The stored property type, upper-cased.
+ *
+ * The v2 create route stores a property declaration verbatim, so a type
+ * arrives however the caller spelled it - the demo seeders send lowercase
+ * `"string"`. Matching case-insensitively is what keeps those properties from
+ * falling through the table and being served under their raw spelling instead
+ * of a v1 `ValueType`.
+ */
+function propertyTypeTag(def: PropertyDef): string {
+  return typeof def.type === "string" ? def.type.toUpperCase() : def.type;
+}
+
 function singularValueType(def: PropertyDef): string {
-  if (def.type === "TIMESERIES") return timeseriesValueType(def);
-  if (def.type === "STRUCT") return structValueType(def);
-  return VALUE_TYPE_BY_PROPERTY_TYPE[def.type] ?? def.type;
+  const type = propertyTypeTag(def);
+  if (type === "TIMESERIES") return timeseriesValueType(def);
+  if (type === "STRUCT") return structValueType(def);
+  return VALUE_TYPE_BY_PROPERTY_TYPE[type] ?? def.type;
 }
 
 /**
@@ -76,7 +90,11 @@ function singularValueType(def: PropertyDef): string {
  */
 export function toV1ValueType(def: PropertyDef): string {
   const singular = singularValueType(def);
-  return def.multiplicity === "ARRAY" || def.multiplicity === "SET"
+  const multiplicity =
+    typeof def.multiplicity === "string"
+      ? def.multiplicity.toUpperCase()
+      : def.multiplicity;
+  return multiplicity === "ARRAY" || multiplicity === "SET"
     ? `Array<${singular}>`
     : singular;
 }

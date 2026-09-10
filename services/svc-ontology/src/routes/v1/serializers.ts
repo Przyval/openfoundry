@@ -8,6 +8,7 @@
  * projected here instead of aliased onto whatever v2 happens to emit.
  */
 
+import { customServer, safeArg } from "@openfoundry/errors";
 import type {
   ActionTypeDefinition,
   LinkTypeDefinition,
@@ -113,10 +114,38 @@ function toV1Property(def: PropertyDef): V1Property {
 }
 
 /**
+ * The primary key property name of a stored object type, under either spelling.
+ *
+ * The v2 create route stores the request body verbatim, so an object type
+ * created over HTTP - which is every object type the demo seeders produce -
+ * carries `primaryKey` where the typed `ObjectTypeDefinition` declares
+ * `primaryKeyApiName`. Both are read here; an object type carrying neither has
+ * no valid v1 representation, since v1 `ObjectType.primaryKey` is required, and
+ * inventing a key would publish a wrong answer instead of a known failure.
+ */
+function primaryKeyApiNameOf(def: ObjectTypeDefinition): string {
+  const stored = def.primaryKeyApiName ?? (def as { primaryKey?: unknown }).primaryKey;
+  if (typeof stored !== "string" || stored === "") {
+    throw customServer(
+      500,
+      "ObjectTypeNotRepresentableInV1",
+      `The object type \`${def.apiName}\` declares no primary key, and v1 \`ObjectType.primaryKey\` is required.`,
+      [safeArg("objectType", def.apiName)],
+    );
+  }
+  return stored;
+}
+
+/**
  * `primaryKey` is a list in v1 because Foundry allows a composite key there.
- * OpenFoundry object types declare a single `primaryKeyApiName`, so the list
+ * OpenFoundry object types declare a single primary key property, so the list
  * always holds one entry - which is a conformant composite key of length one,
  * not a truncation.
+ *
+ * An object type stored without a `status` is served as `ACTIVE`, which is not
+ * an invented value: `object_types.status` is `TEXT NOT NULL DEFAULT 'ACTIVE'`
+ * in both `scripts/migrate.sql` and `db/migrations/003_phase1_tables.sql`, so
+ * that is exactly what the same input carries in Postgres mode.
  *
  * `legacyObjectTypeId` and `visibility` are optional and nothing in the store
  * records them, so they are omitted rather than defaulted.
@@ -128,9 +157,9 @@ export function toV1ObjectType(
   return {
     apiName: def.apiName,
     ...(def.displayName !== undefined ? { displayName: def.displayName } : {}),
-    status: def.status,
+    status: def.status ?? "ACTIVE",
     ...(def.description !== "" ? { description: def.description } : {}),
-    primaryKey: [def.primaryKeyApiName],
+    primaryKey: [primaryKeyApiNameOf(def)],
     properties: Object.fromEntries(
       Object.entries(def.properties ?? {}).map(([name, property]) => [
         name,

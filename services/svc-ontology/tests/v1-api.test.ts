@@ -303,3 +303,86 @@ describe("v1 value types without a declared multiplicity", () => {
     expect(res.json().properties.lineItems.baseType).toBe("Array<String>");
   });
 });
+
+/**
+ * The demo seeders (`scripts/demo/seed-*.sh`) are the only producer of object
+ * types an end user actually has, and they POST through the v2 create route,
+ * which stores the request body verbatim. That body spells the key
+ * `primaryKey`, carries no `status`, and gives each property a lowercase
+ * `type` - none of which is the typed `ObjectTypeDefinition` the other tests in
+ * this file construct. These tests build object types the way the seeders do
+ * and read them back through v1.
+ */
+describe("v1 object types created through the v2 route, seeder-style", () => {
+  /** Verbatim shape of a `scripts/demo/seed-pest-control.sh` object type. */
+  const SEEDED_TECHNICIAN = {
+    apiName: "Technician",
+    displayName: "Technician",
+    description: "Pest control technician",
+    primaryKey: "technicianId",
+    properties: {
+      technicianId: { type: "string", description: "ID" },
+      name: { type: "string", description: "Name" },
+      activeJobCount: { type: "integer", description: "Active jobs" },
+    },
+  };
+
+  beforeEach(async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes`,
+      payload: SEEDED_TECHNICIAN,
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("serves the stored primary key, a status and PascalCase base types", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/ontologies/${ontologyRid}/objectTypes/Technician`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.primaryKey).toEqual(["technicianId"]);
+    expect(body.status).toBe("ACTIVE");
+    expect(body.properties.technicianId.baseType).toBe("String");
+    expect(body.properties.activeJobCount.baseType).toBe("Integer");
+  });
+
+  it("serves the same fields from the list route", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/ontologies/${ontologyRid}/objectTypes`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const technician = res
+      .json()
+      .data.find((ot: { apiName: string }) => ot.apiName === "Technician");
+    expect(technician.primaryKey).toEqual(["technicianId"]);
+    expect(technician.status).toBe("ACTIVE");
+    expect(technician.properties.name.baseType).toBe("String");
+  });
+
+  it("refuses to serve an object type that declares no primary key at all", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes`,
+      payload: {
+        apiName: "Keyless",
+        displayName: "Keyless",
+        properties: { id: { type: "string" } },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/ontologies/${ontologyRid}/objectTypes/Keyless`,
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json().errorName).toBe("ObjectTypeNotRepresentableInV1");
+  });
+});
