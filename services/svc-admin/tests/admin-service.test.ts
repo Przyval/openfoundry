@@ -899,6 +899,71 @@ describe("Group members", () => {
     expect(res.json().errorName).toBe("ValidationError");
   });
 
+  it("POST groupMembers/remove removes nobody when one principal is not a member", async () => {
+    const secondRes = await app.inject({
+      method: "POST",
+      url: "/api/v2/admin/users",
+      payload: {
+        username: "gm-user-3",
+        email: "gm3@test.com",
+        displayName: "Group Member 3",
+      },
+    });
+    const nonMemberRid = secondRes.json().rid;
+
+    await app.inject({
+      method: "POST",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers/add`,
+      payload: { principalIds: [userRid] },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers/remove`,
+      payload: { principalIds: [userRid, nonMemberRid] },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("GroupMemberNotFound");
+
+    // The rejected batch must leave the group untouched, so a corrected
+    // retry is still meaningful.
+    const listRes = await app.inject({
+      method: "GET",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers`,
+    });
+    expect(
+      listRes.json().data.map((m: { principalId: string }) => m.principalId),
+    ).toEqual([userRid]);
+
+    const retry = await app.inject({
+      method: "POST",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers/remove`,
+      payload: { principalIds: [userRid] },
+    });
+    expect(retry.statusCode).toBe(204);
+  });
+
+  it("POST groupMembers/remove tolerates the same principal twice in one payload", async () => {
+    await app.inject({
+      method: "POST",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers/add`,
+      payload: { principalIds: [userRid] },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers/remove`,
+      payload: { principalIds: [userRid, userRid] },
+    });
+    expect(res.statusCode).toBe(204);
+
+    const listRes = await app.inject({
+      method: "GET",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers`,
+    });
+    expect(listRes.json().data).toEqual([]);
+  });
+
   it("POST groupMembers/remove returns GroupNotFound for an unknown group", async () => {
     const res = await app.inject({
       method: "POST",

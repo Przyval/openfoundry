@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { GroupStore, StoredGroup } from "../../store/group-store.js";
 import type { UserStore } from "../../store/user-store.js";
+import { notFound } from "@openfoundry/errors";
 import { requirePermission } from "@openfoundry/permissions";
 import { paginateArray } from "./pagination-helpers.js";
 
@@ -194,8 +195,15 @@ export async function groupRoutes(
   }, async (request, reply) => {
     const { groupRid } = request.params;
 
-    await groupStore.getMembers(groupRid);
-    for (const principalId of request.body.principalIds) {
+    const members = new Set(await groupStore.getMembers(groupRid));
+    const principalIds = new Set(request.body.principalIds);
+    for (const principalId of principalIds) {
+      if (!members.has(principalId)) {
+        throw notFound("GroupMember", principalId);
+      }
+    }
+
+    for (const principalId of principalIds) {
       await groupStore.removeMember(groupRid, principalId);
     }
     reply.status(204);
