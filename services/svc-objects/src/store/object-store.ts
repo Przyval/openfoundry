@@ -281,6 +281,22 @@ export class ObjectStore {
     return obj;
   }
 
+  upsertObject(
+    objectType: string,
+    primaryKey: string,
+    properties: Record<string, unknown>,
+  ): StoredObject {
+    const typeMap = this.getTypeMap(objectType);
+    const existing = typeMap.get(primaryKey);
+    if (existing) {
+      existing.properties = { ...existing.properties, ...properties };
+      existing.updatedAt = new Date().toISOString();
+      this.saveToDisk();
+      return existing;
+    }
+    return this.createObject(objectType, primaryKey, properties);
+  }
+
   getObject(objectType: string, primaryKey: string): StoredObject {
     const typeMap = this.objects.get(objectType);
     const obj = typeMap?.get(primaryKey);

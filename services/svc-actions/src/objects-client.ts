@@ -52,6 +52,7 @@ export class ObjectsClient {
     const init: RequestInit = {
       method,
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(10_000),
     };
     if (body !== undefined) {
       init.body = JSON.stringify(body);

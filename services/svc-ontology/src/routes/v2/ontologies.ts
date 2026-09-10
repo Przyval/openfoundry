@@ -26,7 +26,9 @@ export async function ontologyRoutes(
   }>("/ontologies", {
     preHandler: requirePermission("ontology:read"),
   }, async (request) => {
-    const all = store.listOntologies().map(serializeOntology);
+    const raw = await store.listOntologies();
+    const list: StoredOntology[] = Array.isArray(raw) ? raw : (raw as { items: StoredOntology[] }).items ?? raw as unknown as StoredOntology[];
+    const all = list.map(serializeOntology);
     return paginateArray(all, request.query);
   });
 
@@ -36,7 +38,7 @@ export async function ontologyRoutes(
   }>("/ontologies", {
     preHandler: requirePermission("ontology:write"),
   }, async (request, reply) => {
-    const ontology = store.createOntology(request.body);
+    const ontology = await store.createOntology(request.body);
     reply.status(201);
     return serializeOntology(ontology);
   });
@@ -51,11 +53,13 @@ export async function ontologyRoutes(
 
     // If it doesn't look like a RID, search by apiName
     if (!param.startsWith("ri.")) {
-      const match = store.listOntologies().find((o) => o.apiName === param);
+      const rawList = await store.listOntologies();
+      const list: StoredOntology[] = Array.isArray(rawList) ? rawList : (rawList as { items: StoredOntology[] }).items ?? rawList as unknown as StoredOntology[];
+      const match = list.find((o) => o.apiName === param);
       if (match) return serializeOntology(match);
     }
 
-    const ontology = store.getOntology(param);
+    const ontology = await store.getOntology(param);
     return serializeOntology(ontology);
   });
 
@@ -66,13 +70,19 @@ export async function ontologyRoutes(
     preHandler: requirePermission("ontology:read"),
   }, async (request) => {
     const rid = request.params.ontologyRid;
-    const ontology = store.getOntology(rid);
+    const [ontology, objectTypes, actionTypes, linkTypes, interfaceTypes] = await Promise.all([
+      store.getOntology(rid),
+      Promise.resolve(store.listObjectTypes(rid)),
+      Promise.resolve(store.listActionTypes(rid)),
+      Promise.resolve(store.listLinkTypes(rid)),
+      Promise.resolve(store.listInterfaceTypes(rid)),
+    ]);
     return {
       ...serializeOntology(ontology),
-      objectTypes: store.listObjectTypes(rid),
-      actionTypes: store.listActionTypes(rid),
-      linkTypes: store.listLinkTypes(rid),
-      interfaceTypes: store.listInterfaceTypes(rid),
+      objectTypes,
+      actionTypes,
+      linkTypes,
+      interfaceTypes,
     };
   });
 

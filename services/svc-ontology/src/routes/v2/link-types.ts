@@ -21,7 +21,8 @@ export async function linkTypeRoutes(
       preHandler: requirePermission("ontology:read"),
     },
     async (request) => {
-      const all = store.listLinkTypes(request.params.ontologyRid);
+      const raw = await store.listLinkTypes(request.params.ontologyRid);
+    const all = Array.isArray(raw) ? raw : (raw as { items: unknown[] }).items ?? [];
       return paginateArray(all, request.query);
     },
   );
@@ -36,7 +37,7 @@ export async function linkTypeRoutes(
       preHandler: requirePermission("ontology:read"),
     },
     async (request) => {
-      const all = store.listLinkTypesForObjectType(
+      const all = await store.listLinkTypesForObjectType(
         request.params.ontologyRid,
         request.params.objectTypeApiName,
       );
@@ -51,7 +52,7 @@ export async function linkTypeRoutes(
   }>("/ontologies/:ontologyRid/linkTypes", {
     preHandler: requirePermission("ontology:write"),
   }, async (request, reply) => {
-    const linkType = store.createLinkType(
+    const linkType = await store.createLinkType(
       request.params.ontologyRid,
       request.body,
     );
@@ -68,7 +69,7 @@ export async function linkTypeRoutes(
       preHandler: requirePermission("ontology:read"),
     },
     async (request) => {
-      return store.getLinkType(
+      return await store.getLinkType(
         request.params.ontologyRid,
         request.params.linkTypeApiName,
       );
