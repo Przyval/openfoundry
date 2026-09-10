@@ -36,3 +36,22 @@ export function intentForAction(action: string): AuditActionIntent {
       return "none";
   }
 }
+
+/** What an empty audit log means, which depends on whether it is available. */
+export function describeEmptyAuditLog(available: boolean): {
+  title: string;
+  description: string;
+} {
+  return available
+    ? {
+        title: "No audit entries",
+        description:
+          "Audit log entries will appear here as actions are performed.",
+      }
+    : {
+        title: "Audit log unavailable",
+        description:
+          "This deployment runs without a database, so no audit trail is recorded. " +
+          "Set DATABASE_URL and restart the services to collect and read audit entries.",
+      };
+}

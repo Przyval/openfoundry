@@ -935,6 +935,7 @@ describe("Group members", () => {
 
 /** Audit store that records the queries it receives and serves fixed rows. */
 class RecordingAuditStore implements AuditStore {
+  readonly available = true;
   readonly calls: AuditQuery[] = [];
 
   constructor(private readonly entries: AuditLogEntry[]) {}
@@ -958,13 +959,31 @@ function auditEntry(id: number): AuditLogEntry {
 }
 
 describe("Audit log", () => {
-  it("returns an empty page when the service has no database", async () => {
+  it("reports the trail as unavailable when the service has no database", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/v2/admin/audit",
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ data: [] });
+    expect(res.json()).toEqual({ data: [], available: false });
+  });
+
+  it("reports an empty trail as available when a store can hold entries", async () => {
+    const auditApp = await createServer({
+      config: TEST_CONFIG,
+      userStore: new UserStore(false),
+      groupStore: new GroupStore(),
+      auditStore: new RecordingAuditStore([]),
+    });
+
+    const res = await auditApp.inject({
+      method: "GET",
+      url: "/api/v2/admin/audit",
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ data: [], available: true });
+
+    await auditApp.close();
   });
 
   it("rejects a non-numeric pageSize with 400 rather than failing downstream", async () => {

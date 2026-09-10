@@ -51,6 +51,8 @@ function escapeLikePattern(value: string): string {
  * store never inserts.  Uses parameterised queries exclusively.
  */
 export class PgAuditStore implements AuditStore {
+  readonly available = true;
+
   constructor(private pool: pg.Pool) {}
 
   async listEntries(query: AuditQuery): Promise<AuditLogEntry[]> {

@@ -12,7 +12,7 @@ import {
 } from "@blueprintjs/core";
 import PageHeader from "../components/PageHeader";
 import { useApi } from "../hooks/useApi";
-import { intentForAction } from "../lib/auditAction";
+import { describeEmptyAuditLog, intentForAction } from "../lib/auditAction";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -31,6 +31,8 @@ interface AuditEntry {
 interface AuditLogResponse {
   data: AuditEntry[];
   nextPageToken?: string;
+  /** False when the service runs without a database and records nothing. */
+  available?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -61,6 +63,7 @@ export default function AuditLog() {
   );
 
   const entries = data?.data ?? [];
+  const emptyState = describeEmptyAuditLog(data?.available !== false);
 
   const handlePrevious = useCallback(() => {
     setPageTokens((tokens) => tokens.slice(0, -1));
@@ -159,8 +162,8 @@ export default function AuditLog() {
       ) : entries.length === 0 ? (
         <NonIdealState
           icon="document"
-          title="No audit entries"
-          description="Audit log entries will appear here as actions are performed."
+          title={emptyState.title}
+          description={emptyState.description}
         />
       ) : (
         <>

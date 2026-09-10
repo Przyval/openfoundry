@@ -28,15 +28,19 @@ Because turbo runs `build` as a dependency of the other tasks, one such gap fail
 
 ## Tests
 
-`pnpm run test` (turbo `test`) is green (96/96).
+`pnpm run test` (turbo `test`) is green (97/97).
 A package running `vitest run` inherits the root `vitest.config.ts`, whose `include` globs are
 resolved against the run's root - the package directory, not the repo root.
 Keep those globs relative (`**/tests/**/*.test.ts`); a root-anchored `packages/**` glob matches
 nothing per package and every package then dies on "No test files found".
 
 Read that message carefully before acting on it: here it meant the glob missed, not that tests were absent.
-46 of the 47 packages declaring a `test` script do contain test files; only `@openfoundry/app-workshop` has none.
+47 of the 48 packages declaring a `test` script do contain test files; only `@openfoundry/app-workshop` has none.
 Reaching for `--passWithNoTests` would have turned the job green while suppressing a monorepo of suites that were never running.
+
+`apps/app-console` is the exception to that glob note: it has no `vitest.config.ts`, so its `vitest run`
+resolves `apps/app-console/vite.config.ts`, which declares no `test` block, and vitest falls back to its
+own default include globs rather than the root config's `**/tests/**` + `**/src/**`.
 
 Integration tests are `pnpm run test:integration` (config in `tests/vitest.config.ts`).
 Most files start their own in-process server; `api-endpoints` and `sdk-compat` need a real gateway on `localhost:8080` via `bash start.sh`, which needs Docker Postgres.

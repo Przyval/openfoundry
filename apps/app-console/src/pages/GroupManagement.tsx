@@ -80,11 +80,26 @@ export default function GroupManagement() {
           minimal
           icon="people"
           text="Members"
-          onClick={() => setMembersGroupId(r.id)}
+          onClick={() => {
+            setMemberError(null);
+            setAddMemberId("");
+            setMembersGroupId(r.id);
+          }}
         />
       ),
     },
   ];
+
+  const closeCreate = useCallback(() => {
+    setCreateOpen(false);
+    setCreateError(null);
+  }, []);
+
+  const closeMembers = useCallback(() => {
+    setMembersGroupId(null);
+    setMemberError(null);
+    setAddMemberId("");
+  }, []);
 
   const handleCreate = useCallback(async () => {
     setCreating(true);
@@ -170,7 +185,10 @@ export default function GroupManagement() {
             icon="add"
             intent={Intent.PRIMARY}
             text="Create Group"
-            onClick={() => setCreateOpen(true)}
+            onClick={() => {
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
           />
         }
       />
@@ -193,7 +211,7 @@ export default function GroupManagement() {
       {/* Create Group Dialog */}
       <Dialog
         isOpen={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={closeCreate}
         title="Create Group"
       >
         <DialogBody>
@@ -224,7 +242,7 @@ export default function GroupManagement() {
         <DialogFooter
           actions={
             <>
-              <Button text="Cancel" onClick={() => setCreateOpen(false)} />
+              <Button text="Cancel" onClick={closeCreate} />
               <Button
                 intent={Intent.PRIMARY}
                 text="Create"
@@ -240,7 +258,7 @@ export default function GroupManagement() {
       {/* Member Management Dialog */}
       <Dialog
         isOpen={!!membersGroupId}
-        onClose={() => setMembersGroupId(null)}
+        onClose={closeMembers}
         title="Group Members"
         style={{ width: 550 }}
       >
@@ -311,7 +329,7 @@ export default function GroupManagement() {
         </DialogBody>
         <DialogFooter
           actions={
-            <Button text="Close" onClick={() => setMembersGroupId(null)} />
+            <Button text="Close" onClick={closeMembers} />
           }
         />
       </Dialog>

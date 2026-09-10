@@ -37,6 +37,14 @@ export interface AuditQuery {
  */
 export interface AuditStore {
   /**
+   * Whether this deployment can hold audit entries at all.
+   *
+   * False without a database: nothing writes entries in that mode, so an
+   * empty result means the trail is unavailable rather than uneventful.
+   */
+  readonly available: boolean;
+
+  /**
    * Return entries newest first, applying `query`'s filters.
    *
    * Implementations should return up to `limit` rows; the caller asks for one
@@ -53,10 +61,12 @@ export interface AuditStore {
  * Audit store used when the service runs without a database.
  *
  * Nothing writes audit entries in that mode (`writeAuditLog` needs a pool),
- * so this store is empty by construction and the Audit Log screen honestly
- * reports that there is nothing to show.
+ * so this store is empty by construction and reports itself unavailable, which
+ * is what lets the Audit Log screen say why it has nothing to show.
  */
 export class MemoryAuditStore implements AuditStore {
+  readonly available = false;
+
   async listEntries(): Promise<AuditLogEntry[]> {
     return [];
   }

@@ -65,6 +65,9 @@ export async function auditRoutes(
       limit: req.pageSize + 1,
     });
 
-    return createPageResponse(entries, cursor, req.pageSize);
+    return {
+      ...createPageResponse(entries, cursor, req.pageSize),
+      available: auditStore.available,
+    };
   });
 }
