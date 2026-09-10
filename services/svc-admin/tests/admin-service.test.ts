@@ -760,6 +760,84 @@ describe("Group members", () => {
     expect(res.json().errorName).toBe("UserNotFound");
   });
 
+  it("POST groupMembers/add is idempotent for a principal already in the group", async () => {
+    const first = await app.inject({
+      method: "POST",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers/add`,
+      payload: { principalIds: [userRid] },
+    });
+    expect(first.statusCode).toBe(204);
+
+    const second = await app.inject({
+      method: "POST",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers/add`,
+      payload: { principalIds: [userRid] },
+    });
+    expect(second.statusCode).toBe(204);
+
+    const listRes = await app.inject({
+      method: "GET",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers`,
+    });
+    expect(
+      listRes.json().data.map((m: { principalId: string }) => m.principalId),
+    ).toEqual([userRid]);
+  });
+
+  it("POST groupMembers/add tolerates the same principal twice in one payload", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers/add`,
+      payload: { principalIds: [userRid, userRid] },
+    });
+    expect(res.statusCode).toBe(204);
+
+    const listRes = await app.inject({
+      method: "GET",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers`,
+    });
+    expect(
+      listRes.json().data.map((m: { principalId: string }) => m.principalId),
+    ).toEqual([userRid]);
+  });
+
+  it("POST groupMembers/add adds nobody when one principal is unknown", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers/add`,
+      payload: { principalIds: [userRid, "ri.multipass.main.user.nope"] },
+    });
+    expect(res.statusCode).toBe(404);
+
+    const listRes = await app.inject({
+      method: "GET",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers`,
+    });
+    expect(listRes.json().data).toEqual([]);
+  });
+
+  it("POST groupMembers/add rejects a malformed body with 400", async () => {
+    for (const payload of [{}, { principalIds: null }, { principalIds: [""] }]) {
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/v2/admin/groups/${groupRid}/groupMembers/add`,
+        payload,
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().errorName).toBe("ValidationError");
+    }
+  });
+
+  it("POST groupMembers/remove rejects a malformed body with 400", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers/remove`,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorName).toBe("ValidationError");
+  });
+
   it("POST groupMembers/remove returns 404 for a non-member", async () => {
     const res = await app.inject({
       method: "POST",
@@ -946,6 +1024,7 @@ describe("PgAuditStore", () => {
     expect(captured.values).toEqual([
       "CREATE",
       "alice",
+      "%alice%",
       "2026-09-01",
       "2026-09-30",
       11,
@@ -958,6 +1037,30 @@ describe("PgAuditStore", () => {
     expect(captured.text).toContain("INTERVAL '1 day'");
     // No filter value may ever be interpolated into the SQL text.
     expect(captured.text).not.toContain("alice");
+  });
+
+  it("matches the user filter against the RID as well as the principal's names", async () => {
+    const { pool, captured } = fakePool();
+    const store = new PgAuditStore(pool as unknown as pg.Pool);
+
+    await store.listEntries({ user: "Admin", offset: 0, limit: 11 });
+
+    // The value is bound twice: once whole, once as a contains-pattern.
+    expect(captured.values).toEqual(["Admin", "%Admin%", 11, 0]);
+    expect(captured.text).not.toContain("Admin");
+    // Neither the RID nor the name match may be case-sensitive.
+    expect(captured.text).toContain("LOWER(user_rid) = LOWER($1)");
+    expect(captured.text).toContain("user_rid ILIKE $2");
+    expect(captured.text).toContain("username ILIKE $2");
+  });
+
+  it("escapes LIKE wildcards in the user filter", async () => {
+    const { pool, captured } = fakePool();
+    const store = new PgAuditStore(pool as unknown as pg.Pool);
+
+    await store.listEntries({ user: "100%_x", offset: 0, limit: 11 });
+
+    expect(captured.values?.[1]).toBe("%100\\%\\_x%");
   });
 
   it("maps a row onto the console's audit entry shape", async () => {

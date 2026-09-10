@@ -19,6 +19,18 @@ function serializeGroup(g: StoredGroup) {
   };
 }
 
+/** Body of Foundry's `groupMembers` add / remove actions. */
+const principalIdsBody = {
+  type: "object",
+  required: ["principalIds"],
+  properties: {
+    principalIds: {
+      type: "array",
+      items: { type: "string", minLength: 1 },
+    },
+  },
+} as const;
+
 export async function groupRoutes(
   app: FastifyInstance,
   opts: { groupStore: GroupStore; userStore: UserStore },
@@ -143,16 +155,29 @@ export async function groupRoutes(
   });
 
   // Add group members.
+  //
+  // Foundry's GroupMember add is idempotent: a principal that is already a
+  // member is left alone rather than failing the call.
   app.post<{
     Params: { groupRid: string };
     Body: { principalIds: string[] };
   }>("/admin/groups/:groupRid/groupMembers/add", {
     preHandler: requirePermission("admin:manage"),
+    schema: { body: principalIdsBody },
   }, async (request, reply) => {
+    const { groupRid } = request.params;
+
+    // Resolving the current members validates the group, and every principal
+    // is validated before any of them is added.
+    const members = new Set(await groupStore.getMembers(groupRid));
     for (const principalId of request.body.principalIds) {
-      // Verify the principal exists before adding it
-      userStore.getUser(principalId);
-      await groupStore.addMember(request.params.groupRid, principalId);
+      await userStore.getUser(principalId);
+    }
+
+    for (const principalId of request.body.principalIds) {
+      if (members.has(principalId)) continue;
+      await groupStore.addMember(groupRid, principalId);
+      members.add(principalId);
     }
     reply.status(204);
     return;
@@ -164,6 +189,7 @@ export async function groupRoutes(
     Body: { principalIds: string[] };
   }>("/admin/groups/:groupRid/groupMembers/remove", {
     preHandler: requirePermission("admin:manage"),
+    schema: { body: principalIdsBody },
   }, async (request, reply) => {
     for (const principalId of request.body.principalIds) {
       await groupStore.removeMember(request.params.groupRid, principalId);

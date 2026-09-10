@@ -7,10 +7,10 @@ import {
   NonIdealState,
   Spinner,
   Tag,
-  Intent,
 } from "@blueprintjs/core";
 import PageHeader from "../components/PageHeader";
 import { useApi } from "../hooks/useApi";
+import { intentForAction } from "../lib/auditAction";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -29,27 +29,6 @@ interface AuditEntry {
 interface AuditLogResponse {
   data: AuditEntry[];
   nextPageToken?: string;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Action tag coloring                                                 */
-/* ------------------------------------------------------------------ */
-
-function intentForAction(action: string): Intent {
-  switch (action) {
-    case "CREATE":
-      return Intent.SUCCESS;
-    case "UPDATE":
-      return Intent.PRIMARY;
-    case "DELETE":
-      return Intent.DANGER;
-    case "EXECUTE":
-      return Intent.WARNING;
-    case "LOGIN":
-      return Intent.NONE;
-    default:
-      return Intent.NONE;
-  }
 }
 
 /* ------------------------------------------------------------------ */

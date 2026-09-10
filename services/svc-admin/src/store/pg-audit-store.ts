@@ -30,6 +30,16 @@ function rowToEntry(row: AuditRow): AuditLogEntry {
   };
 }
 
+/**
+ * Neutralise LIKE metacharacters so a filter value is matched literally.
+ *
+ * The result is bound as a parameter; only the wildcards inside it are
+ * escaped, using LIKE's default `\` escape character.
+ */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
 // ---------------------------------------------------------------------------
 // PgAuditStore
 // ---------------------------------------------------------------------------
@@ -59,7 +69,20 @@ export class PgAuditStore implements AuditStore {
 
     if (query.user) {
       values.push(query.user);
-      conditions.push(`user_rid = $${values.length}`);
+      const exact = `$${values.length}`;
+      values.push(`%${escapeLikePattern(query.user)}%`);
+      const partial = `$${values.length}`;
+      // The console renders raw RIDs but its filter is a free-text box, so a
+      // person types either part of a RID or the name they know the principal
+      // by; match the whole RID, part of it, or the principal's own names.
+      conditions.push(
+        `(LOWER(user_rid) = LOWER(${exact})` +
+          ` OR user_rid ILIKE ${partial}` +
+          ` OR user_rid IN (SELECT rid FROM users` +
+          ` WHERE username ILIKE ${partial}` +
+          ` OR display_name ILIKE ${partial}` +
+          ` OR email ILIKE ${partial}))`,
+      );
     }
 
     if (query.dateFrom) {

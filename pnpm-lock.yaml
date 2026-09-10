@@ -82,6 +82,9 @@ importers:
       vite:
         specifier: ^6.0.0
         version: 6.4.1(@types/node@20.19.37)(tsx@4.21.0)(yaml@2.8.2)
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.4(@types/node@20.19.37)(tsx@4.21.0)(yaml@2.8.2)
 
   apps/app-docs:
     dependencies:
