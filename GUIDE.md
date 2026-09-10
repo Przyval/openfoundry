@@ -10,7 +10,7 @@
 1. [Quick Start](#quick-start)
 2. [Login & Autentikasi](#login--autentikasi)
 3. [Dashboard Utama](#dashboard-utama)
-4. [Dashboard Pest Control](#dashboard-pest-control)
+4. [Dashboard Sanocare (Live)](#dashboard-sanocare-live)
 5. [Navigasi & Menu](#navigasi--menu)
 6. [Fitur Data](#fitur-data)
 7. [Fitur Build](#fitur-build)
@@ -64,11 +64,17 @@ User lain yang tersedia di dev mode:
 Dev users di-disable otomatis. Buat admin pertama:
 
 ```bash
-bash scripts/bootstrap-admin.sh \
+# Signup TERTUTUP secara default. Nyalakan sementara, lalu matikan lagi.
+OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1 bash scripts/bootstrap-admin.sh \
   --username admin \
   --password <password-aman> \
   --org "Nama Perusahaan"
 ```
+
+`bootstrap-admin.sh` memakai `POST /api/v2/auth/signup`, dan endpoint itu menolak dengan 403
+selama `OPENFOUNDRY_ALLOW_OPEN_SIGNUP` belum diset di svc-multipass **dan** gateway.
+Selama switch itu menyala, siapa pun yang bisa menjangkau gateway dapat menerbitkan token API
+yang sah, jadi matikan lagi begitu admin pertama jadi.
 
 ### OAuth2 PKCE (untuk integrasi SDK)
 ```bash
@@ -110,46 +116,31 @@ curl -X POST http://localhost:8080/multipass/api/oauth2/token \
 
 ---
 
-## Dashboard Pest Control
+## Dashboard Sanocare (Live)
 
-**URL:** http://localhost:3000/pest-control
+**URL:** http://localhost:3000/sanocare
 
-Dashboard operasional harian untuk bisnis pest control. **Ini yang client buka setiap pagi jam 8.**
+Dashboard operasional harian yang membaca data Safe and Care (Kelava ERP) yang sudah disinkronkan ke ontologi.
+**Ini yang client buka setiap pagi jam 8.**
+Halaman ini menggantikan dashboard pest control lama, yang memakai data demo, bukan data nyata.
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│            🏠 Pest Control Operations Dashboard               │
-├──────────────────────────┬───────────────────────────────────┤
-│  Customers (8)           │  Technicians (5)                  │
-│  ┌──────────────────┐    │  ┌────────────────────────────┐   │
-│  │ PT Maju Jaya Food│    │  │ Agus  ★★★★☆  Termite     │   │
-│  │ Hotel Grand Merc.│    │  │ Dedi  ★★★★★  General     │   │
-│  │ Budi Hartono     │    │  │ Rizky ★★★☆☆  Fumigation  │   │
-│  │ Restoran Padang  │    │  │ Wahyu ★★★★☆  Rodent      │   │
-│  │ ...              │    │  │ Fajar ★★★★☆  Mosquito    │   │
-│  └──────────────────┘    │  └────────────────────────────┘   │
-├──────────────────────────┴───────────────────────────────────┤
-│  Service Jobs                                                 │
-│  ┌───────────────────────────────────────────────────────┐   │
-│  │ JOB-001  PT Maju Jaya   Termite   Agus    COMPLETED  │   │
-│  │ JOB-002  Hotel Grand    Rodent    Wahyu   IN-PROGRESS│   │
-│  │ JOB-003  Budi Hartono   Cockroach Dedi    SCHEDULED  │   │
-│  │ ...                                                    │   │
-│  └───────────────────────────────────────────────────────┘   │
-├──────────────────────────────────────────────────────────────┤
-│  Treatment Products (Stock)                                   │
-│  ┌───────────────────────────────────────────────────────┐   │
-│  │ Advion Cockroach Gel  █████████░  90/100  OK         │   │
-│  │ Brodifacoum           ████░░░░░░  40/100  WARNING    │   │
-│  │ Termidor SC           ██░░░░░░░░  20/100  CRITICAL   │   │
-│  └───────────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────┘
-```
+Sumbernya adalah ontologi `sanocare-kelava`.
+Kalau ontologi itu belum ada, halaman hanya menampilkan pesan "Sanocare Kelava ontology not found" - jalankan `bash scripts/sync-kelava.sh` dulu.
+Data di-refresh otomatis setiap 5 menit.
 
-**Customer list** — nama, alamat, tipe (residential/commercial), status kontrak.
-**Technician list** — rating bintang, spesialisasi, jumlah job aktif.
-**Service Jobs** — status real-time (scheduled → in-progress → completed).
-**Stock levels** — warning otomatis kalau stok di bawah minimum.
+**Lima kartu KPI di baris atas:**
+
+| Kartu | Isi |
+|-------|-----|
+| Customers | Jumlah objek `KelavaCustomer` |
+| Road Plans | Jumlah objek `KelavaRoadPlan` |
+| Visits | Jumlah objek `KelavaVisit` |
+| Avg Completion | Rata-rata `completionRate` teknisi bulan berjalan |
+| Critical Flags | Jumlah `KelavaFlag` severity `critical` yang belum resolved |
+
+**Technician Performance** - 10 teknisi teratas bulan berjalan: nama, segment, jumlah completed, completion rate, dan grade A/B/C/D.
+**Unresolved Flags** - maksimal 15 tanda verifikasi yang belum diselesaikan: tipe, severity, detail, dan drift dalam meter.
+**Recent Road Plans** - 15 rencana kunjungan terbaru: tanggal, judul, tipe, dan status (Terjadwal / Berjalan / Selesai).
 
 ---
 
@@ -161,7 +152,7 @@ Sidebar di sebelah kiri, 5 section:
 | Menu | URL | Fungsi |
 |------|-----|--------|
 | Dashboard | `/` | Overview statistik dan aktivitas |
-| Pest Control | `/pest-control` | Dashboard operasional harian |
+| Sanocare (Live) | `/sanocare` | Dashboard operasional harian (data Kelava) |
 | AIP Chat | `/aip` | Tanya jawab AI tentang data bisnis |
 | Compass | `/compass` | Browse resource tree (folder, project) |
 | Notifications | `/notifications` | Pusat notifikasi (Info/Warning/Error/Critical) |
@@ -446,7 +437,7 @@ AI memahami seluruh ontology — object types, properties, relationships, dan bu
 
 ### 1. Cek Operasional Pagi
 ```
-Login → Pest Control Dashboard → cek:
+Login → Dashboard Sanocare → cek:
   ✓ Ada berapa job hari ini?
   ✓ Stok produk aman?
   ✓ Teknisi siapa yang available?
@@ -490,14 +481,14 @@ Workshop → pilih template "Inventory Management"
 git clone <repo> && cd openfoundry
 docker compose up --build -d
 
-# 2. Buat admin
-bash scripts/bootstrap-admin.sh
+# 2. Buat admin (signup harus dinyalakan sementara - lihat "Mode Production")
+OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1 bash scripts/bootstrap-admin.sh
 
 # 3. Seed data industri
 ORG_RID=<dari_step_2> bash scripts/demo/seed-pest-control.sh
 
 # 4. Setup backup harian
-DATABASE_URL=postgresql://openfoundry:openfoundry@localhost:5432/openfoundry \
+DATABASE_URL=postgresql://openfoundry:openfoundry_dev@localhost:5434/openfoundry \
   bash scripts/backup.sh --install-cron
 
 # 5. Client login di http://<ip>:3000
@@ -517,6 +508,7 @@ ORG_RID=<org> bash scripts/demo/seed-manufacturing.sh
 
 ### Multi-Tenant (Banyak Client di 1 VPS)
 Setiap client = 1 organization. Data terisolasi total via Postgres RLS.
+`bootstrap-admin.sh` tetap butuh `OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1` sementara - lihat [Mode Production](#mode-production).
 ```bash
 # Client 1
 bash scripts/bootstrap-admin.sh --username admin-jkt --password ... --org "PT Jakarta"
@@ -536,6 +528,7 @@ ORG_RID=<org2> bash scripts/demo/seed-pest-control.sh
 ### Authentication
 ```
 POST /api/v2/auth/signup              Daftar user baru + buat org
+                                      (403 kecuali OPENFOUNDRY_ALLOW_OPEN_SIGNUP diset)
 POST /multipass/api/auth/login        Login (dev mode)
 POST /multipass/api/oauth2/token      OAuth2 token
 GET  /multipass/api/auth/me           Info user saat ini

@@ -11,9 +11,9 @@
 
 OpenFoundry is a fully functional, local emulator of the Palantir Foundry platform. It implements real Foundry-compatible API endpoints backed by in-memory storage, letting you develop, test, and demo Foundry-based applications without access to a live Foundry stack.
 
-It runs 9 backend services + a Vite-powered frontend console, seeds a realistic pest control ontology with 47 objects, and starts with a single command.
+It runs 10 backend services + a Vite-powered frontend console, seeds a realistic pest control ontology with 47 objects, and starts with a single command.
 
-> **Storage note:** All data is held in memory and persisted to `/tmp/openfoundry-data/`. Restarting services re-seeds from scratch unless data files exist.
+> **Storage note:** With `DATABASE_URL` set (see `.env.example`), services store data in PostgreSQL; `start.sh` brings up the `postgres` container from `docker-compose.yml` when Docker is available. Without it, data is held in memory and persisted to `/tmp/openfoundry-data/`, and restarting services re-seeds from scratch unless those data files exist.
 
 ---
 
@@ -35,7 +35,7 @@ bash start.sh
 # Login:    admin / admin123
 ```
 
-That's it. No Docker, no PostgreSQL, no Redis required. Everything runs in-process with in-memory storage.
+That's it. Docker and PostgreSQL are optional: if Docker is running, `start.sh` starts the `postgres` container for persistence; otherwise everything runs in-process with in-memory storage. Redis is never required.
 
 To re-seed data from scratch:
 
@@ -87,7 +87,7 @@ docker compose up --build
 
 | Category | What Works |
 |----------|-----------|
-| **Backend Services** | 9 services running (gateway, ontology, objects, actions, multipass, datasets, admin, functions, aip) |
+| **Backend Services** | 10 services running (gateway, ontology, objects, actions, multipass, datasets, admin, functions, aip, sentinel) |
 | **Pest Control Ontology** | 47 objects across 7 types (PestControlOrder, TechnicianAssignment, Customer, etc.) |
 | **SearchJsonQueryV2** | 13 filter operators (eq, gt, lt, gte, lte, isNull, contains, startsWith, and, or, not, prefix, anyTerm) |
 | **ObjectSet loadObjects** | 7 ObjectSet types (base, filter, union, intersect, subtract, searchAround, staticSet) |
@@ -123,13 +123,13 @@ docker compose up --build
    |multipass| |ontology| |objects | |actions | |datasets| |   admin  |
    |  :8084  | | :8081  | | :8082  | | :8083  | | :8085  | |  :8087   |
    +---------+ +--------+ +--------+ +--------+ +--------+ +----------+
-                    |                                |
-              +-----+------+                   +-----+------+
-              | functions  |                   |    aip     |
-              |   :8088    |                   |   :8092    |
-              +------------+                   +------------+
+                     |               |               |
+              +------+-----+  +------+-----+  +------+-----+
+              | functions  |  |  sentinel  |  |    aip     |
+              |   :8088    |  |   :8091    |  |   :8092    |
+              +------------+  +------------+  +------------+
 
-   All services use in-memory storage (no external databases required)
+   Services use PostgreSQL when DATABASE_URL is set, in-memory storage otherwise
 ```
 
 ---
@@ -146,9 +146,10 @@ docker compose up --build
 | `svc-datasets` | 8085 | Dataset management -- files, schemas, branches |
 | `svc-admin` | 8087 | Platform admin -- configuration, user management |
 | `svc-functions` | 8088 | Functions -- user-defined TypeScript functions |
+| `svc-sentinel` | 8091 | Monitors -- scheduler, data fetcher, email digest effects |
 | `svc-aip` | 8092 | AI Platform -- mock LLM chat, embeddings |
 
-> Services not currently started by `start.sh`: svc-compass (:8086), svc-webhooks (:8089), svc-media (:8090), svc-sentinel (:8091). These exist in the codebase but are not wired into the startup script.
+> Services not currently started by `start.sh`: svc-compass (:8086), svc-webhooks (:8089), svc-media (:8090). These exist in the codebase but are not wired into the startup script.
 
 ---
 
@@ -255,7 +256,7 @@ openfoundry/
 +-- deploy/                   Docker and Helm deployment configs
 +-- packages/                 Shared libraries (28 packages)
 +-- scripts/                  Build, migration, and seed scripts
-+-- services/                 Microservices (13 defined, 9 active)
++-- services/                 Microservices (13 defined, 10 active)
 +-- tests/                    Integration and end-to-end tests
 +-- start.sh                  One-command startup script
 +-- turbo.json                Turborepo pipeline config
@@ -295,8 +296,7 @@ pnpm typecheck
 
 - **Node.js** >= 20.0.0
 - **pnpm** >= 10.27.0
-
-No Docker or external databases required for local development.
+- **Docker** (optional) -- only for the PostgreSQL container that makes data survive a restart
 
 ---
 

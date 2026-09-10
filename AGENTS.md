@@ -6,8 +6,14 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 ## Build sharp edges
 
-`pnpm run build` is green (49/49), as are `typecheck` (45/45) and `lint` (21/21). Keep it that way.
+`pnpm run build` is green (49/49), as is `typecheck` (45/45). Keep it that way.
 Run `npx turbo run build --continue` to see every failure at once; plain `build` stops at the first.
+
+`pnpm run lint` reports 21/21 but checks nothing: no package declares a `lint` script, so every
+turbo `lint` task is a no-op, and `eslint` itself is not even installed (only `typescript-eslint`
+and the root `eslint.config.js` exist). Treat a green lint run as no signal.
+Prettier is likewise unenforced - `pnpm run format` writes, nothing checks, and most files are
+not Prettier-clean; do not reformat a file wholesale just because `prettier --check` flags it.
 
 `noUnusedLocals` and `noUnusedParameters` are on, so an unused import or local is a hard error.
 Prefix a deliberately unused parameter with `_`; that exemption does not apply to locals.
