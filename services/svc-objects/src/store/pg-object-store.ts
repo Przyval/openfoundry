@@ -306,6 +306,19 @@ export class PgObjectStore {
    * `(ontology_rid, api_name)`: two ontologies may each declare `Employee`
    * with different properties, and an unscoped lookup would answer with
    * whichever row the database happened to yield first.
+   *
+   * Known divergence: this lookup keys on the requested ontology, but
+   * `resolveObjectTypeRid` - which every data read goes through - still
+   * resolves the object type with no ontology predicate. Where two ontologies
+   * declare a same-named object type, a `select` that one of them legitimately
+   * declares can therefore answer 404 PropertiesNotFound while the rows that
+   * would have been served belong to the other. It is not closed here because
+   * closing it means carrying an ontology through all nine data methods of the
+   * store interface, of this store and of the in-memory `ObjectStore`, across
+   * seventeen call sites - and the in-memory store is ontology-blind by
+   * design, `Map<objectType, Map<primaryKey, StoredObject>>` persisted to disk
+   * in that shape, so it would need re-keying and an on-disk migration. That
+   * is architecture work, filed separately.
    */
   async propertyNames(
     ontologyRid: string,

@@ -57,6 +57,10 @@ Order by position instead: the in-memory stores are `Map`s and arrays in inserti
 `PgObjectStore` is fully async where `ObjectStore` is synchronous. Both satisfy `ObjectReadWriteStore`, whose methods return `T | Promise<T>`, and every route in `svc-objects/src/server.ts` is registered against that interface with no cast.
 Await every store call in a handler: an unawaited read passes every in-memory test and serves a pending promise as a 200 against Postgres.
 
+The declaration lookups (`PgObjectStore.propertyNames`, `linkTargetObjectType`) are scoped by `ontology_rid`, but `resolveObjectTypeRid` - which every data read goes through - is not.
+Where two ontologies declare a same-named object type, the property-existence check and the rows served can therefore come from different declarations; see the note on `propertyNames`.
+Scoping the store's type resolution is separate architecture work, not a patch.
+
 There are no ontology branches, scenarios or ontology transactions - every `branch` in this repo is a *dataset* branch, and the console's Scenarios page persists nothing.
 The v2 ontology endpoints therefore reject any `branch`, `scenarioRid` or `transactionId` value rather than serving the only state there is; `packages/errors/src/ontology-scoping.ts` is the single place that policy lives.
 

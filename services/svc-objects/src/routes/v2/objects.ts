@@ -472,10 +472,15 @@ export async function objectRoutes(
       parseBooleanParam("executeInMemoryOnly", request.query.executeInMemoryOnly);
       const { where, orderBy, pageSize = 100, pageToken, select } = request.body;
 
+      const declared = await declaredProperties(
+        request.params.ontologyRid,
+        objectType,
+      );
+      assertPropertiesExist(objectType, declared, select);
       assertPropertiesExist(
         objectType,
-        await declaredProperties(request.params.ontologyRid, objectType),
-        select,
+        declared,
+        orderBy ? [orderBy.field] : undefined,
       );
 
       // Start with all objects of this type

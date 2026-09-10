@@ -767,6 +767,133 @@ describe("Unknown property names", () => {
     expect(res.json().errorName).toBe("PropertiesNotFound");
   });
 
+  it("checks select through a nested filter object set", async () => {
+    const res = await typedApp.inject({
+      method: "POST",
+      url: `${BASE_URL}/objectSets/loadObjects`,
+      payload: {
+        objectSet: {
+          type: "filter",
+          objectSet: { type: "base", objectType: "Employee" },
+          where: { type: "eq", field: "name", value: "Alice" },
+        },
+        select: ["nmae"],
+      },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("PropertiesNotFound");
+  });
+
+  it("checks select across every branch of a union object set", async () => {
+    const union = (select: string[]) =>
+      typedApp.inject({
+        method: "POST",
+        url: `${BASE_URL}/objectSets/loadObjects`,
+        payload: {
+          objectSet: {
+            type: "union",
+            objectSets: [
+              { type: "base", objectType: "Employee" },
+              { type: "static", objectType: "Employee", primaryKeys: ["emp-1"] },
+            ],
+          },
+          select,
+        },
+      });
+
+    const bad = await union(["nmae"]);
+    expect(bad.statusCode).toBe(404);
+    expect(bad.json().errorName).toBe("PropertiesNotFound");
+
+    const good = await union(["name", "endDate"]);
+    expect(good.statusCode).toBe(200);
+    expect(good.json().data.length).toBeGreaterThan(0);
+  });
+
+  it("makes no claim when a union branch has no declaration", async () => {
+    typedStore.createObject("Contractor", "c-1", { name: "Dana" });
+
+    const res = await typedApp.inject({
+      method: "POST",
+      url: `${BASE_URL}/objectSets/loadObjects`,
+      payload: {
+        objectSet: {
+          type: "union",
+          objectSets: [
+            { type: "base", objectType: "Employee" },
+            { type: "base", objectType: "Contractor" },
+          ],
+        },
+        select: ["nmae"],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("checks the search body orderBy field", async () => {
+    const bad = await typedApp.inject({
+      method: "POST",
+      url: `${BASE_URL}/objects/Employee/search`,
+      payload: { orderBy: { field: "nmae" } },
+    });
+    expect(bad.statusCode).toBe(404);
+    expect(bad.json().errorName).toBe("PropertiesNotFound");
+
+    const good = await typedApp.inject({
+      method: "POST",
+      url: `${BASE_URL}/objects/Employee/search`,
+      payload: { orderBy: { field: "name" } },
+    });
+    expect(good.statusCode).toBe(200);
+    expect(good.json().data.map((o: any) => o.properties.name)).toEqual([
+      "Alice",
+      "Carol",
+    ]);
+  });
+
+  it("checks the loadObjects body orderBy field", async () => {
+    const bad = await typedApp.inject({
+      method: "POST",
+      url: `${BASE_URL}/objectSets/loadObjects`,
+      payload: {
+        objectSet: { type: "base", objectType: "Employee" },
+        orderBy: [{ field: "nmae", direction: "asc" }],
+      },
+    });
+    expect(bad.statusCode).toBe(404);
+    expect(bad.json().errorName).toBe("PropertiesNotFound");
+
+    const good = await typedApp.inject({
+      method: "POST",
+      url: `${BASE_URL}/objectSets/loadObjects`,
+      payload: {
+        objectSet: { type: "base", objectType: "Employee" },
+        orderBy: [{ field: "name", direction: "asc" }],
+      },
+    });
+    expect(good.statusCode).toBe(200);
+    expect(good.json().data.map((o: any) => o.properties.name)).toEqual([
+      "Alice",
+      "Carol",
+    ]);
+  });
+
+  it("sorts by a declared but unpopulated property on the body paths", async () => {
+    const res = await typedApp.inject({
+      method: "POST",
+      url: `${BASE_URL}/objectSets/loadObjects`,
+      payload: {
+        objectSet: { type: "base", objectType: "Employee" },
+        orderBy: [{ field: "endDate", direction: "asc" }],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toHaveLength(2);
+  });
+
   it("serves a declared but unpopulated property on the search body", async () => {
     const res = await typedApp.inject({
       method: "POST",

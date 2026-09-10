@@ -243,6 +243,48 @@ async function resolveApiObjectSet(
   }
 }
 
+/**
+ * The object types a set draws its results from, per the definition alone.
+ *
+ * Only `base` and `static` name a type; every other form has to be walked to
+ * its leaves. `intersect` and `subtract` draw only from their first operand,
+ * `union` from all of them. Returns `undefined` whenever the definition cannot
+ * say - an unnamed leaf, an empty set, or a `searchAround`, whose results are
+ * of the link type's target rather than of anything the body names - so the
+ * caller makes no claim it has no grounds for.
+ */
+function objectSetLeafTypes(
+  objectSetDef: Record<string, unknown>,
+): string[] | undefined {
+  const type = String(objectSetDef.type ?? "").toUpperCase();
+
+  if (type === "BASE" || type === "STATIC") {
+    return typeof objectSetDef.objectType === "string"
+      ? [objectSetDef.objectType]
+      : undefined;
+  }
+
+  if (type === "FILTER") {
+    const inner = objectSetDef.objectSet as Record<string, unknown> | undefined;
+    return inner ? objectSetLeafTypes(inner) : undefined;
+  }
+
+  if (type === "INTERSECT" || type === "SUBTRACT") {
+    const sets = (objectSetDef.objectSets as Record<string, unknown>[]) ?? [];
+    return sets.length > 0 ? objectSetLeafTypes(sets[0]) : undefined;
+  }
+
+  if (type === "UNION") {
+    const sets = (objectSetDef.objectSets as Record<string, unknown>[]) ?? [];
+    if (sets.length === 0) return undefined;
+    const nested = sets.map(objectSetLeafTypes);
+    if (nested.some((types) => types === undefined)) return undefined;
+    return [...new Set((nested as string[][]).flat())];
+  }
+
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Request / response types
 // ---------------------------------------------------------------------------
@@ -293,6 +335,32 @@ export async function objectSetRoutes(
       ? objectTypeSchema.propertyNames(ontologyRid, objectType)
       : store.propertyNames?.(ontologyRid, objectType);
 
+  /**
+   * The properties declared across the object types an object set draws from.
+   *
+   * A union spans several types, so a name is known when any of them declares
+   * it. `properties` stays `undefined` if the leaves cannot be resolved or any
+   * one of them has no declaration, since an incomplete union would call a
+   * legitimate name unknown.
+   */
+  const declaredForSet = async (
+    ontologyRid: string,
+    objectSetDef: Record<string, unknown>,
+  ): Promise<{ objectType: string; properties?: ReadonlySet<string> }> => {
+    const types = objectSetLeafTypes(objectSetDef);
+    if (!types || types.length === 0) return { objectType: "" };
+
+    const objectType = types.join(", ");
+    const sets = await Promise.all(
+      types.map((type) => declaredProperties(ontologyRid, type)),
+    );
+    if (sets.some((set) => set === undefined)) return { objectType };
+    return {
+      objectType,
+      properties: new Set((sets as ReadonlySet<string>[]).flatMap((s) => [...s])),
+    };
+  };
+
   // Load objects from an ObjectSet query (enhanced with filter/where support)
   app.post<{
     Params: OntologyParams;
@@ -316,14 +384,16 @@ export async function objectSetRoutes(
       parseBooleanParam("executeInMemoryOnly", request.query.executeInMemoryOnly);
       const { objectSet: objectSetDef, select, pageSize = 100, pageToken, orderBy } = request.body;
 
-      const baseObjectType = objectSetDef.objectType;
-      if (select && select.length > 0 && typeof baseObjectType === "string") {
-        assertPropertiesExist(
-          baseObjectType,
-          await declaredProperties(request.params.ontologyRid, baseObjectType),
-          select,
-        );
-      }
+      const declared = await declaredForSet(
+        request.params.ontologyRid,
+        objectSetDef,
+      );
+      assertPropertiesExist(declared.objectType, declared.properties, select);
+      assertPropertiesExist(
+        declared.objectType,
+        declared.properties,
+        orderBy?.map((clause) => clause.field),
+      );
 
       let objects = await resolveApiObjectSet(objectSetDef, store, linkStore);
 
