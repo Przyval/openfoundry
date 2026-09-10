@@ -35,6 +35,21 @@ export interface ListResult {
 }
 
 /**
+ * Where the property names declared on an object type are read from.
+ *
+ * The declaration, not the data, is what says whether a property exists: a
+ * property an object type lists but no object has populated is still a real
+ * property and must be selectable. `undefined` means no declaration is
+ * available for that type, in which case nothing can be said about a property
+ * name and no existence check may be made.
+ */
+export interface ObjectTypeSchemaSource {
+  propertyNames(
+    objectType: string,
+  ): ReadonlySet<string> | undefined | Promise<ReadonlySet<string> | undefined>;
+}
+
+/**
  * The object-store surface the v2 object routes depend on.
  *
  * Both the in-memory `ObjectStore` and the Postgres-backed `PgObjectStore`
@@ -45,6 +60,11 @@ export interface ListResult {
  */
 export interface ObjectReadWriteStore {
   allObjects(objectType: string): StoredObject[] | Promise<StoredObject[]>;
+  listObjects(
+    objectType: string,
+    options?: ListOptions,
+  ): ListResult | Promise<ListResult>;
+  propertyNames?: ObjectTypeSchemaSource["propertyNames"];
   getObject(
     objectType: string,
     primaryKey: string,

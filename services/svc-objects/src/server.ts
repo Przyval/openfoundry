@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import { OpenFoundryApiError } from "@openfoundry/errors";
 import { createPool } from "@openfoundry/db";
 import { type ObjectsConfig, loadConfig } from "./config.js";
-import { ObjectStore } from "./store/object-store.js";
+import { ObjectStore, type ObjectTypeSchemaSource } from "./store/object-store.js";
 import { PgObjectStore } from "./store/pg-object-store.js";
 import { LinkStore } from "./store/link-store.js";
 import { healthRoutes } from "./routes/health.js";
@@ -21,6 +21,13 @@ export interface CreateServerOptions {
   config?: ObjectsConfig;
   store?: ObjectStore | PgObjectStore;
   linkStore?: LinkStore;
+  /**
+   * Where the object routes read declared property names from. Defaults to the
+   * store, which only the Postgres backend can answer; the in-memory store
+   * holds objects and no type definitions, so an in-memory deployment needs
+   * one supplied before `select` / `orderBy` names can be checked at all.
+   */
+  objectTypeSchema?: ObjectTypeSchemaSource;
 }
 
 /**
@@ -110,9 +117,19 @@ export async function createServer(
 
   // -- Routes -------------------------------------------------------------
   await app.register(healthRoutes);
-  await app.register(objectRoutes, { prefix: "/api/v2", store, pool: pgPool });
+  await app.register(objectRoutes, {
+    prefix: "/api/v2",
+    store,
+    objectTypeSchema: options.objectTypeSchema,
+    pool: pgPool,
+  });
   await app.register(objectSetRoutes, { prefix: "/api/v2", store: store as ObjectStore, linkStore });
-  await app.register(linkRoutes, { prefix: "/api/v2", linkStore, objectStore: store as ObjectStore });
+  await app.register(linkRoutes, {
+    prefix: "/api/v2",
+    linkStore,
+    objectStore: store,
+    objectTypeSchema: options.objectTypeSchema,
+  });
   await app.register(importRoutes, { prefix: "/api/v2", objectStore: store as ObjectStore });
   await app.register(semanticSearchRoutes, {
     prefix: "/api/v2",

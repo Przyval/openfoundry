@@ -587,88 +587,140 @@ describe("Ontology scoping — branch, scenarioRid, transactionId", () => {
 
 // ===========================================================================
 // Unknown property names
+//
+// The object type definition decides what a property is, never the data: a
+// declared property no object has populated is real and must be served.
 // ===========================================================================
 
 describe("Unknown property names", () => {
-  it("answers PropertiesNotFound for a select typo instead of an empty bag", async () => {
-    seedEmployees();
-    const res = await app.inject({
-      method: "GET",
-      url: `${BASE_URL}/objects/Employee?select=nmae`,
+  const EMPLOYEE_PROPERTIES = new Set([
+    "name",
+    "department",
+    "salary",
+    "endDate",
+  ]);
+
+  let typedApp: FastifyInstance;
+  let typedStore: ObjectStore;
+  let typedLinkStore: LinkStore;
+
+  beforeEach(async () => {
+    typedStore = new ObjectStore(null);
+    typedLinkStore = new LinkStore(null);
+    typedApp = await createServer({
+      config: { port: 0, host: "127.0.0.1", logLevel: "silent" },
+      store: typedStore,
+      linkStore: typedLinkStore,
+      objectTypeSchema: {
+        propertyNames: (objectType) =>
+          objectType === "Employee" ? EMPLOYEE_PROPERTIES : undefined,
+      },
     });
 
-    expect(res.statusCode).toBe(404);
-    expect(res.json().errorName).toBe("PropertiesNotFound");
-    expect(res.json().parameters.properties).toEqual(["nmae"]);
+    // `endDate` is declared but populated on no object.
+    typedStore.createObject("Employee", "emp-1", {
+      name: "Carol",
+      department: "Engineering",
+      salary: 120000,
+    });
+    typedStore.createObject("Employee", "emp-2", {
+      name: "Alice",
+      department: "Sales",
+      salary: 90000,
+    });
   });
 
-  it("names only the properties that are unknown", async () => {
-    seedEmployees();
-    const res = await app.inject({
-      method: "GET",
-      url: `${BASE_URL}/objects/Employee?select=name&select=nmae`,
-    });
+  const get = (url: string) =>
+    typedApp.inject({ method: "GET", url: `${BASE_URL}${url}` });
 
-    expect(res.json().parameters.properties).toEqual(["nmae"]);
-  });
-
-  it("answers PropertiesNotFound for an orderBy typo instead of insertion order", async () => {
-    seedEmployees();
-    const res = await app.inject({
-      method: "GET",
-      url: `${BASE_URL}/objects/Employee?orderBy=properties.nonexistent`,
-    });
-
-    expect(res.statusCode).toBe(404);
-    expect(res.json().errorName).toBe("PropertiesNotFound");
-  });
-
-  it("accepts a property that only some objects carry", async () => {
-    seedEmployees();
-    store.createObject("Employee", "emp-4", { name: "Dave", nickname: "D" });
-
-    const res = await app.inject({
-      method: "GET",
-      url: `${BASE_URL}/objects/Employee?select=nickname`,
-    });
+  it("serves a declared property that no object has populated", async () => {
+    const res = await get("/objects/Employee?select=name&select=endDate");
 
     expect(res.statusCode).toBe(200);
-    expect(
-      res.json().data.map((o: any) => o.properties.nickname),
-    ).toContain("D");
+    expect(res.json().data).toHaveLength(2);
+    for (const obj of res.json().data) {
+      expect(obj.properties.endDate).toBeUndefined();
+      expect(typeof obj.properties.name).toBe("string");
+    }
   });
 
-  it("answers PropertiesNotFound on the single-object endpoint", async () => {
-    seedEmployees();
-    const res = await app.inject({
-      method: "GET",
-      url: `${BASE_URL}/objects/Employee/emp-1?select=nmae`,
-    });
+  it("answers PropertiesNotFound for a name the definition does not list", async () => {
+    const res = await get("/objects/Employee?select=nmae");
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("PropertiesNotFound");
+    expect(res.json().parameters.properties).toEqual(["nmae"]);
+  });
+
+  it("names only the undeclared properties", async () => {
+    const res = await get("/objects/Employee?select=name&select=nmae");
+    expect(res.json().parameters.properties).toEqual(["nmae"]);
+  });
+
+  it("sorts by a declared but unpopulated property without failing", async () => {
+    const res = await get("/objects/Employee?orderBy=properties.endDate");
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toHaveLength(2);
+  });
+
+  it("answers PropertiesNotFound for an orderBy the definition does not list", async () => {
+    const res = await get("/objects/Employee?orderBy=properties.nonexistent");
 
     expect(res.statusCode).toBe(404);
     expect(res.json().errorName).toBe("PropertiesNotFound");
   });
 
-  it("serves a property this object lacks but its type has, rather than 404ing", async () => {
-    seedEmployees();
-    store.createObject("Employee", "emp-4", { name: "Dave", nickname: "D" });
-
-    const res = await app.inject({
-      method: "GET",
-      url: `${BASE_URL}/objects/Employee/emp-1?select=name&select=nickname`,
-    });
+  it("serves a declared but unpopulated property on the single-object endpoint", async () => {
+    const res = await get("/objects/Employee/emp-1?select=name&select=endDate");
 
     expect(res.statusCode).toBe(200);
     expect(res.json().properties).toEqual({ name: "Carol" });
   });
 
-  it("cannot check anything on an empty collection, so it lists nothing", async () => {
+  it("answers PropertiesNotFound on the single-object endpoint", async () => {
+    const res = await get("/objects/Employee/emp-1?select=nmae");
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("PropertiesNotFound");
+  });
+
+  it("makes no claim about a type the definition source cannot answer for", async () => {
+    typedStore.createObject("Contractor", "c-1", { name: "Dana" });
+    const res = await get("/objects/Contractor?select=whatever");
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toHaveLength(1);
+  });
+
+  it("makes no claim when no definition source is configured at all", async () => {
+    seedEmployees();
     const res = await app.inject({
       method: "GET",
       url: `${BASE_URL}/objects/Employee?select=whatever`,
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json().data).toEqual([]);
+    expect(res.json().data).toHaveLength(3);
+  });
+
+  it("checks select on the linked-objects endpoint the same way", async () => {
+    typedLinkStore.createLink(
+      "Employee",
+      "emp-1",
+      "reportsTo",
+      "Employee",
+      "emp-2",
+    );
+
+    const bad = await get("/objects/Employee/emp-1/links/reportsTo?select=nmae");
+    expect(bad.statusCode).toBe(404);
+    expect(bad.json().errorName).toBe("PropertiesNotFound");
+
+    const good = await get(
+      "/objects/Employee/emp-1/links/reportsTo?select=name&select=endDate",
+    );
+    expect(good.statusCode).toBe(200);
+    expect(good.json().data[0].properties).toEqual({ name: "Alice" });
   });
 });

@@ -1,7 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import type { LinkStore } from "../../store/link-store.js";
-import type { ObjectStore } from "../../store/object-store.js";
-import type { StoredObject } from "../../store/object-store.js";
+import type {
+  ObjectReadWriteStore,
+  ObjectTypeSchemaSource,
+  StoredObject,
+} from "../../store/object-store.js";
 import {
   encodePageToken,
   decodePageToken,
@@ -14,6 +17,7 @@ import {
   applyExcludeRid,
   applyOrderBy,
   applySelect,
+  assertPropertiesExist,
   applySnapshot,
   parseBooleanParam,
   parseListParam,
@@ -61,9 +65,36 @@ function decodeLinkPageToken(pageToken: string | undefined): PageCursor {
 
 export async function linkRoutes(
   app: FastifyInstance,
-  opts: { linkStore: LinkStore; objectStore: ObjectStore },
+  opts: {
+    linkStore: LinkStore;
+    objectStore: ObjectReadWriteStore;
+    objectTypeSchema?: ObjectTypeSchemaSource;
+  },
 ): Promise<void> {
-  const { linkStore, objectStore } = opts;
+  const { linkStore, objectStore, objectTypeSchema } = opts;
+
+  const declaredProperties = (objectType: string) =>
+    objectTypeSchema
+      ? objectTypeSchema.propertyNames(objectType)
+      : objectStore.propertyNames?.(objectType);
+
+  /**
+   * The properties declared across the object types the links point at.
+   *
+   * A link type can resolve to more than one target type, so a name is known
+   * when any of them declares it. If any target type has no declaration the
+   * union cannot be complete, and `undefined` suppresses the check rather than
+   * calling a name unknown on incomplete evidence.
+   */
+  const declaredAcross = async (
+    objectTypes: readonly string[],
+  ): Promise<ReadonlySet<string> | undefined> => {
+    const sets = await Promise.all(objectTypes.map(declaredProperties));
+    if (sets.length === 0 || sets.some((set) => set === undefined)) {
+      return undefined;
+    }
+    return new Set(sets.flatMap((set) => [...set!]));
+  };
 
   // Get linked objects (paginated)
   // Returns the actual linked objects (not just link metadata) as @osdk/client expects.
@@ -108,16 +139,29 @@ export async function linkRoutes(
       );
       const links = applySnapshot(allLinks, snapshotSize);
 
-      let objects = links
-        .map((link) => {
+      const targetTypes = [...new Set(links.map((l) => l.targetObjectType))];
+      const declared = await declaredAcross(targetTypes);
+      assertPropertiesExist(objectType, declared, select);
+      assertPropertiesExist(
+        objectType,
+        declared,
+        orderBy?.map((term) => term.property),
+      );
+
+      const resolved = await Promise.all(
+        links.map(async (link) => {
           try {
-            return objectStore.getObject(link.targetObjectType, link.targetPrimaryKey);
+            return await objectStore.getObject(
+              link.targetObjectType,
+              link.targetPrimaryKey,
+            );
           } catch {
             // Object may have been deleted after the link was created; skip it
             return null;
           }
-        })
-        .filter((obj): obj is StoredObject => obj !== null);
+        }),
+      );
+      let objects = resolved.filter((obj): obj is StoredObject => obj !== null);
 
       if (orderBy) {
         objects = applyOrderBy(objects, orderBy);

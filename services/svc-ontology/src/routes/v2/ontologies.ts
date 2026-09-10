@@ -162,7 +162,8 @@ export async function ontologyRoutes(
     // the caller opted in, which is exactly what the flag controls.
     const actionTypeList = (Array.isArray(actionTypes)
       ? actionTypes
-      : []) as unknown as ActionTypeShape[];
+      : (actionTypes as { items?: unknown[] }).items ??
+        []) as unknown as ActionTypeShape[];
     const actionTypesFullMetadata = includeActionTypeFullMetadata === true
       ? Object.fromEntries(
           actionTypeList.map((actionType) => [

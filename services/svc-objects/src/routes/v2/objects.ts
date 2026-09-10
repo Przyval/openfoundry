@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import {
   type ObjectReadWriteStore,
+  type ObjectTypeSchemaSource,
   type StoredObject,
 } from "../../store/object-store.js";
 import {
@@ -240,9 +241,18 @@ function paginate(
 
 export async function objectRoutes(
   app: FastifyInstance,
-  opts: { store: ObjectReadWriteStore; pool?: import("pg").Pool },
+  opts: {
+    store: ObjectReadWriteStore;
+    objectTypeSchema?: ObjectTypeSchemaSource;
+    pool?: import("pg").Pool;
+  },
 ): Promise<void> {
-  const { store, pool } = opts;
+  const { store, objectTypeSchema, pool } = opts;
+
+  const declaredProperties = (objectType: string) =>
+    objectTypeSchema
+      ? objectTypeSchema.propertyNames(objectType)
+      : store.propertyNames?.(objectType);
 
   // List objects (paginated)
   app.get<{
@@ -278,17 +288,36 @@ export async function objectRoutes(
 
       // A snapshot listing freezes its view at the size the collection had
       // when paging began and carries that boundary forward in every token.
-      const all = await store.allObjects(objectType);
-
-      // Validated against the whole collection before any paging, so a typo
-      // fails the same way regardless of which page was asked for.
-      assertPropertiesExist(objectType, all, select);
+      const declared = await declaredProperties(objectType);
+      assertPropertiesExist(objectType, declared, select);
       assertPropertiesExist(
         objectType,
-        all,
+        declared,
         orderBy?.map((term) => term.property),
       );
 
+      const project = (page: StoredObject[]) =>
+        applyExcludeRid(applySelectedProperties(page, select), excludeRid);
+
+      // Ordering spans the whole collection and a snapshot has to freeze its
+      // size, so only those two need every object read. A plain listing stays
+      // on the store's paged path, which is a LIMIT/OFFSET against Postgres
+      // rather than one full read of the type per page.
+      if (!orderBy && snapshot !== true && cursor.snapshotSize === undefined) {
+        const result = await store.listObjects(objectType, {
+          pageSize,
+          ...(query.pageToken ? { pageToken: query.pageToken } : {}),
+        });
+        return {
+          data: project(result.data),
+          totalCount: result.totalCount,
+          ...(result.nextPageToken
+            ? { nextPageToken: result.nextPageToken }
+            : {}),
+        };
+      }
+
+      const all = await store.allObjects(objectType);
       const snapshotSize = resolveSnapshotSize(
         snapshot,
         cursor.snapshotSize,
@@ -305,13 +334,8 @@ export async function objectRoutes(
       const hasMore = slice.length > pageSize;
       const page = hasMore ? slice.slice(0, pageSize) : slice;
 
-      const data = applyExcludeRid(
-        applySelectedProperties(page, select),
-        excludeRid,
-      );
-
       return {
-        data,
+        data: project(page),
         totalCount,
         ...(hasMore
           ? {
@@ -340,21 +364,13 @@ export async function objectRoutes(
       const select = parseListParam(request.query.select);
       const excludeRid = parseBooleanParam("excludeRid", request.query.excludeRid);
 
+      assertPropertiesExist(
+        objectType,
+        await declaredProperties(objectType),
+        select,
+      );
+
       const object = await store.getObject(objectType, primaryKey);
-
-      // A single object is not a population: a property it happens not to
-      // carry may still be a real property of the type. Only when the object
-      // itself cannot answer is the type's collection consulted, which keeps
-      // the extra read off the successful path.
-      const unverified = select?.filter((name) => !(name in object.properties));
-      if (unverified && unverified.length > 0) {
-        assertPropertiesExist(
-          objectType,
-          await store.allObjects(objectType),
-          unverified,
-        );
-      }
-
       const [result] = applyExcludeRid(
         applySelectedProperties([object], select),
         excludeRid,

@@ -13,6 +13,8 @@ import type { FastifyInstance } from "fastify";
 import { createServer } from "../src/server.js";
 import {
   ObjectStore,
+  type ListOptions,
+  type ListResult,
   type ObjectReadWriteStore,
   type StoredObject,
 } from "../src/store/object-store.js";
@@ -30,6 +32,13 @@ class AsyncObjectStore implements ObjectReadWriteStore {
 
   async allObjects(objectType: string): Promise<StoredObject[]> {
     return this.inner.allObjects(objectType);
+  }
+
+  async listObjects(
+    objectType: string,
+    options: ListOptions = {},
+  ): Promise<ListResult> {
+    return this.inner.listObjects(objectType, options);
   }
 
   async getObject(objectType: string, primaryKey: string): Promise<StoredObject> {
@@ -67,15 +76,17 @@ class AsyncObjectStore implements ObjectReadWriteStore {
 
 let app: FastifyInstance;
 let inner: ObjectStore;
+let linkStore: LinkStore;
 
 beforeEach(async () => {
   inner = new ObjectStore(null);
+  linkStore = new LinkStore(null);
   app = await createServer({
     config: { port: 0, host: "127.0.0.1", logLevel: "silent" },
-    // The object-set and link routes still need the richer in-memory store;
-    // only the object routes under test are driven through the async double.
+    // The object-set and import routes still need the richer in-memory store;
+    // the object and link routes under test are driven through the double.
     store: new AsyncObjectStore(inner) as unknown as ObjectStore,
-    linkStore: new LinkStore(null),
+    linkStore,
   });
 
   inner.createObject("Employee", "emp-1", { name: "Carol", salary: 120000 });
@@ -154,5 +165,58 @@ describe("Object read endpoints against an async store", () => {
       "emp-1",
       "emp-2",
     ]);
+  });
+});
+
+describe("Linked objects against an async store", () => {
+  beforeEach(() => {
+    linkStore.createLink("Employee", "emp-1", "reportsTo", "Employee", "emp-2");
+  });
+
+  const links = (query = "") =>
+    app.inject({
+      method: "GET",
+      url: `${BASE_URL}/Employee/emp-1/links/reportsTo${query}`,
+    });
+
+  it("resolves the linked object rather than serving a pending read", async () => {
+    const res = await links();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().totalCount).toBe(1);
+    expect(res.json().data[0].primaryKey).toBe("emp-2");
+    expect(res.json().data[0].properties).toEqual({
+      name: "Alice",
+      salary: 90000,
+    });
+    expect(res.json().data[0].rid).toEqual(expect.any(String));
+  });
+
+  it("applies select to the resolved linked object", async () => {
+    const res = await links("?select=name");
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data[0].properties).toEqual({ name: "Alice" });
+  });
+
+  it("orders by a property of the resolved linked objects", async () => {
+    inner.createObject("Employee", "emp-3", { name: "Bob", salary: 150000 });
+    linkStore.createLink("Employee", "emp-1", "reportsTo", "Employee", "emp-3");
+
+    const res = await links("?orderBy=properties.name:desc");
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.map((o: any) => o.properties.name)).toEqual([
+      "Bob",
+      "Alice",
+    ]);
+  });
+
+  it("skips a link whose target has since been deleted", async () => {
+    inner.deleteObject("Employee", "emp-2");
+    const res = await links();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual([]);
   });
 });

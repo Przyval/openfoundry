@@ -287,3 +287,73 @@ describe("Ontology metadata — branch", () => {
     expect(res.statusCode).toBe(200);
   });
 });
+
+// ===========================================================================
+// fullMetadata against a paginating store
+//
+// `PgOntologyStore.listActionTypes` answers `{items, total}` rather than a bare
+// array, so a handler that only understands the array shape reports an ontology
+// as having no action types at all on a DATABASE_URL deployment.
+// ===========================================================================
+
+describe("Full metadata — paginating store shape", () => {
+  let pagedApp: FastifyInstance;
+  let pagedOntologyRid: string;
+
+  beforeEach(async () => {
+    const inner = new OntologyStore(null);
+    const paged = Object.create(inner) as OntologyStore & {
+      listActionTypes(ontologyRid: string): unknown;
+    };
+    paged.listActionTypes = (rid: string) => {
+      const items = OntologyStore.prototype.listActionTypes.call(inner, rid);
+      return { items, total: items.length };
+    };
+
+    pagedApp = await createServer({ config: TEST_CONFIG, store: paged });
+
+    const created = await pagedApp.inject({
+      method: "POST",
+      url: "/api/v2/ontologies",
+      payload: {
+        apiName: "paged-ontology",
+        displayName: "Paged Ontology",
+        description: "Fixture ontology",
+      },
+    });
+    pagedOntologyRid = created.json().rid;
+
+    await pagedApp.inject({
+      method: "POST",
+      url: `/api/v2/ontologies/${pagedOntologyRid}/actionTypes`,
+      payload: {
+        apiName: "promoteEmployee",
+        description: "Promotes an employee",
+        parameters: {
+          employee: {
+            type: "STRING",
+            required: true,
+            objectTypeApiName: "Employee",
+          },
+        },
+        modifiedEntities: { Employee: { created: false, modified: true } },
+        status: "ACTIVE",
+      },
+    });
+  });
+
+  it("populates actionTypesFullMetadata from the paged shape", async () => {
+    const res = await pagedApp.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${pagedOntologyRid}/fullMetadata?includeActionTypeFullMetadata=true`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(Object.keys(res.json().actionTypesFullMetadata)).toEqual([
+      "promoteEmployee",
+    ]);
+    expect(
+      res.json().actionTypesFullMetadata.promoteEmployee.actionType.apiName,
+    ).toBe("promoteEmployee");
+  });
+});

@@ -107,34 +107,27 @@ export function parseOrderBy(raw: string | undefined): OrderByTerm[] | undefined
 }
 
 /**
- * Rejects `select` / `orderBy` property names that no object of the type
- * carries.
+ * Rejects `select` / `orderBy` property names the object type does not declare.
  *
  * Foundry answers an unknown property with `PropertiesNotFound`; without this
  * check `select=nmae` returns 200 with `properties: {}` and `orderBy=p.nmae`
  * returns 200 in insertion order, both telling the client its request was
  * honoured when it was not.
  *
- * Limitation: svc-objects does not hold the ontology schema (that lives in
- * svc-ontology), so the only signal available here is the population itself.
- * A property that is declared on the object type but set on no object is
- * therefore reported as unknown, and on an empty collection nothing can be
- * checked at all. Both are deliberate: the check is skipped rather than
- * guessed when the population cannot answer.
+ * The declaration is the only admissible source. A property the type declares
+ * but no object has populated is legitimate and must be served as absent, so
+ * the data can never stand in for the declaration. `declared` is `undefined`
+ * when no declaration is available, and then no name can be called unknown and
+ * no check is made.
  */
 export function assertPropertiesExist(
   objectType: string,
-  population: readonly StoredObject[],
+  declared: ReadonlySet<string> | undefined,
   properties: readonly string[] | undefined,
 ): void {
-  if (!properties || properties.length === 0 || population.length === 0) return;
+  if (!declared || !properties || properties.length === 0) return;
 
-  const known = new Set<string>();
-  for (const obj of population) {
-    for (const name of Object.keys(obj.properties)) known.add(name);
-  }
-
-  const unknown = properties.filter((name) => !known.has(name));
+  const unknown = properties.filter((name) => !declared.has(name));
   if (unknown.length === 0) return;
 
   throw customClient(
