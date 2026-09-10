@@ -21,7 +21,7 @@ WORKDIR /app
 COPY . .
 
 ARG SERVICE
-RUN turbo prune --scope="${SERVICE}" --docker
+RUN turbo prune --scope="@openfoundry/${SERVICE}" --docker
 
 # ---------------------------------------------------------------------------
 # Stage 2: install dependencies for the pruned workspace
@@ -42,7 +42,7 @@ COPY --from=pruner /app/out/full/ .
 COPY tsconfig.base.json turbo.json ./
 
 ARG SERVICE
-RUN npx turbo run build --filter="${SERVICE}"
+RUN npx turbo run build --filter="@openfoundry/${SERVICE}"
 
 # ---------------------------------------------------------------------------
 # Stage 3: production-only dependencies
