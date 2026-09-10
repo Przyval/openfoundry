@@ -29,6 +29,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build workspace packages
+        # Services run from source via tsx, but they import workspace packages
+        # through their published entry points (dist/index.js), so those must be
+        # compiled first or every service dies with ERR_MODULE_NOT_FOUND.
+        run: pnpm run build
+
       - name: Start services in background
         env:
           # Enables POST /api/v2/auth/signup for tests/integration/tenant-isolation.test.ts.
