@@ -142,6 +142,21 @@ export class LinkStore {
     };
   }
 
+  /**
+   * Returns every link of a given type from a source object, unpaginated.
+   *
+   * The linked-objects endpoint resolves links into objects and orders them by
+   * object property before cutting a page, so it needs the whole set rather
+   * than {@link getLinks}' pre-paginated slice.
+   */
+  getAllLinks(
+    objectType: string,
+    primaryKey: string,
+    linkType: string,
+  ): StoredLink[] {
+    return this.links.get(this.key(objectType, primaryKey, linkType)) ?? [];
+  }
+
   deleteLink(
     objectType: string,
     primaryKey: string,

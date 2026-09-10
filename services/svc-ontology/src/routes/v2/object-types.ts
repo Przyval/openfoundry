@@ -3,6 +3,25 @@ import type { ObjectTypeDefinition } from "@openfoundry/ontology-schema";
 import type { OntologyStore } from "../../store/ontology-store.js";
 import { requirePermission } from "@openfoundry/permissions";
 import { paginateArray } from "./pagination-helpers.js";
+import { parseBooleanParam } from "./query-params.js";
+
+/**
+ * Populates the `datasources` field the caller opted into with
+ * `includeDatasources=true`.
+ *
+ * Foundry only emits this field when the flag is set, and documents the list as
+ * possibly empty when the caller can see no backing datasource. OpenFoundry
+ * object types are served straight from the object store rather than from a
+ * backing dataset, so the list is always empty here — but its presence still
+ * tracks the flag exactly, which is the part of the contract a client can act on.
+ */
+function withDatasources<T>(
+  objectType: T,
+  includeDatasources: boolean | undefined,
+): T | (T & { datasources: never[] }) {
+  if (includeDatasources !== true) return objectType;
+  return { ...objectType, datasources: [] };
+}
 
 export async function objectTypeRoutes(
   app: FastifyInstance,
@@ -13,13 +32,25 @@ export async function objectTypeRoutes(
   // List object types
   app.get<{
     Params: { ontologyRid: string };
-    Querystring: { pageSize?: string; pageToken?: string };
+    Querystring: {
+      pageSize?: string;
+      pageToken?: string;
+      includeDatasources?: string;
+    };
   }>("/ontologies/:ontologyRid/objectTypes", {
     preHandler: requirePermission("ontology:read"),
   }, async (request) => {
+    const includeDatasources = parseBooleanParam(
+      "includeDatasources",
+      request.query.includeDatasources,
+    );
     const raw = await store.listObjectTypes(request.params.ontologyRid);
     const all = Array.isArray(raw) ? raw : (raw as { items: unknown[] }).items ?? [];
-    return paginateArray(all, request.query);
+    const page = paginateArray(all, request.query);
+    return {
+      ...page,
+      data: page.data.map((ot) => withDatasources(ot, includeDatasources)),
+    };
   });
 
   // Create object type
@@ -40,16 +71,22 @@ export async function objectTypeRoutes(
   // Get object type by apiName
   app.get<{
     Params: { ontologyRid: string; objectTypeApiName: string };
+    Querystring: { includeDatasources?: string };
   }>(
     "/ontologies/:ontologyRid/objectTypes/:objectTypeApiName",
     {
       preHandler: requirePermission("ontology:read"),
     },
     async (request) => {
-      return await store.getObjectType(
+      const includeDatasources = parseBooleanParam(
+        "includeDatasources",
+        request.query.includeDatasources,
+      );
+      const objectType = await store.getObjectType(
         request.params.ontologyRid,
         request.params.objectTypeApiName,
       );
+      return withDatasources(objectType, includeDatasources);
     },
   );
 

@@ -24,21 +24,9 @@ interface ExecutionParams {
   };
 }
 
-interface ApplyBody {
-  Body: {
-    parameters: Record<string, unknown>;
-  };
-}
-
 interface ValidateBody {
   Body: {
     parameters: Record<string, unknown>;
-  };
-}
-
-interface BatchBody {
-  Body: {
-    requests: Array<{ parameters: Record<string, unknown> }>;
   };
 }
 
@@ -67,7 +55,10 @@ export async function actionRoutes(
   // -----------------------------------------------------------------------
   // POST /api/v2/ontologies/:ontologyRid/actions/:actionApiName/apply
   // -----------------------------------------------------------------------
-  app.post<ActionParams & ApplyBody>(
+  app.post<{
+    Params: { ontologyRid: string; actionApiName: string };
+    Body: { parameters: Record<string, unknown> };
+  }>(
     "/ontologies/:ontologyRid/actions/:actionApiName/apply",
     {
       preHandler: requirePermission("actions:execute"),
@@ -160,7 +151,10 @@ export async function actionRoutes(
   // -----------------------------------------------------------------------
   // POST /api/v2/ontologies/:ontologyRid/actions/:actionApiName/applyBatch
   // -----------------------------------------------------------------------
-  app.post<ActionParams & BatchBody>(
+  app.post<{
+    Params: { ontologyRid: string; actionApiName: string };
+    Body: { requests: Array<{ parameters: Record<string, unknown> }> };
+  }>(
     "/ontologies/:ontologyRid/actions/:actionApiName/applyBatch",
     {
       preHandler: requirePermission("actions:execute"),

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { UserStore, StoredUser } from "../../store/user-store.js";
 import type { GroupStore } from "../../store/group-store.js";
 import { requirePermission } from "@openfoundry/permissions";
+import { customClient, invalidArgument } from "@openfoundry/errors";
 import { paginateArray } from "./pagination-helpers.js";
 
 /** Serialize a StoredUser to the wire format. */
@@ -29,6 +30,36 @@ function serializeGroup(g: { rid: string; name: string; description?: string; cr
   };
 }
 
+/**
+ * The user lifecycle states Foundry exposes on the wire.
+ *
+ * OpenFoundry tracks a wider `UserStatus` internally — `ACTIVE`, `INACTIVE`
+ * and `SUSPENDED` — while Foundry's `UserStatus` is only `ACTIVE` or
+ * `DELETED`. Deleting a user here sets `INACTIVE` (see `UserStore.deleteUser`),
+ * so `INACTIVE` is what `DELETED` names on the wire; `SUSPENDED` is neither.
+ */
+const FOUNDRY_USER_STATUSES = ["ACTIVE", "DELETED"] as const;
+type FoundryUserStatus = (typeof FOUNDRY_USER_STATUSES)[number];
+
+function parseUserStatus(
+  param: string,
+  raw: string | undefined,
+): FoundryUserStatus | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  if ((FOUNDRY_USER_STATUSES as readonly string[]).includes(raw)) {
+    return raw as FoundryUserStatus;
+  }
+  throw invalidArgument(
+    param,
+    `must be one of ${FOUNDRY_USER_STATUSES.join(", ")}, got "${raw}"`,
+  );
+}
+
+/** Whether a stored user is in the requested Foundry lifecycle state. */
+function matchesStatus(user: StoredUser, status: FoundryUserStatus): boolean {
+  return status === "ACTIVE" ? user.status === "ACTIVE" : user.status === "INACTIVE";
+}
+
 export async function userRoutes(
   app: FastifyInstance,
   opts: { userStore: UserStore; groupStore: GroupStore },
@@ -47,12 +78,17 @@ export async function userRoutes(
 
   // List users (paginated)
   app.get<{
-    Querystring: { pageSize?: string; pageToken?: string };
+    Querystring: { pageSize?: string; pageToken?: string; include?: string };
   }>("/admin/users", {
     preHandler: requirePermission("admin:manage"),
   }, async (request) => {
-    const all = userStore.listUsers().map(serializeUser);
-    return paginateArray(all, request.query);
+    // `include` narrows the listing to one lifecycle state. Omitting it keeps
+    // the endpoint's existing behaviour of listing users in every state.
+    const include = parseUserStatus("include", request.query.include);
+    const users = include
+      ? userStore.listUsers().filter((u) => matchesStatus(u, include))
+      : userStore.listUsers();
+    return paginateArray(users.map(serializeUser), request.query);
   });
 
   // Create user
@@ -74,10 +110,23 @@ export async function userRoutes(
   // Get user by RID
   app.get<{
     Params: { userRid: string };
+    Querystring: { status?: string };
   }>("/admin/users/:userRid", {
     preHandler: requirePermission("admin:manage"),
   }, async (request) => {
+    // `status` asserts which lifecycle state the caller expects the user to be
+    // in. Foundry answers a mismatch with `UserDeleted` or `UserIsActive`
+    // rather than the user record. Omitting it returns the user either way,
+    // which is what this endpoint has always done.
+    const status = parseUserStatus("status", request.query.status);
     const user = userStore.getUser(request.params.userRid);
+
+    if (status !== undefined && !matchesStatus(user, status)) {
+      throw status === "ACTIVE"
+        ? customClient(400, "UserDeleted", "The user is deleted.")
+        : customClient(400, "UserIsActive", "The user is an active user.");
+    }
+
     return serializeUser(user);
   });
 

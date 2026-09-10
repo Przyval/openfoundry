@@ -16,6 +16,7 @@ import {
 import type { LinkStore } from "../../store/link-store.js";
 import { encodePageToken, decodePageToken, type PageToken } from "@openfoundry/pagination";
 import { requirePermission } from "@openfoundry/permissions";
+import { parseBooleanParam } from "./query-params.js";
 
 // ---------------------------------------------------------------------------
 // Query engine singleton
@@ -276,12 +277,20 @@ export async function objectSetRoutes(
   const { store, linkStore } = opts;
 
   // Load objects from an ObjectSet query (enhanced with filter/where support)
-  app.post<{ Params: OntologyParams; Body: LoadObjectsBody }>(
+  app.post<{
+    Params: OntologyParams;
+    Querystring: { executeInMemoryOnly?: string };
+    Body: LoadObjectsBody;
+  }>(
     "/ontologies/:ontologyRid/objectSets/loadObjects",
     {
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
+      // The object set is resolved entirely from the in-memory object store,
+      // so the in-memory-only guarantee always holds; the flag is validated
+      // rather than silently swallowed.
+      parseBooleanParam("executeInMemoryOnly", request.query.executeInMemoryOnly);
       const { objectSet: objectSetDef, select, pageSize = 100, pageToken, orderBy } = request.body;
 
       let objects = resolveApiObjectSet(objectSetDef, store, linkStore);
@@ -345,12 +354,18 @@ export async function objectSetRoutes(
   );
 
   // Aggregate over an ObjectSet
-  app.post<{ Params: OntologyParams; Body: AggregateBody }>(
+  app.post<{
+    Params: OntologyParams;
+    Querystring: { executeInMemoryOnly?: string };
+    Body: AggregateBody;
+  }>(
     "/ontologies/:ontologyRid/objectSets/aggregate",
     {
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
+      // See loadObjects: aggregation runs over the in-memory object store.
+      parseBooleanParam("executeInMemoryOnly", request.query.executeInMemoryOnly);
       const { objectSet: objectSetDef, aggregation: aggregations, groupBy } = request.body;
 
       const objects = resolveApiObjectSet(objectSetDef, store, linkStore);

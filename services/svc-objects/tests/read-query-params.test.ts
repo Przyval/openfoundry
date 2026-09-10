@@ -1,0 +1,484 @@
+/**
+ * Behaviour of the Foundry read query parameters on the object endpoints.
+ *
+ * Each test asserts what the parameter actually changes about the response, not
+ * merely that the request is accepted: a parameter that is declared but ignored
+ * would tell a client its request was honoured when it was not.
+ */
+
+import { describe, it, expect, beforeEach } from "vitest";
+import type { FastifyInstance } from "fastify";
+import { createServer } from "../src/server.js";
+import { ObjectStore } from "../src/store/object-store.js";
+import { LinkStore } from "../src/store/link-store.js";
+
+const ONTOLOGY_RID = "ri.ontology.main.ontology.test-ontology";
+const BASE_URL = `/api/v2/ontologies/${ONTOLOGY_RID}`;
+
+let app: FastifyInstance;
+let store: ObjectStore;
+let linkStore: LinkStore;
+
+beforeEach(async () => {
+  store = new ObjectStore(null);
+  linkStore = new LinkStore(null);
+  app = await createServer({
+    config: { port: 0, host: "127.0.0.1", logLevel: "silent" },
+    store,
+    linkStore,
+  });
+});
+
+/** Seeds three employees whose names and salaries sort in different orders. */
+function seedEmployees() {
+  store.createObject("Employee", "emp-1", {
+    name: "Carol",
+    department: "Engineering",
+    salary: 120000,
+  });
+  store.createObject("Employee", "emp-2", {
+    name: "Alice",
+    department: "Sales",
+    salary: 90000,
+  });
+  store.createObject("Employee", "emp-3", {
+    name: "Bob",
+    department: "Engineering",
+    salary: 150000,
+  });
+}
+
+// ===========================================================================
+// GET /objects/{objectType}
+// ===========================================================================
+
+describe("List objects — select", () => {
+  it("returns only the selected properties", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?select=name`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    for (const obj of res.json().data) {
+      expect(Object.keys(obj.properties)).toEqual(["name"]);
+    }
+  });
+
+  it("honours an exploded list, which is how the Foundry clients send it", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?select=name&select=salary`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    for (const obj of res.json().data) {
+      expect(Object.keys(obj.properties).sort()).toEqual(["name", "salary"]);
+    }
+  });
+
+  it("returns every property when omitted", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee`,
+    });
+
+    expect(Object.keys(res.json().data[0].properties).sort()).toEqual([
+      "department",
+      "name",
+      "salary",
+    ]);
+  });
+});
+
+describe("List objects — orderBy", () => {
+  it("sorts ascending by default", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?orderBy=properties.name`,
+    });
+
+    expect(res.json().data.map((o: any) => o.properties.name)).toEqual([
+      "Alice",
+      "Bob",
+      "Carol",
+    ]);
+  });
+
+  it("sorts descending when the term says so", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?orderBy=properties.salary:desc`,
+    });
+
+    expect(res.json().data.map((o: any) => o.properties.salary)).toEqual([
+      150000, 120000, 90000,
+    ]);
+  });
+
+  it("accepts the documented `p.` shorthand", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?orderBy=p.name:desc`,
+    });
+
+    expect(res.json().data.map((o: any) => o.properties.name)).toEqual([
+      "Carol",
+      "Bob",
+      "Alice",
+    ]);
+  });
+
+  it("breaks ties with the second comma-delimited term", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?orderBy=properties.department,properties.salary:desc`,
+    });
+
+    expect(
+      res.json().data.map((o: any) => [o.properties.department, o.properties.salary]),
+    ).toEqual([
+      ["Engineering", 150000],
+      ["Engineering", 120000],
+      ["Sales", 90000],
+    ]);
+  });
+
+  it("rejects a property that is not prefixed", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?orderBy=name`,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorCode).toBe("INVALID_ARGUMENT");
+  });
+
+  it("rejects an unknown sort direction", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?orderBy=properties.name:sideways`,
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("List objects — excludeRid", () => {
+  it("withholds the rid when true", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?excludeRid=true`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    for (const obj of res.json().data) {
+      expect(obj.rid).toBeUndefined();
+      expect(obj.primaryKey).toBeDefined();
+    }
+  });
+
+  it("returns the rid when false or omitted", async () => {
+    seedEmployees();
+    for (const url of [
+      `${BASE_URL}/objects/Employee?excludeRid=false`,
+      `${BASE_URL}/objects/Employee`,
+    ]) {
+      const res = await app.inject({ method: "GET", url });
+      expect(res.json().data[0].rid).toBeDefined();
+    }
+  });
+
+  it("rejects a value that is neither true nor false", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?excludeRid=yes`,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorCode).toBe("INVALID_ARGUMENT");
+  });
+});
+
+describe("List objects — snapshot", () => {
+  it("hides objects created after paging began", async () => {
+    seedEmployees();
+
+    const first = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?pageSize=2&snapshot=true`,
+    });
+    expect(first.json().data).toHaveLength(2);
+    const token = first.json().nextPageToken;
+    expect(token).toBeDefined();
+
+    // A new object entering mid-paging must not appear in the frozen view.
+    store.createObject("Employee", "emp-4", { name: "Dave", salary: 70000 });
+
+    const second = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?pageSize=2&snapshot=true&pageToken=${token}`,
+    });
+    expect(second.json().data.map((o: any) => o.primaryKey)).toEqual(["emp-3"]);
+  });
+
+  it("lets new objects in when snapshot is not requested", async () => {
+    seedEmployees();
+
+    const first = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?pageSize=2`,
+    });
+    const token = first.json().nextPageToken;
+
+    store.createObject("Employee", "emp-4", { name: "Dave", salary: 70000 });
+
+    const second = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?pageSize=2&pageToken=${token}`,
+    });
+    expect(second.json().data.map((o: any) => o.primaryKey)).toEqual([
+      "emp-3",
+      "emp-4",
+    ]);
+  });
+
+  it("keeps the plain cursor token when snapshot is off", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?pageSize=1`,
+    });
+
+    const cursor = JSON.parse(
+      Buffer.from(res.json().nextPageToken, "base64url").toString("utf-8"),
+    );
+    expect(cursor).toEqual({ offset: 1 });
+  });
+
+  it("freezes the view even for objects created within the same millisecond", async () => {
+    seedEmployees();
+
+    const first = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?pageSize=2&snapshot=true`,
+    });
+    const token = first.json().nextPageToken;
+
+    // No await between the first page and these writes: a wall-clock snapshot
+    // boundary would be unable to tell them apart from the seeded objects.
+    store.createObject("Employee", "emp-5", { name: "Erin" });
+    store.createObject("Employee", "emp-6", { name: "Frank" });
+
+    const second = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?pageSize=10&snapshot=true&pageToken=${token}`,
+    });
+    expect(second.json().data.map((o: any) => o.primaryKey)).toEqual(["emp-3"]);
+  });
+});
+
+describe("List objects — pageSize and pageToken", () => {
+  it("cuts the page and reports totalCount across all pages", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?pageSize=2`,
+    });
+
+    expect(res.json().data).toHaveLength(2);
+    expect(res.json().totalCount).toBe(3);
+    expect(res.json().nextPageToken).toBeDefined();
+  });
+});
+
+// ===========================================================================
+// GET /objects/{objectType}/{primaryKey}
+// ===========================================================================
+
+describe("Get object — select and excludeRid", () => {
+  it("returns only the selected properties", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee/emp-1?select=salary`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().properties).toEqual({ salary: 120000 });
+  });
+
+  it("withholds the rid when excludeRid is true", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee/emp-1?excludeRid=true`,
+    });
+
+    expect(res.json().rid).toBeUndefined();
+    expect(res.json().primaryKey).toBe("emp-1");
+  });
+
+  it("returns the whole object when neither is given", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee/emp-1`,
+    });
+
+    expect(res.json().rid).toBeDefined();
+    expect(Object.keys(res.json().properties).sort()).toEqual([
+      "department",
+      "name",
+      "salary",
+    ]);
+  });
+});
+
+// ===========================================================================
+// GET .../links/{linkType}
+// ===========================================================================
+
+describe("List linked objects — select, orderBy, excludeRid, snapshot", () => {
+  beforeEach(() => {
+    seedEmployees();
+    store.createObject("Project", "proj-1", { name: "Zeta", budget: 10 });
+    store.createObject("Project", "proj-2", { name: "Alpha", budget: 30 });
+    store.createObject("Project", "proj-3", { name: "Mu", budget: 20 });
+    for (const pk of ["proj-1", "proj-2", "proj-3"]) {
+      linkStore.createLink("Employee", "emp-1", "projects", "Project", pk);
+    }
+  });
+
+  const linksUrl = `${BASE_URL}/objects/Employee/emp-1/links/projects`;
+
+  it("orders the linked objects by property", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `${linksUrl}?orderBy=properties.name`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.map((o: any) => o.properties.name)).toEqual([
+      "Alpha",
+      "Mu",
+      "Zeta",
+    ]);
+  });
+
+  it("projects the selected properties", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `${linksUrl}?select=budget`,
+    });
+
+    for (const obj of res.json().data) {
+      expect(Object.keys(obj.properties)).toEqual(["budget"]);
+    }
+  });
+
+  it("withholds the rid when excludeRid is true", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `${linksUrl}?excludeRid=true`,
+    });
+
+    for (const obj of res.json().data) {
+      expect(obj.rid).toBeUndefined();
+    }
+  });
+
+  it("pages, and hides links added after a snapshot listing began", async () => {
+    const first = await app.inject({
+      method: "GET",
+      url: `${linksUrl}?pageSize=2&snapshot=true`,
+    });
+    expect(first.json().data).toHaveLength(2);
+    const token = first.json().nextPageToken;
+
+    store.createObject("Project", "proj-4", { name: "Later", budget: 1 });
+    linkStore.createLink("Employee", "emp-1", "projects", "Project", "proj-4");
+
+    const second = await app.inject({
+      method: "GET",
+      url: `${linksUrl}?pageSize=2&snapshot=true&pageToken=${token}`,
+    });
+    expect(second.json().data).toHaveLength(1);
+  });
+
+  it("keeps the numeric page token when snapshot is off", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `${linksUrl}?pageSize=2`,
+    });
+
+    expect(res.json().nextPageToken).toBe("2");
+  });
+});
+
+// ===========================================================================
+// executeInMemoryOnly
+// ===========================================================================
+
+describe("executeInMemoryOnly", () => {
+  it("is satisfied by object search, which never leaves memory", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "POST",
+      url: `${BASE_URL}/objects/Employee/search?executeInMemoryOnly=true`,
+      payload: { where: { type: "eq", field: "department", value: "Sales" } },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toHaveLength(1);
+  });
+
+  it("is satisfied by objectSets/loadObjects", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "POST",
+      url: `${BASE_URL}/objectSets/loadObjects?executeInMemoryOnly=true`,
+      payload: { objectSet: { type: "base", objectType: "Employee" } },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toHaveLength(3);
+  });
+
+  it("is satisfied by objectSets/aggregate", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "POST",
+      url: `${BASE_URL}/objectSets/aggregate?executeInMemoryOnly=true`,
+      payload: {
+        objectSet: { type: "base", objectType: "Employee" },
+        aggregation: [{ type: "count" }],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("rejects a value that is neither true nor false", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "POST",
+      url: `${BASE_URL}/objects/Employee/search?executeInMemoryOnly=maybe`,
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorCode).toBe("INVALID_ARGUMENT");
+  });
+});

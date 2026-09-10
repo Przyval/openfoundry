@@ -12,10 +12,21 @@ import {
 import {
   encodePageToken,
   decodePageToken,
+  type PageCursor,
   type PageToken,
 } from "@openfoundry/pagination";
 import { requirePermission } from "@openfoundry/permissions";
 import { writeAuditLog } from "@openfoundry/db";
+import {
+  applyExcludeRid,
+  applyOrderBy,
+  applySelect as applySelectedProperties,
+  applySnapshot,
+  parseBooleanParam,
+  parseListParam,
+  parseOrderBy,
+  resolveSnapshotSize,
+} from "./query-params.js";
 
 // ---------------------------------------------------------------------------
 // Shared query engine
@@ -47,9 +58,19 @@ interface UpdateBody {
   properties: Record<string, unknown>;
 }
 
+/**
+ * Query parameters of `GET /v2/ontologies/{ontology}/objects/{objectType}`.
+ *
+ * Declared inline rather than as a named type so the contract is legible in the
+ * route registration itself.
+ */
 interface ListQuery {
   pageSize?: number;
   pageToken?: string;
+  select?: string | string[];
+  orderBy?: string;
+  excludeRid?: string;
+  snapshot?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,23 +202,6 @@ function searchFilterToWhere(f: SearchFilter): WhereClause | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: apply `select` to objects (project only requested properties)
-// ---------------------------------------------------------------------------
-
-function applySelect(objects: StoredObject[], select?: string[]): StoredObject[] {
-  if (!select || select.length === 0) return objects;
-  return objects.map((obj) => {
-    const filtered: Record<string, unknown> = {};
-    for (const prop of select) {
-      if (prop in obj.properties) {
-        filtered[prop] = obj.properties[prop];
-      }
-    }
-    return { ...obj, properties: filtered };
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Helper: paginate an array of objects
 // ---------------------------------------------------------------------------
 
@@ -238,30 +242,94 @@ export async function objectRoutes(
   const { store, pool } = opts;
 
   // List objects (paginated)
-  app.get<{ Params: ListParams; Querystring: ListQuery }>(
+  app.get<{
+    Params: ListParams;
+    Querystring: {
+      pageSize?: number;
+      pageToken?: string;
+      select?: string | string[];
+      orderBy?: string;
+      excludeRid?: string;
+      snapshot?: string;
+    };
+  }>(
     "/ontologies/:ontologyRid/objects/:objectType",
     {
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
       const { objectType } = request.params;
-      const { pageSize, pageToken } = request.query;
-      return store.listObjects(objectType, {
-        pageSize: pageSize ? Number(pageSize) : undefined,
-        pageToken,
-      });
+      const query = request.query as ListQuery;
+
+      const select = parseListParam(query.select);
+      const orderBy = parseOrderBy(query.orderBy);
+      const excludeRid = parseBooleanParam("excludeRid", query.excludeRid);
+      const snapshot = parseBooleanParam("snapshot", query.snapshot);
+
+      const pageSize = query.pageSize ? Number(query.pageSize) : 100;
+      const cursor: PageCursor = query.pageToken
+        ? decodePageToken(query.pageToken as PageToken)
+        : { offset: 0 };
+
+      // A snapshot listing freezes its view at the size the collection had
+      // when paging began and carries that boundary forward in every token.
+      const all = store.allObjects(objectType);
+      const snapshotSize = resolveSnapshotSize(
+        snapshot,
+        cursor.snapshotSize,
+        all.length,
+      );
+
+      let objects = applySnapshot(all, snapshotSize);
+      if (orderBy) {
+        objects = applyOrderBy(objects, orderBy);
+      }
+      const totalCount = objects.length;
+
+      const slice = objects.slice(cursor.offset, cursor.offset + pageSize + 1);
+      const hasMore = slice.length > pageSize;
+      const page = hasMore ? slice.slice(0, pageSize) : slice;
+
+      const data = applyExcludeRid(
+        applySelectedProperties(page, select),
+        excludeRid,
+      );
+
+      return {
+        data,
+        totalCount,
+        ...(hasMore
+          ? {
+              nextPageToken: encodePageToken({
+                offset: cursor.offset + pageSize,
+                ...(snapshotSize !== undefined && { snapshotSize }),
+              }),
+            }
+          : {}),
+      };
     },
   );
 
   // Get single object
-  app.get<{ Params: ObjectParams }>(
+  app.get<{
+    Params: ObjectParams;
+    Querystring: { select?: string | string[]; excludeRid?: string };
+  }>(
     "/ontologies/:ontologyRid/objects/:objectType/:primaryKey",
     {
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
       const { objectType, primaryKey } = request.params;
-      return store.getObject(objectType, primaryKey);
+      const select = parseListParam(request.query.select);
+      const excludeRid = parseBooleanParam("excludeRid", request.query.excludeRid);
+
+      const object = store.getObject(objectType, primaryKey);
+      const [result] = applyExcludeRid(
+        applySelectedProperties([object], select),
+        excludeRid,
+      );
+      return result;
     },
   );
 
@@ -339,13 +407,22 @@ export async function objectRoutes(
   //   eq, gt, gte, lt, lte, isNull, contains, not, and, or,
   //   startsWith, containsAnyTerm, containsAllTerms
   // ---------------------------------------------------------------------------
-  app.post<{ Params: ListParams; Body: SearchJsonQueryV2 }>(
+  app.post<{
+    Params: ListParams;
+    Querystring: { executeInMemoryOnly?: string };
+    Body: SearchJsonQueryV2;
+  }>(
     "/ontologies/:ontologyRid/objects/:objectType/search",
     {
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
       const { objectType } = request.params;
+      // `executeInMemoryOnly` asks the service to fail rather than fall back to
+      // heavier computation. This handler resolves the whole search from the
+      // in-memory object store, so the guarantee always holds and the flag can
+      // only fail validation.
+      parseBooleanParam("executeInMemoryOnly", request.query.executeInMemoryOnly);
       const { where, orderBy, pageSize = 100, pageToken, select } = request.body;
 
       // Start with all objects of this type
@@ -382,7 +459,7 @@ export async function objectRoutes(
       const page = paginate(objects, pageSize, pageToken);
 
       // Apply select (property projection)
-      const data = applySelect(page.data, select);
+      const data = applySelectedProperties(page.data, select);
 
       return {
         data,

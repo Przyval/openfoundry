@@ -48,6 +48,15 @@ The suite is still NOT idempotent against a live gateway: a second run fails wit
 already-created ontologies and with counts inflated by the previous run's objects.
 Run `rm -rf /tmp/openfoundry-data` before re-running, or you will chase failures that are only leftover state.
 
+## Store sharp edges
+
+Never order or bound anything by a store's `createdAt`.
+Those are millisecond ISO strings and collide freely - three transactions opened in one request, or an object created right after a page was served, all share a timestamp.
+Order by position instead: the in-memory stores are `Map`s and arrays in insertion order, so an index is exact where a timestamp is ambiguous.
+
+`PgObjectStore` implements only the CRUD subset of `ObjectStore` - it has no `allObjects`, and `svc-objects/src/server.ts` casts it with `store as ObjectStore`.
+Anything reached through `allObjects` (object search, object-set load and aggregate) therefore throws against a Postgres-backed deployment while passing every in-memory test.
+
 ## Secrets
 
 Real credentials live only in `.env`, which is gitignored; `.env.example` lists every key with empty values.
