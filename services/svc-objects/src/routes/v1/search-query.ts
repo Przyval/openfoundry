@@ -125,7 +125,13 @@ export function matchesV1Query(
       return actual === query.value;
 
     case "isNull":
-      return (actual === null || actual === undefined) === (query.value === true);
+      if (typeof query.value !== "boolean") {
+        throw invalidArgument(
+          "query",
+          'an "isNull" filter requires a boolean "value"',
+        );
+      }
+      return (actual === null || actual === undefined) === query.value;
 
     case "contains":
       // v1 `ContainsQuery`: "the specified array contains a value".

@@ -83,8 +83,20 @@ interface AggregateBody {
   groupBy?: Array<{ field: string; type: string }>;
 }
 
+/**
+ * Decodes a caller-supplied page token, reporting a malformed one as a client
+ * error rather than letting the decoder's plain `Error` become a 500.
+ */
 function cursorOf(pageToken: string | undefined): PageCursor {
-  return pageToken ? decodePageToken(pageToken as PageToken) : { offset: 0 };
+  if (!pageToken) return { offset: 0 };
+  try {
+    return decodePageToken(pageToken as PageToken);
+  } catch (err) {
+    throw invalidArgument(
+      "pageToken",
+      err instanceof Error ? err.message : "is not a valid page token",
+    );
+  }
 }
 
 /**
@@ -204,6 +216,7 @@ export async function objectRoutesV1(
     );
 
     const pageSize = parsePageSize(request.query.pageSize) ?? DEFAULT_PAGE_SIZE;
+    const cursor = cursorOf(request.query.pageToken);
 
     // Ordering spans the whole collection, so only that case needs every object
     // read; a plain listing stays on the store's paged path, which is a
@@ -222,7 +235,7 @@ export async function objectRoutesV1(
     }
 
     const objects = applyOrderBy(await store.allObjects(objectType), orderBy);
-    const result = page(objects, cursorOf(request.query.pageToken), pageSize);
+    const result = page(objects, cursor, pageSize);
     return {
       data: applySelect(result.data, properties).map(toV1OntologyObject),
       totalCount: objects.length,
@@ -398,6 +411,18 @@ export async function objectRoutesV1(
           throw invalidArgument(
             "aggregation",
             `"${aggregation?.type}" is not implemented; supported: ${[...SUPPORTED_AGGREGATIONS.keys()].join(", ")}`,
+          );
+        }
+        // `count` is the only v1 aggregation that takes no field. Without one
+        // the others read an undefined property off every object and report 0,
+        // which reads as a real answer to a request v1 does not allow.
+        if (
+          aggregation.type !== "count" &&
+          (typeof aggregation.field !== "string" || aggregation.field === "")
+        ) {
+          throw invalidArgument(
+            "aggregation",
+            `a "${aggregation.type}" aggregation requires a field`,
           );
         }
       }

@@ -439,3 +439,112 @@ describe("v1 aggregate metric names", () => {
     expect(res.json().parameters.param).toBe("groupBy");
   });
 });
+
+describe("v1 aggregate field requirement", () => {
+  for (const type of ["sum", "avg", "min", "max", "approximateDistinct"]) {
+    it(`refuses a "${type}" aggregation with no field`, async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: `${BASE}/objects/Employee/aggregate`,
+        payload: { aggregation: [{ type }] },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().parameters.param).toBe("aggregation");
+    });
+  }
+
+  it("still counts without a field, the one v1 aggregation that takes none", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `${BASE}/objects/Employee/aggregate`,
+      payload: { aggregation: [{ type: "count" }] },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual([
+      { group: {}, metrics: [{ name: "count", value: 3 }] },
+    ]);
+  });
+});
+
+describe("v1 page token validation", () => {
+  const urls = [
+    `${BASE}/objects/Employee`,
+    `${BASE}/objects/Employee?orderBy=p.name`,
+    `${BASE}/objects/Employee/e1/links/worksIn`,
+  ];
+
+  for (const url of urls) {
+    it(`reports a malformed pageToken on GET ${url} as a 400`, async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: `${url}${url.includes("?") ? "&" : "?"}pageToken=zz`,
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().parameters.param).toBe("pageToken");
+    });
+  }
+
+  it("reports a malformed pageToken in the search body as a 400", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `${BASE}/objects/Employee/search`,
+      payload: { pageToken: "zz" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().parameters.param).toBe("pageToken");
+  });
+
+  it("still follows a token it issued itself", async () => {
+    const first = await app.inject({
+      method: "GET",
+      url: `${BASE}/objects/Employee?orderBy=p.name&pageSize=2`,
+    });
+    expect(first.statusCode).toBe(200);
+
+    const second = await app.inject({
+      method: "GET",
+      url: `${BASE}/objects/Employee?orderBy=p.name&pageSize=2&pageToken=${first.json().nextPageToken}`,
+    });
+
+    expect(second.statusCode).toBe(200);
+    expect(second.json().data).toHaveLength(1);
+  });
+});
+
+describe("v1 isNull filter", () => {
+  async function search(payload: object) {
+    return app.inject({
+      method: "POST",
+      url: `${BASE}/objects/Employee/search`,
+      payload,
+    });
+  }
+
+  it("refuses an isNull filter with no value rather than inverting it", async () => {
+    // `value` is required on v1 `IsNullQuery`; treating an absent one as false
+    // answers with exactly the objects the caller asked to exclude.
+    const res = await search({ query: { type: "isNull", field: "hiredOn" } });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().parameters.param).toBe("query");
+  });
+
+  it("honours both boolean values", async () => {
+    // No employee carries `hiredOn`.
+    const missing = await search({
+      query: { type: "isNull", field: "hiredOn", value: true },
+    });
+    expect(missing.statusCode).toBe(200);
+    expect(missing.json().totalCount).toBe(3);
+
+    const present = await search({
+      query: { type: "isNull", field: "hiredOn", value: false },
+    });
+    expect(present.statusCode).toBe(200);
+    expect(present.json().totalCount).toBe(0);
+  });
+});
