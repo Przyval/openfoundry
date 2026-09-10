@@ -266,10 +266,17 @@ export interface RateLimitPluginOptions {
  * Extract a rate-limit key from the request.
  *
  * Precedence:
- * 1. Authorization header (hashed to avoid storing raw tokens)
- * 2. Client IP address
+ * 1. Tenant org_rid (per-tenant isolation — each tenant gets their own bucket)
+ * 2. Authorization header hash (fallback for pre-tenancy requests)
+ * 3. Client IP address
  */
 function extractKey(request: FastifyRequest): string {
+  // Per-tenant rate limiting: each org gets its own bucket
+  const orgRid = (request as { orgRid?: string }).orgRid;
+  if (orgRid) {
+    return `org:${orgRid}`;
+  }
+
   const auth = request.headers.authorization;
   if (typeof auth === "string" && auth.length > 0) {
     // Use a simple hash of the auth header to avoid storing credentials

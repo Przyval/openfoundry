@@ -22,6 +22,8 @@ let validateOptions: ValidateTokenOptions = {};
 declare module "fastify" {
   interface FastifyRequest {
     claims?: OpenFoundryClaims;
+    /** Tenant organization RID, extracted from JWT `org` claim. */
+    orgRid?: string;
   }
 }
 
@@ -32,6 +34,8 @@ declare module "fastify" {
 const SKIP_AUTH_PREFIXES = [
   "/status/",
   "/multipass/api/oauth2/",
+  "/multipass/api/auth/login",
+  "/api/v2/auth/signup",
 ];
 
 function shouldSkipAuth(url: string): boolean {
@@ -113,6 +117,12 @@ export async function authPlugin(
     try {
       const claims = await validateToken(token, publicKey, validateOptions);
       request.claims = claims;
+
+      // Extract tenant org from JWT claims for RLS and per-tenant rate limiting
+      const orgClaim = (claims as Record<string, unknown>).org;
+      if (typeof orgClaim === "string" && orgClaim.length > 0) {
+        request.orgRid = orgClaim;
+      }
     } catch (err: unknown) {
       if (err instanceof TokenValidationError) {
         throw new OpenFoundryApiError({
