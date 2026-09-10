@@ -11,7 +11,9 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "vitest run --passWithNoTests"
@@ -26,6 +28,7 @@
     "react": "^18.0.0"
   },
   "devDependencies": {
+    "@types/node": "^20.14.0",
     "@types/react": "^18.3.0",
     "typescript": "^5.4.0",
     "vitest": "^1.6.0"
