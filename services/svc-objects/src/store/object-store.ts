@@ -45,8 +45,20 @@ export interface ListResult {
  */
 export interface ObjectTypeSchemaSource {
   propertyNames(
+    ontologyRid: string,
     objectType: string,
   ): ReadonlySet<string> | undefined | Promise<ReadonlySet<string> | undefined>;
+
+  /**
+   * The object type a link type points at, per the link type's own
+   * declaration. `undefined` when the link type is not declared, which - like
+   * an undeclared object type - means nothing can be checked.
+   */
+  linkTargetObjectType(
+    ontologyRid: string,
+    objectType: string,
+    linkType: string,
+  ): string | undefined | Promise<string | undefined>;
 }
 
 /**
@@ -64,7 +76,12 @@ export interface ObjectReadWriteStore {
     objectType: string,
     options?: ListOptions,
   ): ListResult | Promise<ListResult>;
+  getObjectsByKeys(
+    objectType: string,
+    primaryKeys: string[],
+  ): StoredObject[] | Promise<StoredObject[]>;
   propertyNames?: ObjectTypeSchemaSource["propertyNames"];
+  linkTargetObjectType?: ObjectTypeSchemaSource["linkTargetObjectType"];
   getObject(
     objectType: string,
     primaryKey: string,

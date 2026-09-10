@@ -301,17 +301,74 @@ export class PgObjectStore {
    * lists is real whether or not any row has populated it. Returns `undefined`
    * when the type is unknown or declares nothing, so callers make no claim
    * about a property name they have no declaration for.
+   *
+   * Scoped by ontology because `object_types` is unique on
+   * `(ontology_rid, api_name)`: two ontologies may each declare `Employee`
+   * with different properties, and an unscoped lookup would answer with
+   * whichever row the database happened to yield first.
    */
-  async propertyNames(objectType: string): Promise<ReadonlySet<string> | undefined> {
-    const { rows } = await this.pool.query<{ properties: Record<string, unknown> | null }>({
-      text: `SELECT properties FROM object_types WHERE api_name = $1 LIMIT 1`,
-      values: [objectType],
+  async propertyNames(
+    ontologyRid: string,
+    objectType: string,
+  ): Promise<ReadonlySet<string> | undefined> {
+    return this.withTenant(async (client) => {
+      const { rows } = await client.query<{ properties: Record<string, unknown> | null }>({
+        text: `SELECT properties FROM object_types
+               WHERE ontology_rid = $1 AND api_name = $2
+               LIMIT 1`,
+        values: [ontologyRid, objectType],
+      });
+
+      const declared = rows[0]?.properties;
+      if (!declared || typeof declared !== "object") return undefined;
+      const names = Object.keys(declared);
+      return names.length > 0 ? new Set(names) : undefined;
+    });
+  }
+
+  /**
+   * Reads the object type a link type points at from the link type's own
+   * declaration, so the answer does not depend on which links happen to exist.
+   */
+  async linkTargetObjectType(
+    ontologyRid: string,
+    objectType: string,
+    linkType: string,
+  ): Promise<string | undefined> {
+    return this.withTenant(async (client) => {
+      const { rows } = await client.query<{ linked_object_type_api_name: string }>({
+        text: `SELECT linked_object_type_api_name FROM link_types
+               WHERE ontology_rid = $1 AND object_type_api_name = $2 AND api_name = $3
+               LIMIT 1`,
+        values: [ontologyRid, objectType, linkType],
+      });
+      return rows[0]?.linked_object_type_api_name;
+    });
+  }
+
+  /**
+   * Gets objects by explicit primary keys, matching
+   * `ObjectStore.getObjectsByKeys`. Keys with no row are simply absent from
+   * the result rather than an error.
+   */
+  async getObjectsByKeys(
+    objectType: string,
+    primaryKeys: string[],
+  ): Promise<StoredObject[]> {
+    if (primaryKeys.length === 0) return [];
+    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+
+    const { rows } = await this.pool.query<ObjectRow>({
+      text: `SELECT * FROM objects
+             WHERE object_type_rid = $1 AND primary_key = ANY($2::text[])`,
+      values: [objectTypeRid, primaryKeys],
     });
 
-    const declared = rows[0]?.properties;
-    if (!declared || typeof declared !== "object") return undefined;
-    const names = Object.keys(declared);
-    return names.length > 0 ? new Set(names) : undefined;
+    const byKey = new Map(rows.map((r) => [r.primary_key, r]));
+    return primaryKeys
+      .map((key) => byKey.get(key))
+      .filter((row): row is ObjectRow => row !== undefined)
+      .map((row) => rowToStoredObject(row, objectType));
   }
 
   /**

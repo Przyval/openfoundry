@@ -73,27 +73,30 @@ export async function linkRoutes(
 ): Promise<void> {
   const { linkStore, objectStore, objectTypeSchema } = opts;
 
-  const declaredProperties = (objectType: string) =>
-    objectTypeSchema
-      ? objectTypeSchema.propertyNames(objectType)
-      : objectStore.propertyNames?.(objectType);
-
   /**
-   * The properties declared across the object types the links point at.
+   * The object type a linked-objects listing returns, and the properties that
+   * type declares.
    *
-   * A link type can resolve to more than one target type, so a name is known
-   * when any of them declares it. If any target type has no declaration the
-   * union cannot be complete, and `undefined` suppresses the check rather than
-   * calling a name unknown on incomplete evidence.
+   * Both come from the declaration - the link type says what it points at, and
+   * that object type says what its properties are - so the same request is
+   * answered the same way whether the source object has no links or many.
+   * `properties` is `undefined` when either declaration is missing, which
+   * leaves the request unchecked rather than judged on absent evidence.
    */
-  const declaredAcross = async (
-    objectTypes: readonly string[],
-  ): Promise<ReadonlySet<string> | undefined> => {
-    const sets = await Promise.all(objectTypes.map(declaredProperties));
-    if (sets.length === 0 || sets.some((set) => set === undefined)) {
-      return undefined;
-    }
-    return new Set(sets.flatMap((set) => [...set!]));
+  const declaredTarget = async (
+    ontologyRid: string,
+    objectType: string,
+    linkType: string,
+  ): Promise<{ objectType: string; properties?: ReadonlySet<string> }> => {
+    const target = objectTypeSchema
+      ? await objectTypeSchema.linkTargetObjectType(ontologyRid, objectType, linkType)
+      : await objectStore.linkTargetObjectType?.(ontologyRid, objectType, linkType);
+    if (target === undefined) return { objectType };
+
+    const properties = objectTypeSchema
+      ? await objectTypeSchema.propertyNames(ontologyRid, target)
+      : await objectStore.propertyNames?.(ontologyRid, target);
+    return { objectType: target, ...(properties ? { properties } : {}) };
   };
 
   // Get linked objects (paginated)
@@ -116,7 +119,7 @@ export async function linkRoutes(
     },
     async (request) => {
       rejectUnsupportedOntologyScoping(request.query);
-      const { objectType, primaryKey, linkType } = request.params;
+      const { ontologyRid, objectType, primaryKey, linkType } = request.params;
       const query = request.query;
 
       const select = parseListParam(query.select);
@@ -139,12 +142,11 @@ export async function linkRoutes(
       );
       const links = applySnapshot(allLinks, snapshotSize);
 
-      const targetTypes = [...new Set(links.map((l) => l.targetObjectType))];
-      const declared = await declaredAcross(targetTypes);
-      assertPropertiesExist(objectType, declared, select);
+      const target = await declaredTarget(ontologyRid, objectType, linkType);
+      assertPropertiesExist(target.objectType, target.properties, select);
       assertPropertiesExist(
-        objectType,
-        declared,
+        target.objectType,
+        target.properties,
         orderBy?.map((term) => term.property),
       );
 

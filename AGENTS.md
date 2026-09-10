@@ -54,8 +54,8 @@ Never order or bound anything by a store's `createdAt`.
 Those are millisecond ISO strings and collide freely - three transactions opened in one request, or an object created right after a page was served, all share a timestamp.
 Order by position instead: the in-memory stores are `Map`s and arrays in insertion order, so an index is exact where a timestamp is ambiguous.
 
-`PgObjectStore` implements only the CRUD subset of `ObjectStore` - it has no `allObjects`, and `svc-objects/src/server.ts` casts it with `store as ObjectStore`.
-Anything reached through `allObjects` (object search, object-set load and aggregate) therefore throws against a Postgres-backed deployment while passing every in-memory test.
+`PgObjectStore` is fully async where `ObjectStore` is synchronous. Both satisfy `ObjectReadWriteStore`, whose methods return `T | Promise<T>`, and every route in `svc-objects/src/server.ts` is registered against that interface with no cast.
+Await every store call in a handler: an unawaited read passes every in-memory test and serves a pending promise as a 200 against Postgres.
 
 There are no ontology branches, scenarios or ontology transactions - every `branch` in this repo is a *dataset* branch, and the console's Scenarios page persists nothing.
 The v2 ontology endpoints therefore reject any `branch`, `scenarioRid` or `transactionId` value rather than serving the only state there is; `packages/errors/src/ontology-scoping.ts` is the single place that policy lives.

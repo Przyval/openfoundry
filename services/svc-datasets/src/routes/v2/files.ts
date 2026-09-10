@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { FileStore } from "../../store/file-store.js";
 import type { DatasetStore } from "../../store/dataset-store.js";
 import { requirePermission } from "@openfoundry/permissions";
-import { customClient, notFound } from "@openfoundry/errors";
+import { customClient } from "@openfoundry/errors";
 import { paginateArray } from "./pagination-helpers.js";
 
 /** Serialize a file to the wire format (without content). */
@@ -31,30 +31,27 @@ export async function fileRoutes(
 
   // List files (must be registered before the wildcard route)
   //
-  // Foundry scopes this listing three ways, all of which resolve against the
-  // dataset's own branches and transactions:
-  //   - `branchName`         files written by transactions on that branch
-  //   - `endTransactionRid`  files up to and including that transaction
-  //   - `startTransactionRid` + `endTransactionRid`  files in that range
-  // plus `pathPrefix`, which filters on the file path itself.
+  // Only `pathPrefix` scopes this listing. Foundry also scopes it by
+  // `branchName` and a `startTransactionRid`/`endTransactionRid` range, but
+  // `FileStore` is keyed by `${datasetRid}::${path}`, so re-uploading a path
+  // overwrites the record and only the newest transaction survives. Serving
+  // those parameters needs per-transaction file versions - new storage, not
+  // parameter completion - and until the store has them the filters would
+  // answer an empty set for any path that was ever rewritten.
   app.get<{
     Params: { datasetRid: string };
     Querystring: {
       pageSize?: string;
       pageToken?: string;
-      branchName?: string;
       pathPrefix?: string;
-      startTransactionRid?: string;
-      endTransactionRid?: string;
     };
   }>("/datasets/:datasetRid/files", {
     preHandler: requirePermission("datasets:read"),
   }, async (request) => {
     const datasetRid = request.params.datasetRid;
-    const { branchName, pathPrefix, startTransactionRid, endTransactionRid } =
-      request.query;
+    const { pathPrefix } = request.query;
 
-    const dataset = datasetStore.getDataset(datasetRid);
+    datasetStore.getDataset(datasetRid);
 
     if (pathPrefix !== undefined && pathPrefix.startsWith("/")) {
       throw customClient(
@@ -64,94 +61,24 @@ export async function fileRoutes(
       );
     }
 
-    let branchRid: string | undefined;
-    if (branchName !== undefined) {
-      if (branchName === "" || /^ri\./.test(branchName)) {
-        throw customClient(
-          400,
-          "InvalidBranchName",
-          "The requested branch name cannot be used. Branch names cannot be empty and must not look like RIDs or UUIDs.",
-        );
-      }
-      const branch = dataset.branches.get(branchName);
-      if (!branch) {
-        throw notFound("Branch", branchName);
-      }
-      branchRid = branch.rid;
-    }
-
-    // Transactions are ordered by the position they were opened in rather than
-    // by their timestamp: several can be opened within the same millisecond,
-    // which would leave a timestamp comparison unable to separate them.
-    const transactionOrder = new Map(
-      [...dataset.transactions.keys()].map((rid, index) => [rid, index]),
-    );
-
-    // Resolve the bounds first so an unknown rid is reported as such rather
-    // than silently matching nothing.
-    const resolveOrdinal = (rid: string) => {
-      const ordinal = transactionOrder.get(rid);
-      if (ordinal === undefined) {
-        throw notFound("Transaction", rid);
-      }
-      return ordinal;
-    };
-    const endOrdinal =
-      endTransactionRid !== undefined ? resolveOrdinal(endTransactionRid) : undefined;
-    const startOrdinal =
-      startTransactionRid !== undefined
-        ? resolveOrdinal(startTransactionRid)
-        : undefined;
-
-    const files = fileStore.listFiles(datasetRid).filter((file) => {
-      if (pathPrefix !== undefined && !file.path.startsWith(pathPrefix)) {
-        return false;
-      }
-
-      // Files uploaded outside a transaction carry no transaction rid. They
-      // belong to the dataset's latest view on every branch, so they survive a
-      // branch filter but cannot fall inside a transaction range.
-      const transaction = file.transactionRid
-        ? dataset.transactions.get(file.transactionRid)
-        : undefined;
-
-      if (branchRid !== undefined && transaction && transaction.branchRid !== branchRid) {
-        return false;
-      }
-
-      if (startOrdinal !== undefined || endOrdinal !== undefined) {
-        if (!transaction) return false;
-        const ordinal = transactionOrder.get(transaction.rid);
-        if (ordinal === undefined) return false;
-        if (startOrdinal !== undefined && ordinal < startOrdinal) return false;
-        if (endOrdinal !== undefined && ordinal > endOrdinal) return false;
-      }
-
-      return true;
-    });
+    const files = fileStore
+      .listFiles(datasetRid)
+      .filter(
+        (file) => pathPrefix === undefined || file.path.startsWith(pathPrefix),
+      );
 
     return paginateArray(files.map(serializeFile), request.query);
   });
 
   // Upload file (raw body)
-  //
-  // Foundry attributes an upload to an open transaction via `transactionRid`;
-  // that attribution is what the listing's `branchName` and transaction-range
-  // filters resolve against, so a file written without it belongs to the
-  // dataset's latest view on every branch and to no transaction range.
   app.put<{
     Params: { datasetRid: string; "*": string };
-    Querystring: { transactionRid?: string };
   }>("/datasets/:datasetRid/files/*", {
     preHandler: requirePermission("datasets:write"),
   }, async (request, reply) => {
     const datasetRid = request.params.datasetRid;
-    const dataset = datasetStore.getDataset(datasetRid);
-
-    const { transactionRid } = request.query;
-    if (transactionRid !== undefined && !dataset.transactions.has(transactionRid)) {
-      throw notFound("Transaction", transactionRid);
-    }
+    // Ensure dataset exists
+    datasetStore.getDataset(datasetRid);
 
     const filePath = request.params["*"];
     const body = request.body as Buffer | string | null;
@@ -167,7 +94,7 @@ export async function fileRoutes(
       filePath,
       content,
       contentType,
-      transactionRid ?? "",
+      "", // transactionRid is optional for direct upload
     );
     reply.status(201);
     return serializeFile(file);

@@ -249,10 +249,10 @@ export async function objectRoutes(
 ): Promise<void> {
   const { store, objectTypeSchema, pool } = opts;
 
-  const declaredProperties = (objectType: string) =>
+  const declaredProperties = (ontologyRid: string, objectType: string) =>
     objectTypeSchema
-      ? objectTypeSchema.propertyNames(objectType)
-      : store.propertyNames?.(objectType);
+      ? objectTypeSchema.propertyNames(ontologyRid, objectType)
+      : store.propertyNames?.(ontologyRid, objectType);
 
   // List objects (paginated)
   app.get<{
@@ -273,7 +273,7 @@ export async function objectRoutes(
     },
     async (request) => {
       rejectUnsupportedOntologyScoping(request.query);
-      const { objectType } = request.params;
+      const { ontologyRid, objectType } = request.params;
       const query = request.query as ListQuery;
 
       const select = parseListParam(query.select);
@@ -288,7 +288,7 @@ export async function objectRoutes(
 
       // A snapshot listing freezes its view at the size the collection had
       // when paging began and carries that boundary forward in every token.
-      const declared = await declaredProperties(objectType);
+      const declared = await declaredProperties(ontologyRid, objectType);
       assertPropertiesExist(objectType, declared, select);
       assertPropertiesExist(
         objectType,
@@ -360,13 +360,13 @@ export async function objectRoutes(
     },
     async (request) => {
       rejectUnsupportedOntologyScoping(request.query);
-      const { objectType, primaryKey } = request.params;
+      const { ontologyRid, objectType, primaryKey } = request.params;
       const select = parseListParam(request.query.select);
       const excludeRid = parseBooleanParam("excludeRid", request.query.excludeRid);
 
       assertPropertiesExist(
         objectType,
-        await declaredProperties(objectType),
+        await declaredProperties(ontologyRid, objectType),
         select,
       );
 
@@ -471,6 +471,12 @@ export async function objectRoutes(
       // only fail validation.
       parseBooleanParam("executeInMemoryOnly", request.query.executeInMemoryOnly);
       const { where, orderBy, pageSize = 100, pageToken, select } = request.body;
+
+      assertPropertiesExist(
+        objectType,
+        await declaredProperties(request.params.ontologyRid, objectType),
+        select,
+      );
 
       // Start with all objects of this type
       let objects = await store.allObjects(objectType);

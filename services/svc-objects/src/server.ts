@@ -123,14 +123,19 @@ export async function createServer(
     objectTypeSchema: options.objectTypeSchema,
     pool: pgPool,
   });
-  await app.register(objectSetRoutes, { prefix: "/api/v2", store: store as ObjectStore, linkStore });
+  await app.register(objectSetRoutes, {
+    prefix: "/api/v2",
+    store,
+    linkStore,
+    objectTypeSchema: options.objectTypeSchema,
+  });
   await app.register(linkRoutes, {
     prefix: "/api/v2",
     linkStore,
     objectStore: store,
     objectTypeSchema: options.objectTypeSchema,
   });
-  await app.register(importRoutes, { prefix: "/api/v2", objectStore: store as ObjectStore });
+  await app.register(importRoutes, { prefix: "/api/v2", objectStore: store });
   await app.register(semanticSearchRoutes, {
     prefix: "/api/v2",
     aipServiceUrl: config.aipServiceUrl ?? "http://localhost:8092",

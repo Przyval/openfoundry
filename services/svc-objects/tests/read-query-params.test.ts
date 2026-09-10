@@ -612,8 +612,12 @@ describe("Unknown property names", () => {
       store: typedStore,
       linkStore: typedLinkStore,
       objectTypeSchema: {
-        propertyNames: (objectType) =>
+        propertyNames: (_ontologyRid, objectType) =>
           objectType === "Employee" ? EMPLOYEE_PROPERTIES : undefined,
+        linkTargetObjectType: (_ontologyRid, objectType, linkType) =>
+          objectType === "Employee" && linkType === "reportsTo"
+            ? "Employee"
+            : undefined,
       },
     });
 
@@ -722,5 +726,121 @@ describe("Unknown property names", () => {
     );
     expect(good.statusCode).toBe(200);
     expect(good.json().data[0].properties).toEqual({ name: "Alice" });
+  });
+
+  it("answers a linked-objects typo the same way with no links at all", async () => {
+    const res = await get("/objects/Employee/emp-1/links/reportsTo?select=nmae");
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("PropertiesNotFound");
+  });
+
+  it("makes no claim for a link type the definition source does not declare", async () => {
+    const res = await get("/objects/Employee/emp-1/links/undeclared?select=nmae");
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual([]);
+  });
+
+  it("checks select on the search body the same way", async () => {
+    const res = await typedApp.inject({
+      method: "POST",
+      url: `${BASE_URL}/objects/Employee/search`,
+      payload: { select: ["nmae"] },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("PropertiesNotFound");
+  });
+
+  it("checks select on the objectSets loadObjects body the same way", async () => {
+    const res = await typedApp.inject({
+      method: "POST",
+      url: `${BASE_URL}/objectSets/loadObjects`,
+      payload: {
+        objectSet: { type: "base", objectType: "Employee" },
+        select: ["nmae"],
+      },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("PropertiesNotFound");
+  });
+
+  it("serves a declared but unpopulated property on the search body", async () => {
+    const res = await typedApp.inject({
+      method: "POST",
+      url: `${BASE_URL}/objects/Employee/search`,
+      payload: { select: ["name", "endDate"] },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toHaveLength(2);
+  });
+});
+
+// ===========================================================================
+// Linked-objects error names the type actually checked
+// ===========================================================================
+
+describe("Linked objects — PropertiesNotFound names the target type", () => {
+  it("names the link type's declared target, not the source type", async () => {
+    const linkedStore = new ObjectStore(null);
+    const linkedLinks = new LinkStore(null);
+    const linkedApp = await createServer({
+      config: { port: 0, host: "127.0.0.1", logLevel: "silent" },
+      store: linkedStore,
+      linkStore: linkedLinks,
+      objectTypeSchema: {
+        propertyNames: (_ontologyRid, objectType) =>
+          objectType === "Department"
+            ? new Set(["title"])
+            : new Set(["name"]),
+        linkTargetObjectType: (_ontologyRid, objectType, linkType) =>
+          objectType === "Employee" && linkType === "manages"
+            ? "Department"
+            : undefined,
+      },
+    });
+
+    linkedStore.createObject("Employee", "emp-1", { name: "Carol" });
+
+    const res = await linkedApp.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee/emp-1/links/manages?select=nmae`,
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().parameters.objectType).toBe("Department");
+    expect(res.json().parameters.properties).toEqual(["nmae"]);
+  });
+
+  it("accepts a property of the target type that the source type lacks", async () => {
+    const linkedStore = new ObjectStore(null);
+    const linkedLinks = new LinkStore(null);
+    const linkedApp = await createServer({
+      config: { port: 0, host: "127.0.0.1", logLevel: "silent" },
+      store: linkedStore,
+      linkStore: linkedLinks,
+      objectTypeSchema: {
+        propertyNames: (_ontologyRid, objectType) =>
+          objectType === "Department"
+            ? new Set(["title"])
+            : new Set(["name"]),
+        linkTargetObjectType: () => "Department",
+      },
+    });
+
+    linkedStore.createObject("Employee", "emp-1", { name: "Carol" });
+    linkedStore.createObject("Department", "dep-1", { title: "Engineering" });
+    linkedLinks.createLink("Employee", "emp-1", "manages", "Department", "dep-1");
+
+    const res = await linkedApp.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee/emp-1/links/manages?select=title`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data[0].properties).toEqual({ title: "Engineering" });
   });
 });

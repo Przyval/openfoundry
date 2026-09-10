@@ -117,6 +117,10 @@ services:
           pageToken:
             type: optional<PageToken>
             param-type: query
+          include:
+            type: optional<string>
+            param-type: query
+            docs: Narrow the listing to ACTIVE or DELETED users
         returns: ListUsersResponse
 
       searchUsers:
@@ -145,6 +149,10 @@ services:
           userRid:
             type: Rid
             param-type: path
+          status:
+            type: optional<string>
+            param-type: query
+            docs: Assert the user is ACTIVE or DELETED; a mismatch is an error
         returns: User
 
       updateUser:

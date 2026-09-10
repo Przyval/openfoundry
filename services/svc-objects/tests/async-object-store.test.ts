@@ -72,6 +72,13 @@ class AsyncObjectStore implements ObjectReadWriteStore {
   async deleteObject(objectType: string, primaryKey: string): Promise<void> {
     this.inner.deleteObject(objectType, primaryKey);
   }
+
+  async getObjectsByKeys(
+    objectType: string,
+    primaryKeys: string[],
+  ): Promise<StoredObject[]> {
+    return this.inner.getObjectsByKeys(objectType, primaryKeys);
+  }
 }
 
 let app: FastifyInstance;
@@ -218,5 +225,92 @@ describe("Linked objects against an async store", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().data).toEqual([]);
+  });
+});
+
+describe("Object sets against an async store", () => {
+  const objectSets = (path: string, payload: unknown) =>
+    app.inject({
+      method: "POST",
+      url: `/api/v2/ontologies/${ONTOLOGY_RID}/objectSets/${path}`,
+      payload,
+    });
+
+  it("counts the resolved objects rather than a pending read", async () => {
+    const res = await objectSets("aggregate", {
+      objectSet: { type: "base", objectType: "Employee" },
+      aggregation: [{ type: "count" }],
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data[0].value).toBe(2);
+  });
+
+  it("computes a numeric aggregate over the resolved objects", async () => {
+    const res = await objectSets("aggregate", {
+      objectSet: { type: "base", objectType: "Employee" },
+      aggregation: [{ type: "sum", field: "salary" }],
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data[0].value).toBe(210000);
+  });
+
+  it("loads the resolved objects", async () => {
+    const res = await objectSets("loadObjects", {
+      objectSet: { type: "base", objectType: "Employee" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().totalCount).toBe(2);
+    expect(res.json().data.map((o: any) => o.primaryKey).sort()).toEqual([
+      "emp-1",
+      "emp-2",
+    ]);
+  });
+
+  it("resolves a filtered object set", async () => {
+    const res = await objectSets("loadObjects", {
+      objectSet: {
+        type: "filter",
+        objectSet: { type: "base", objectType: "Employee" },
+        where: { type: "eq", field: "name", value: "Alice" },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.map((o: any) => o.primaryKey)).toEqual(["emp-2"]);
+  });
+
+  it("resolves a static object set by primary key", async () => {
+    const res = await objectSets("loadObjects", {
+      objectSet: {
+        type: "static",
+        objectType: "Employee",
+        primaryKeys: ["emp-2"],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.map((o: any) => o.primaryKey)).toEqual(["emp-2"]);
+  });
+
+  it("resolves a search-around object set through the link store", async () => {
+    linkStore.createLink("Employee", "emp-1", "reportsTo", "Employee", "emp-2");
+
+    const res = await objectSets("loadObjects", {
+      objectSet: {
+        type: "searchAround",
+        objectSet: {
+          type: "static",
+          objectType: "Employee",
+          primaryKeys: ["emp-1"],
+        },
+        link: "reportsTo",
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.map((o: any) => o.primaryKey)).toEqual(["emp-2"]);
   });
 });
