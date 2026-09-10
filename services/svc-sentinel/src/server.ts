@@ -11,6 +11,7 @@ import { PgExecutionLog } from "./store/pg-execution-log.js";
 import { EffectExecutor } from "./effects/effect-executor.js";
 import { healthRoutes } from "./routes/health.js";
 import { v2Routes } from "./routes/v2/index.js";
+import { Scheduler } from "./scheduler.js";
 
 // ---------------------------------------------------------------------------
 // Server factory
@@ -134,6 +135,19 @@ export async function createServer(
     notificationStore,
     effectExecutor,
   });
+
+  // -- Background Scheduler ------------------------------------------------
+  const scheduler = new Scheduler(
+    monitorStore as MonitorStore,
+    executionLog as ExecutionLog,
+    effectExecutor,
+    {
+      intervalMs: 60_000, // Check every 60 seconds
+      objectsServiceUrl: process.env.OBJECTS_SERVICE_URL ?? "http://localhost:8082",
+    },
+  );
+  scheduler.start();
+  app.addHook("onClose", () => scheduler.stop());
 
   return app;
 }
