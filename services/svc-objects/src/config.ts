@@ -8,6 +8,9 @@ export interface ObjectsConfig {
 
   /** PostgreSQL connection string.  When set, the PG store is used instead of in-memory. */
   readonly databaseUrl?: string;
+
+  /** Base URL of svc-aip for embedding and semantic search proxying. */
+  readonly aipServiceUrl?: string;
 }
 
 function env(key: string, fallback: string): string {
@@ -30,5 +33,6 @@ export function loadConfig(): ObjectsConfig {
     host: env("HOST", "0.0.0.0"),
     logLevel: env("LOG_LEVEL", "info"),
     databaseUrl: process.env.DATABASE_URL || undefined,
+    aipServiceUrl: process.env.AIP_SERVICE_URL || undefined,
   };
 }
