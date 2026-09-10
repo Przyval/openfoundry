@@ -544,6 +544,121 @@ describe("Link type CRUD", () => {
 });
 
 // -------------------------------------------------------------------------
+// Outgoing link types (Foundry `listOutgoingLinkTypes` contract)
+// -------------------------------------------------------------------------
+
+describe("Outgoing link types", () => {
+  let ontologyRid: string;
+
+  beforeEach(async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v2/ontologies",
+      payload: { apiName: "links", displayName: "Links", description: "d" },
+    });
+    ontologyRid = res.json().rid;
+
+    for (const name of ["Employee", "Department"]) {
+      await app.inject({
+        method: "POST",
+        url: `/api/v2/ontologies/${ontologyRid}/objectTypes`,
+        payload: makeObjectType(name),
+      });
+    }
+    await app.inject({
+      method: "POST",
+      url: `/api/v2/ontologies/${ontologyRid}/linkTypes`,
+      payload: makeLinkType("employeeDepartment", "Employee", "Department"),
+    });
+  });
+
+  it("returns each outgoing link as a LinkTypeSideV2", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes/Employee/outgoingLinkTypes`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual([
+      {
+        apiName: "employeeDepartment",
+        displayName: "employeeDepartment",
+        status: "ACTIVE",
+        // A link side names the far end of the link, not the object type asked for.
+        objectTypeApiName: "Department",
+        cardinality: "MANY",
+        foreignKeyPropertyApiName: "DepartmentId",
+      },
+    ]);
+  });
+
+  it("excludes links where the object type is the target, not the source", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes/Department/outgoingLinkTypes`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual([]);
+
+    // The neighbouring OpenFoundry route still reports both directions.
+    const bothWays = await app.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes/Department/linkTypes`,
+    });
+    expect(bothWays.json().data).toHaveLength(1);
+  });
+
+  it("paginates", async () => {
+    await app.inject({
+      method: "POST",
+      url: `/api/v2/ontologies/${ontologyRid}/linkTypes`,
+      payload: makeLinkType("employeeManager", "Employee", "Employee"),
+    });
+
+    const firstPage = await app.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes/Employee/outgoingLinkTypes?pageSize=1`,
+    });
+    expect(firstPage.json().data).toHaveLength(1);
+    const token = firstPage.json().nextPageToken;
+    expect(token).toBeTruthy();
+
+    const secondPage = await app.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes/Employee/outgoingLinkTypes?pageSize=1&pageToken=${token}`,
+    });
+    expect(secondPage.json().data).toHaveLength(1);
+    expect(secondPage.json().nextPageToken).toBeUndefined();
+  });
+
+  it("returns 404 for an unknown object type", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes/Nope/outgoingLinkTypes`,
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("ObjectTypeNotFound");
+  });
+
+  it("rejects a non-numeric pageSize instead of reporting no link types", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes/Employee/outgoingLinkTypes?pageSize=abc`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorName).toBe("InvalidArgument");
+  });
+
+  it("rejects an undecodable pageToken as a client error", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes/Employee/outgoingLinkTypes?pageToken=zzz`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorName).toBe("InvalidArgument");
+  });
+});
+
+// -------------------------------------------------------------------------
 // Interface type CRUD
 // -------------------------------------------------------------------------
 

@@ -19,6 +19,10 @@ import {
 import PageHeader from "../components/PageHeader";
 import PaginationControls from "../components/PaginationControls";
 import { useApi } from "../hooks/useApi";
+import {
+  fetchOutgoingLinkTypes,
+  type LinkTypeDef,
+} from "../lib/linkTypes";
 import { API_BASE_URL } from "../config";
 
 // ---------------------------------------------------------------------------
@@ -71,16 +75,6 @@ interface FilterRule {
   field: string;
   operator: string;
   value: string;
-}
-
-interface LinkTypeDef {
-  apiName: string;
-  displayName?: string;
-  objectTypeApiName?: string;
-}
-
-interface LinkTypeListResponse {
-  data: LinkTypeDef[];
 }
 
 interface LinkedObjectsResponse {
@@ -189,6 +183,7 @@ export default function ObjectExplorer() {
   const [linkTypes, setLinkTypes] = useState<LinkTypeDef[]>([]);
   const [linkedObjectsMap, setLinkedObjectsMap] = useState<Record<string, OntologyObject[]>>({});
   const [linkTypesLoading, setLinkTypesLoading] = useState(false);
+  const [linkTypesError, setLinkTypesError] = useState<string | null>(null);
   const [linkedObjectsLoading, setLinkedObjectsLoading] = useState<Record<string, boolean>>({});
 
   // -- Column sorting (client-side click on header) -------------------------
@@ -198,9 +193,8 @@ export default function ObjectExplorer() {
   const currentToken = pageTokens[pageTokens.length - 1] ?? "";
 
   // -- Fetch ontologies -----------------------------------------------------
-  const { data: ontologiesData } = useApi<OntologyListResponse>(
-    "/api/v2/ontologies",
-  );
+  const { data: ontologiesData, error: ontologiesError } =
+    useApi<OntologyListResponse>("/api/v2/ontologies");
   const ontologies = ontologiesData?.data ?? [];
 
   // -- Auto-select ontology when there's exactly one --------------------------
@@ -211,7 +205,11 @@ export default function ObjectExplorer() {
   }, [ontologies, ontologyRid]);
 
   // -- Fetch full metadata for object types ---------------------------------
-  const { data: fullMetadata, loading: metadataLoading } = useApi<FullMetadataResponse>(
+  const {
+    data: fullMetadata,
+    loading: metadataLoading,
+    error: metadataError,
+  } = useApi<FullMetadataResponse>(
     ontologyRid ? `/api/v2/ontologies/${ontologyRid}/fullMetadata` : "",
   );
 
@@ -450,6 +448,8 @@ export default function ObjectExplorer() {
 
   // -- Fetch link types when an object is selected --------------------------
   useEffect(() => {
+    setLinkTypesError(null);
+
     if (!selectedObject || !ontologyRid) {
       setLinkTypes([]);
       setLinkedObjectsMap({});
@@ -460,25 +460,19 @@ export default function ObjectExplorer() {
     setLinkTypesLoading(true);
 
     async function fetchLinkTypes() {
-      try {
-        const res = await fetch(
-          `${API_BASE_URL}/api/v2/ontologies/${ontologyRid}/objectTypes/${selectedObject!.objectType}/outgoingLinkTypes`,
-          {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
-          },
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as LinkTypeListResponse;
-        if (!cancelled) {
-          setLinkTypes(data.data ?? []);
-        }
-      } catch {
-        if (!cancelled) setLinkTypes([]);
-      } finally {
-        if (!cancelled) setLinkTypesLoading(false);
+      const result = await fetchOutgoingLinkTypes(
+        ontologyRid,
+        selectedObject!.objectType,
+        localStorage.getItem("token"),
+      );
+      if (cancelled) return;
+      if (result.ok) {
+        setLinkTypes(result.linkTypes);
+      } else {
+        setLinkTypes([]);
+        setLinkTypesError(result.error);
       }
+      setLinkTypesLoading(false);
     }
 
     void fetchLinkTypes();
@@ -716,7 +710,15 @@ export default function ObjectExplorer() {
         </FormGroup>
       </div>
 
-      {!ontologyRid ? (
+      {ontologiesError ? (
+        <Callout
+          intent={Intent.DANGER}
+          icon="error"
+          title="Could not load ontologies"
+        >
+          {ontologiesError.message}
+        </Callout>
+      ) : !ontologyRid ? (
         <NonIdealState
           icon="search"
           title="Select an ontology"
@@ -724,6 +726,14 @@ export default function ObjectExplorer() {
         />
       ) : metadataLoading ? (
         <Spinner size={40} />
+      ) : metadataError ? (
+        <Callout
+          intent={Intent.DANGER}
+          icon="error"
+          title="Could not load object types"
+        >
+          {metadataError.message}
+        </Callout>
       ) : objectTypes.length === 0 ? (
         <NonIdealState
           icon="inbox-search"
@@ -863,6 +873,14 @@ export default function ObjectExplorer() {
 
                   {linkTypesLoading ? (
                     <Spinner size={30} />
+                  ) : linkTypesError ? (
+                    <Callout
+                      intent={Intent.DANGER}
+                      icon="error"
+                      title="Could not load outgoing link types"
+                    >
+                      {linkTypesError}
+                    </Callout>
                   ) : linkTypes.length === 0 ? (
                     <Callout intent={Intent.NONE} icon="info-sign">
                       No outgoing link types found for this object type.

@@ -2,7 +2,26 @@ import type { FastifyInstance } from "fastify";
 import type { LinkTypeDefinition } from "@openfoundry/ontology-schema";
 import type { OntologyStore } from "../../store/ontology-store.js";
 import { requirePermission } from "@openfoundry/permissions";
+import { rejectUnsupportedOntologyScoping } from "@openfoundry/errors";
 import { paginateArray } from "./pagination-helpers.js";
+
+/**
+ * Project a link type onto Foundry's `LinkTypeSideV2`, as seen from
+ * `objectTypeApiName`.
+ *
+ * A link side describes the *far* end of the link, so the emitted
+ * `objectTypeApiName` is the linked object type, not the one being queried.
+ */
+function toLinkTypeSide(link: LinkTypeDefinition) {
+  return {
+    apiName: link.apiName,
+    displayName: link.apiName,
+    status: "ACTIVE",
+    objectTypeApiName: link.linkedObjectTypeApiName,
+    cardinality: link.cardinality,
+    foreignKeyPropertyApiName: link.foreignKeyPropertyApiName,
+  };
+}
 
 export async function linkTypeRoutes(
   app: FastifyInstance,
@@ -42,6 +61,35 @@ export async function linkTypeRoutes(
         request.params.objectTypeApiName,
       );
       return paginateArray(all, request.query);
+    },
+  );
+
+  // List the outgoing link types of an object type.
+  //
+  // This is Foundry's `ontologies.ObjectType.listOutgoingLinkTypes`: only the
+  // links where this object type is the source count as outgoing, and each is
+  // returned as a `LinkTypeSideV2`.  The neighbouring `/linkTypes` route is
+  // OpenFoundry's own, returns both directions, and is left as it is because
+  // `@openfoundry/sdk` calls it.
+  app.get<{
+    Params: { ontologyRid: string; objectTypeApiName: string };
+    Querystring: { branch?: string; pageSize?: string; pageToken?: string };
+  }>(
+    "/ontologies/:ontologyRid/objectTypes/:objectTypeApiName/outgoingLinkTypes",
+    {
+      preHandler: requirePermission("ontology:read"),
+    },
+    async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
+      const { ontologyRid, objectTypeApiName } = request.params;
+      const all = await store.listLinkTypesForObjectType(
+        ontologyRid,
+        objectTypeApiName,
+      );
+      const outgoing = all
+        .filter((link) => link.objectTypeApiName === objectTypeApiName)
+        .map(toLinkTypeSide);
+      return paginateArray(outgoing, request.query);
     },
   );
 

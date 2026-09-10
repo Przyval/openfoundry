@@ -357,6 +357,53 @@ describe("NOTIFICATION effect execution", () => {
     expect(readRes.statusCode).toBe(200);
     expect(readRes.json().read).toBe(true);
   });
+
+  it("marks every notification read in one call", async () => {
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/api/v2/monitors",
+      payload: {
+        name: "read-all-test",
+        objectType: "Employee",
+        trigger: { type: "OBJECT_CHANGED", config: { properties: ["status"] } },
+        effects: [
+          { type: "NOTIFICATION", config: { message: "Ping", severity: "INFO" } },
+        ],
+      },
+    });
+    const rid = createRes.json().rid;
+
+    for (let i = 0; i < 2; i++) {
+      await app.inject({
+        method: "POST",
+        url: `/api/v2/monitors/${rid}/trigger`,
+        payload: {},
+      });
+    }
+
+    const before = await app.inject({ method: "GET", url: "/api/v2/notifications" });
+    expect(before.json().data).toHaveLength(2);
+    expect(before.json().data.every((n: { read: boolean }) => !n.read)).toBe(true);
+
+    const readAllRes = await app.inject({
+      method: "POST",
+      url: "/api/v2/notifications/read-all",
+    });
+    expect(readAllRes.statusCode).toBe(200);
+    expect(readAllRes.json().updated).toBe(2);
+
+    const after = await app.inject({ method: "GET", url: "/api/v2/notifications" });
+    expect(after.json().data.every((n: { read: boolean }) => n.read)).toBe(true);
+  });
+
+  it("reports nothing updated when all notifications are already read", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v2/notifications/read-all",
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().updated).toBe(0);
+  });
 });
 
 // -------------------------------------------------------------------------

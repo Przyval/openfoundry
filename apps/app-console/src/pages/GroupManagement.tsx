@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import {
   Button,
+  Callout,
   Dialog,
   DialogBody,
   DialogFooter,
@@ -15,6 +16,11 @@ import {
 import PageHeader from "../components/PageHeader";
 import DataTable, { type ColumnDef } from "../components/DataTable";
 import { useApi } from "../hooks/useApi";
+import { apiErrorMessage } from "../lib/apiError";
+import {
+  MEMBERS_PAGE_SIZE,
+  describeMemberTruncation,
+} from "../lib/groupMembers";
 import { API_BASE_URL } from "../config";
 
 interface Group {
@@ -34,10 +40,11 @@ interface GroupMember {
 
 interface GroupMemberListResponse {
   data: GroupMember[];
+  nextPageToken?: string;
 }
 
 export default function GroupManagement() {
-  const { data, loading, refetch } = useApi<GroupListResponse>(
+  const { data, loading, error, refetch } = useApi<GroupListResponse>(
     "/api/v2/admin/groups",
   );
 
@@ -45,19 +52,31 @@ export default function GroupManagement() {
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Member management
   const [membersGroupId, setMembersGroupId] = useState<string | null>(null);
-  const { data: membersData, loading: membersLoading, refetch: refetchMembers } =
+  const {
+    data: membersData,
+    loading: membersLoading,
+    error: membersError,
+    refetch: refetchMembers,
+  } =
     useApi<GroupMemberListResponse>(
       membersGroupId
-        ? `/api/v2/admin/groups/${membersGroupId}/groupMembers`
+        ? `/api/v2/admin/groups/${membersGroupId}/groupMembers` +
+          `?pageSize=${MEMBERS_PAGE_SIZE}`
         : "",
     );
   const [addMemberId, setAddMemberId] = useState("");
+  const [memberError, setMemberError] = useState<string | null>(null);
 
   const groups = data?.data ?? [];
   const members = membersData?.data ?? [];
+  const membersTruncated = describeMemberTruncation(
+    members.length,
+    membersData?.nextPageToken,
+  );
 
   const columns: ColumnDef<Group>[] = [
     { key: "name", header: "Name", sortable: true, render: (r) => r.name },
@@ -71,16 +90,32 @@ export default function GroupManagement() {
           minimal
           icon="people"
           text="Members"
-          onClick={() => setMembersGroupId(r.id)}
+          onClick={() => {
+            setMemberError(null);
+            setAddMemberId("");
+            setMembersGroupId(r.id);
+          }}
         />
       ),
     },
   ];
 
+  const closeCreate = useCallback(() => {
+    setCreateOpen(false);
+    setCreateError(null);
+  }, []);
+
+  const closeMembers = useCallback(() => {
+    setMembersGroupId(null);
+    setMemberError(null);
+    setAddMemberId("");
+  }, []);
+
   const handleCreate = useCallback(async () => {
     setCreating(true);
+    setCreateError(null);
     try {
-      await fetch(`${API_BASE_URL}/api/v2/admin/groups`, {
+      const res = await fetch(`${API_BASE_URL}/api/v2/admin/groups`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -88,10 +123,16 @@ export default function GroupManagement() {
           description: newDesc || undefined,
         }),
       });
+      if (!res.ok) {
+        setCreateError(await apiErrorMessage(res));
+        return;
+      }
       setCreateOpen(false);
       setNewName("");
       setNewDesc("");
       refetch();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : String(err));
     } finally {
       setCreating(false);
     }
@@ -99,22 +140,48 @@ export default function GroupManagement() {
 
   const handleAddMember = useCallback(async () => {
     if (!membersGroupId || !addMemberId) return;
-    await fetch(
-      `${API_BASE_URL}/api/v2/admin/groups/${membersGroupId}/groupMembers/${addMemberId}`,
-      { method: "POST", headers: { "Content-Type": "application/json" } },
-    );
-    setAddMemberId("");
-    refetchMembers();
+    setMemberError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/v2/admin/groups/${membersGroupId}/groupMembers/add`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ principalIds: [addMemberId] }),
+        },
+      );
+      if (!res.ok) {
+        setMemberError(await apiErrorMessage(res));
+        return;
+      }
+      setAddMemberId("");
+      refetchMembers();
+    } catch (err) {
+      setMemberError(err instanceof Error ? err.message : String(err));
+    }
   }, [membersGroupId, addMemberId, refetchMembers]);
 
   const handleRemoveMember = useCallback(
     async (principalId: string) => {
       if (!membersGroupId) return;
-      await fetch(
-        `${API_BASE_URL}/api/v2/admin/groups/${membersGroupId}/groupMembers/${principalId}`,
-        { method: "DELETE" },
-      );
-      refetchMembers();
+      setMemberError(null);
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/api/v2/admin/groups/${membersGroupId}/groupMembers/remove`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ principalIds: [principalId] }),
+          },
+        );
+        if (!res.ok) {
+          setMemberError(await apiErrorMessage(res));
+          return;
+        }
+        refetchMembers();
+      } catch (err) {
+        setMemberError(err instanceof Error ? err.message : String(err));
+      }
     },
     [membersGroupId, refetchMembers],
   );
@@ -128,13 +195,20 @@ export default function GroupManagement() {
             icon="add"
             intent={Intent.PRIMARY}
             text="Create Group"
-            onClick={() => setCreateOpen(true)}
+            onClick={() => {
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
           />
         }
       />
 
       {loading ? (
         <Spinner size={40} />
+      ) : error ? (
+        <Callout intent={Intent.DANGER} icon="error" title="Could not load groups">
+          {error.message}
+        </Callout>
       ) : (
         <DataTable
           columns={columns}
@@ -147,10 +221,19 @@ export default function GroupManagement() {
       {/* Create Group Dialog */}
       <Dialog
         isOpen={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={closeCreate}
         title="Create Group"
       >
         <DialogBody>
+          {createError && (
+            <Callout
+              intent={Intent.DANGER}
+              icon="error"
+              style={{ marginBottom: 12 }}
+            >
+              {createError}
+            </Callout>
+          )}
           <FormGroup label="Group Name" labelFor="g-name">
             <InputGroup
               id="g-name"
@@ -169,7 +252,7 @@ export default function GroupManagement() {
         <DialogFooter
           actions={
             <>
-              <Button text="Cancel" onClick={() => setCreateOpen(false)} />
+              <Button text="Cancel" onClick={closeCreate} />
               <Button
                 intent={Intent.PRIMARY}
                 text="Create"
@@ -185,16 +268,40 @@ export default function GroupManagement() {
       {/* Member Management Dialog */}
       <Dialog
         isOpen={!!membersGroupId}
-        onClose={() => setMembersGroupId(null)}
+        onClose={closeMembers}
         title="Group Members"
         style={{ width: 550 }}
       >
         <DialogBody>
+          {memberError && (
+            <Callout
+              intent={Intent.DANGER}
+              icon="error"
+              style={{ marginBottom: 12 }}
+            >
+              {memberError}
+            </Callout>
+          )}
+
           {membersLoading ? (
             <Spinner size={30} />
+          ) : membersError ? (
+            <Callout intent={Intent.DANGER} icon="error" title="Could not load members">
+              {membersError.message}
+            </Callout>
           ) : members.length === 0 ? (
             <NonIdealState icon="people" title="No members" />
           ) : (
+            <>
+              {membersTruncated && (
+                <Callout
+                  intent={Intent.WARNING}
+                  icon="warning-sign"
+                  style={{ marginBottom: 12 }}
+                >
+                  {membersTruncated}
+                </Callout>
+              )}
             <HTMLTable bordered compact striped style={{ width: "100%" }}>
               <thead>
                 <tr>
@@ -222,6 +329,7 @@ export default function GroupManagement() {
                 ))}
               </tbody>
             </HTMLTable>
+            </>
           )}
 
           <div className="toolbar" style={{ marginTop: 12 }}>
@@ -242,7 +350,7 @@ export default function GroupManagement() {
         </DialogBody>
         <DialogFooter
           actions={
-            <Button text="Close" onClick={() => setMembersGroupId(null)} />
+            <Button text="Close" onClick={closeMembers} />
           }
         />
       </Dialog>

@@ -2,15 +2,17 @@ import { useCallback, useState } from "react";
 import {
   Button,
   ButtonGroup,
+  Callout,
   HTMLTable,
   InputGroup,
+  Intent,
   NonIdealState,
   Spinner,
   Tag,
-  Intent,
 } from "@blueprintjs/core";
 import PageHeader from "../components/PageHeader";
 import { useApi } from "../hooks/useApi";
+import { describeEmptyAuditLog, intentForAction } from "../lib/auditAction";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -29,27 +31,8 @@ interface AuditEntry {
 interface AuditLogResponse {
   data: AuditEntry[];
   nextPageToken?: string;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Action tag coloring                                                 */
-/* ------------------------------------------------------------------ */
-
-function intentForAction(action: string): Intent {
-  switch (action) {
-    case "CREATE":
-      return Intent.SUCCESS;
-    case "UPDATE":
-      return Intent.PRIMARY;
-    case "DELETE":
-      return Intent.DANGER;
-    case "EXECUTE":
-      return Intent.WARNING;
-    case "LOGIN":
-      return Intent.NONE;
-    default:
-      return Intent.NONE;
-  }
+  /** False when the service runs without a database and records nothing. */
+  available?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -75,11 +58,12 @@ export default function AuditLog() {
   params.set("pageSize", "25");
 
   const qs = params.toString();
-  const { data, loading } = useApi<AuditLogResponse>(
+  const { data, loading, error } = useApi<AuditLogResponse>(
     `/api/v2/admin/audit${qs ? `?${qs}` : ""}`,
   );
 
   const entries = data?.data ?? [];
+  const emptyState = describeEmptyAuditLog(data?.available !== false);
 
   const handlePrevious = useCallback(() => {
     setPageTokens((tokens) => tokens.slice(0, -1));
@@ -167,11 +151,19 @@ export default function AuditLog() {
       {/* Content */}
       {loading ? (
         <Spinner size={40} />
+      ) : error ? (
+        <Callout
+          intent={Intent.DANGER}
+          icon="error"
+          title="Could not load the audit log"
+        >
+          {error.message}
+        </Callout>
       ) : entries.length === 0 ? (
         <NonIdealState
           icon="document"
-          title="No audit entries"
-          description="Audit log entries will appear here as actions are performed."
+          title={emptyState.title}
+          description={emptyState.description}
         />
       ) : (
         <>

@@ -40,4 +40,14 @@ export async function notificationRoutes(
   }>("/notifications/:rid/read", async (request) => {
     return notificationStore.markRead(request.params.rid);
   });
+
+  // Mark every notification as read.
+  //
+  // Notifications are an OpenFoundry-only resource - the Foundry API has no
+  // notification endpoints at all - so this follows Foundry's house style for
+  // collection-level actions (POST to a named action, as in
+  // `admin/groups/{id}/groupMembers/add`).
+  app.post("/notifications/read-all", async () => {
+    return { updated: notificationStore.markAllRead() };
+  });
 }

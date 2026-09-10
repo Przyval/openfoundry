@@ -8,6 +8,8 @@ import { UserStore } from "./store/user-store.js";
 import { PgUserStore } from "./store/pg-user-store.js";
 import { GroupStore } from "./store/group-store.js";
 import { PgGroupStore } from "./store/pg-group-store.js";
+import { type AuditStore, MemoryAuditStore } from "./store/audit-store.js";
+import { PgAuditStore } from "./store/pg-audit-store.js";
 import { healthRoutes } from "./routes/health.js";
 import { v2Routes } from "./routes/v2/index.js";
 
@@ -22,6 +24,8 @@ export interface CreateServerOptions {
   userStore?: UserStore | PgUserStore;
   /** Inject an existing group store (useful for tests). */
   groupStore?: GroupStore | PgGroupStore;
+  /** Inject an existing audit store (useful for tests). */
+  auditStore?: AuditStore;
 }
 
 /**
@@ -34,19 +38,23 @@ export async function createServer(
 
   let userStore: UserStore | PgUserStore;
   let groupStore: GroupStore | PgGroupStore;
+  let auditStore: AuditStore;
   let permissionStore: PgPermissionStore | undefined;
 
   if (options.userStore && options.groupStore) {
     userStore = options.userStore;
     groupStore = options.groupStore;
+    auditStore = options.auditStore ?? new MemoryAuditStore();
   } else if (config.databaseUrl) {
     const pool = createPool({ connectionString: config.databaseUrl });
     userStore = options.userStore ?? new PgUserStore(pool);
     groupStore = options.groupStore ?? new PgGroupStore(pool);
+    auditStore = options.auditStore ?? new PgAuditStore(pool);
     permissionStore = new PgPermissionStore(pool);
   } else {
     userStore = options.userStore ?? new UserStore();
     groupStore = options.groupStore ?? new GroupStore();
+    auditStore = options.auditStore ?? new MemoryAuditStore();
   }
 
   const app = Fastify({
@@ -125,6 +133,7 @@ export async function createServer(
     prefix: "/api/v2",
     userStore: userStore as UserStore,
     groupStore: groupStore as GroupStore,
+    auditStore,
     permissionStore,
   });
 

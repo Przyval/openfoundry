@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   Button,
+  Callout,
   Card,
   Elevation,
   Intent,
@@ -10,6 +11,7 @@ import {
 } from "@blueprintjs/core";
 import PageHeader from "../components/PageHeader";
 import { useApi } from "../hooks/useApi";
+import { apiErrorMessage } from "../lib/apiError";
 import { API_BASE_URL } from "../config";
 
 /* ------------------------------------------------------------------ */
@@ -61,12 +63,13 @@ const READ_OPTIONS: Array<{ value: "ALL" | "READ" | "UNREAD"; label: string }> =
 /* ------------------------------------------------------------------ */
 
 export default function NotificationsPage() {
-  const { data, loading, refetch } =
+  const { data, loading, error, refetch } =
     useApi<NotificationListResponse>("/api/v2/notifications");
 
   const [severityFilter, setSeverityFilter] = useState<Severity | "ALL">("ALL");
   const [readFilter, setReadFilter] = useState<"ALL" | "READ" | "UNREAD">("ALL");
   const [markingAll, setMarkingAll] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const notifications = data?.data ?? [];
 
@@ -81,23 +84,41 @@ export default function NotificationsPage() {
 
   const handleMarkRead = useCallback(
     async (rid: string) => {
-      await fetch(`${API_BASE_URL}/api/v2/notifications/${rid}/read`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      refetch();
+      setActionError(null);
+      try {
+        // No Content-Type header: this request carries no body, and declaring
+        // one makes the server reject it as an empty JSON payload.
+        const res = await fetch(
+          `${API_BASE_URL}/api/v2/notifications/${rid}/read`,
+          { method: "PUT" },
+        );
+        if (!res.ok) {
+          setActionError(await apiErrorMessage(res));
+          return;
+        }
+        refetch();
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : String(err));
+      }
     },
     [refetch],
   );
 
   const handleMarkAllRead = useCallback(async () => {
     setMarkingAll(true);
+    setActionError(null);
     try {
-      await fetch(`${API_BASE_URL}/api/v2/notifications/read-all`, {
+      // Bodyless, so no Content-Type header (see handleMarkRead).
+      const res = await fetch(`${API_BASE_URL}/api/v2/notifications/read-all`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
       });
+      if (!res.ok) {
+        setActionError(await apiErrorMessage(res));
+        return;
+      }
       refetch();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
     } finally {
       setMarkingAll(false);
     }
@@ -158,9 +179,27 @@ export default function NotificationsPage() {
         </span>
       </div>
 
+      {actionError && (
+        <Callout
+          intent={Intent.DANGER}
+          icon="error"
+          style={{ marginBottom: 12 }}
+        >
+          {actionError}
+        </Callout>
+      )}
+
       {/* Content */}
       {loading ? (
         <Spinner size={40} />
+      ) : error ? (
+        <Callout
+          intent={Intent.DANGER}
+          icon="error"
+          title="Could not load notifications"
+        >
+          {error.message}
+        </Callout>
       ) : filtered.length === 0 ? (
         <NonIdealState
           icon="notifications"

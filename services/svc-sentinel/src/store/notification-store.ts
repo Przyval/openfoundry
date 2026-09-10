@@ -45,4 +45,16 @@ export class NotificationStore {
     notification.read = true;
     return notification;
   }
+
+  /** Mark every unread notification as read; returns how many changed. */
+  markAllRead(): number {
+    let updated = 0;
+    for (const notification of this.notifications.values()) {
+      if (!notification.read) {
+        notification.read = true;
+        updated += 1;
+      }
+    }
+    return updated;
+  }
 }
