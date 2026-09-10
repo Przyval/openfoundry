@@ -105,7 +105,10 @@ Those addresses are live infrastructure and must never be committed to this publ
 ## CI
 
 Workflows trigger on `master`, the default branch. They previously listened on `main`, which has never existed here, so nothing ever ran.
-Note that `docker.yml` and `release.yml` fire on push only and do publish: 12 images to ghcr.io and a changesets npm release.
+`docker.yml` publishes 12 images to ghcr.io on push to `master` and on `v*` tags, and also accepts `workflow_dispatch`, so image-build changes can be proven on a branch instead of only after a merge.
+Build the tag from a lowercased `GITHUB_REPOSITORY`, never from `github.repository` directly: the owner login is `Przyval`, and ghcr.io rejects any uppercase letter in a repository name.
+`Dockerfile.service` selects turbo packages by package name (`@openfoundry/${SERVICE}`), not by the `services/` directory name; the other `${SERVICE}` uses in that file are filesystem paths and stay bare.
+`release.yml` publishes nothing: the repo has no Actions secrets at all, so `NPM_TOKEN` is empty and `changeset publish` fails with ENEEDAUTH on every push.
 
 ## Maintaining this file
 
