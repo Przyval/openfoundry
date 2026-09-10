@@ -252,3 +252,84 @@ export function applySnapshot<T>(
   if (snapshotSize === undefined) return items;
   return items.slice(0, snapshotSize);
 }
+
+/**
+ * One clause of a request body's `orderBy`, as the Foundry contract types it.
+ *
+ * Distinct from the store's `OrderByClause`, whose direction is already resolved
+ * and therefore required.
+ */
+export interface BodyOrderByClause {
+  field: string;
+  direction?: "asc" | "desc";
+}
+
+function isOrderByClause(value: unknown): value is BodyOrderByClause {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const { field, direction } = value as Record<string, unknown>;
+  if (typeof field !== "string") return false;
+  return direction === undefined || direction === "asc" || direction === "desc";
+}
+
+/**
+ * Checks that a body value the contract types as `list<string>` really is one.
+ *
+ * A request body is unvalidated JSON, so nothing stops a client sending another
+ * shape for `select`. The names are then mapped over and used to index each
+ * object's properties, which on a wrong shape fails as a 500 InternalError or,
+ * worse, is silently ignored and answered 200 as though the projection had been
+ * applied. Both mislead the client about what it received, so a malformed value
+ * is a client error naming the parameter.
+ */
+export function assertStringListBody(
+  name: string,
+  raw: unknown,
+): string[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw) || raw.some((value) => typeof value !== "string")) {
+    throw invalidArgument(name, "must be a list of property names");
+  }
+  return raw as string[];
+}
+
+/**
+ * Checks that a body `orderBy` is the single clause its operation declares.
+ *
+ * See {@link assertStringListBody} for why a malformed body value is answered
+ * as a client error rather than crashed on or ignored.
+ */
+export function assertOrderByClauseBody(
+  name: string,
+  raw: unknown,
+): BodyOrderByClause | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!isOrderByClause(raw)) {
+    throw invalidArgument(
+      name,
+      'must be an object { field, direction? } whose direction is "asc" or "desc"',
+    );
+  }
+  return raw;
+}
+
+/**
+ * Checks that a body `orderBy` is the list of clauses its operation declares.
+ *
+ * See {@link assertStringListBody} for why a malformed body value is answered
+ * as a client error rather than crashed on or ignored.
+ */
+export function assertOrderByClauseListBody(
+  name: string,
+  raw: unknown,
+): BodyOrderByClause[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw) || !raw.every(isOrderByClause)) {
+    throw invalidArgument(
+      name,
+      'must be a list of { field, direction? } clauses whose direction is "asc" or "desc"',
+    );
+  }
+  return raw;
+}

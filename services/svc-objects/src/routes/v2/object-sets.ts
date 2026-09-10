@@ -18,7 +18,12 @@ import type { LinkStore } from "../../store/link-store.js";
 import { encodePageToken, decodePageToken, type PageToken } from "@openfoundry/pagination";
 import { requirePermission } from "@openfoundry/permissions";
 import { rejectUnsupportedOntologyScoping } from "@openfoundry/errors";
-import { assertPropertiesExist, parseBooleanParam } from "./query-params.js";
+import {
+  assertOrderByClauseListBody,
+  assertPropertiesExist,
+  assertStringListBody,
+  parseBooleanParam,
+} from "./query-params.js";
 
 // ---------------------------------------------------------------------------
 // Query engine singleton
@@ -381,7 +386,9 @@ export async function objectSetRoutes(
       // so the in-memory-only guarantee always holds; the flag is validated
       // rather than silently swallowed.
       parseBooleanParam("executeInMemoryOnly", request.query.executeInMemoryOnly);
-      const { objectSet: objectSetDef, select, pageSize = 100, pageToken, orderBy } = request.body;
+      const { objectSet: objectSetDef, pageSize = 100, pageToken } = request.body;
+      const select = assertStringListBody("select", request.body.select);
+      const orderBy = assertOrderByClauseListBody("orderBy", request.body.orderBy);
 
       const declared = await declaredForSet(
         request.params.ontologyRid,

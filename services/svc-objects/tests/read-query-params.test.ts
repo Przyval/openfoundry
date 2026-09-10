@@ -1006,3 +1006,102 @@ describe("Linked objects — PropertiesNotFound names the target type", () => {
     expect(res.json().data[0].properties).toEqual({ title: "Engineering" });
   });
 });
+
+// ===========================================================================
+// Out-of-contract body shapes
+// ===========================================================================
+
+/**
+ * A request body is unvalidated JSON, so a client can send any shape for a
+ * field the contract types as a list or a clause. A malformed sort or
+ * projection must be answered as a client error naming the parameter - never as
+ * a 500, and never as a 200 pretending it was applied.
+ */
+describe("Body parameter shapes", () => {
+  beforeEach(() => {
+    seedEmployees();
+  });
+
+  const post = (url: string, payload: unknown) =>
+    app.inject({ method: "POST", url: `${BASE_URL}${url}`, payload });
+
+  const expectInvalidArgument = (res: { statusCode: number; json: () => any }, param: string) => {
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorCode).toBe("INVALID_ARGUMENT");
+    expect(res.json().parameters.param).toBe(param);
+  };
+
+  it("rejects a loadObjects orderBy that is an object rather than a list", async () => {
+    const res = await post("/objectSets/loadObjects", {
+      objectSet: { type: "base", objectType: "Employee" },
+      orderBy: { fields: [{ field: "salary", direction: "desc" }] },
+    });
+
+    expectInvalidArgument(res, "orderBy");
+  });
+
+  it("rejects a loadObjects orderBy clause with no field", async () => {
+    const res = await post("/objectSets/loadObjects", {
+      objectSet: { type: "base", objectType: "Employee" },
+      orderBy: [{ direction: "desc" }],
+    });
+
+    expectInvalidArgument(res, "orderBy");
+  });
+
+  it("rejects a loadObjects select that is a bare string", async () => {
+    const res = await post("/objectSets/loadObjects", {
+      objectSet: { type: "base", objectType: "Employee" },
+      select: "name",
+    });
+
+    expectInvalidArgument(res, "select");
+  });
+
+  it("rejects a search orderBy that is a list rather than a single clause", async () => {
+    const res = await post("/objects/Employee/search", {
+      orderBy: [{ field: "salary", direction: "desc" }],
+    });
+
+    expectInvalidArgument(res, "orderBy");
+  });
+
+  it("rejects a search orderBy with an unknown sort direction", async () => {
+    const res = await post("/objects/Employee/search", {
+      orderBy: { field: "salary", direction: "descending" },
+    });
+
+    expectInvalidArgument(res, "orderBy");
+  });
+
+  it("rejects a search select that is a bare string", async () => {
+    const res = await post("/objects/Employee/search", { select: "name" });
+
+    expectInvalidArgument(res, "select");
+  });
+
+  it("still honours the shapes the contract declares", async () => {
+    const loaded = await post("/objectSets/loadObjects", {
+      objectSet: { type: "base", objectType: "Employee" },
+      orderBy: [{ field: "salary", direction: "desc" }],
+      select: ["name"],
+    });
+    expect(loaded.statusCode).toBe(200);
+    expect(loaded.json().data.map((o: any) => o.properties.name)).toEqual([
+      "Bob",
+      "Carol",
+      "Alice",
+    ]);
+
+    const searched = await post("/objects/Employee/search", {
+      orderBy: { field: "salary" },
+      select: ["name"],
+    });
+    expect(searched.statusCode).toBe(200);
+    expect(searched.json().data.map((o: any) => o.properties.name)).toEqual([
+      "Alice",
+      "Carol",
+      "Bob",
+    ]);
+  });
+});

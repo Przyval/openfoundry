@@ -22,7 +22,9 @@ import { writeAuditLog } from "@openfoundry/db";
 import {
   applyExcludeRid,
   applyOrderBy,
+  assertOrderByClauseBody,
   assertPropertiesExist,
+  assertStringListBody,
   applySelect as applySelectedProperties,
   applySnapshot,
   parseBooleanParam,
@@ -460,7 +462,9 @@ export async function objectRoutes(
       // in-memory object store, so the guarantee always holds and the flag can
       // only fail validation.
       parseBooleanParam("executeInMemoryOnly", request.query.executeInMemoryOnly);
-      const { where, orderBy, pageSize = 100, pageToken, select } = request.body;
+      const { where, pageSize = 100, pageToken } = request.body;
+      const select = assertStringListBody("select", request.body.select);
+      const orderBy = assertOrderByClauseBody("orderBy", request.body.orderBy);
 
       const declared = await declaredProperties(
         request.params.ontologyRid,
