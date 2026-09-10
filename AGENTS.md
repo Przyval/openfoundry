@@ -84,6 +84,9 @@ Services serialize identifiers as `rid` while the console reads Foundry's `id`.
 Setting `DATABASE_URL` swaps svc-admin onto `PgUserStore` / `PgGroupStore`, whose methods are async while the user and group routes still call them synchronously, so every one of those routes 500s in that mode.
 The audit route is the exception; it awaits.
 
+`app.css` declares `@layer blueprint, app`, but `main.tsx` imports Blueprint's stylesheets unlayered, and unlayered rules beat every layer no matter how specific the selector.
+A rule that has to override Blueprint therefore has to sit outside `@layer app`; the navbar override at the end of `app.css` is the worked example.
+
 `scripts/migrate.sql` (what Docker Compose loads at init) and `db/migrations/*.sql` (what `pnpm db:migrate` applies) have drifted: only the latter adds `org_rid` and row-level security.
 Code written against one schema fails against the other - `PgObjectStore` inserts `org_rid`, which the Compose database has no column for.
 

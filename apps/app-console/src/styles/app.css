@@ -165,3 +165,26 @@
     gap: 8px;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/*  Top navbar overflow                                               */
+/*                                                                     */
+/*  Blueprint floats the two navbar groups inside a bar of fixed       */
+/*  height.  Once their combined width exceeds the viewport the right  */
+/*  group wraps onto a second line, and because the bar cannot grow    */
+/*  and does not contain its floats, that line is painted over the     */
+/*  page below - far enough down to cover the page header's action     */
+/*  buttons, so clicking one of them hits Logout instead.              */
+/*                                                                     */
+/*  Letting the bar contain its floats and grow is enough to stop the  */
+/*  overlap; nothing about the navbar's own layout changes.            */
+/*                                                                     */
+/*  These rules sit outside `@layer app` on purpose: Blueprint's CSS   */
+/*  is imported unlayered (see main.tsx), and unlayered rules win over  */
+/*  every layer regardless of specificity.                            */
+/* ------------------------------------------------------------------ */
+.app-shell .bp5-navbar {
+  display: flow-root;
+  height: auto;
+  min-height: var(--navbar-height);
+}
