@@ -638,6 +638,24 @@ describe("Outgoing link types", () => {
     expect(res.statusCode).toBe(404);
     expect(res.json().errorName).toBe("ObjectTypeNotFound");
   });
+
+  it("rejects a non-numeric pageSize instead of reporting no link types", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes/Employee/outgoingLinkTypes?pageSize=abc`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorName).toBe("InvalidArgument");
+  });
+
+  it("rejects an undecodable pageToken as a client error", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes/Employee/outgoingLinkTypes?pageToken=zzz`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorName).toBe("InvalidArgument");
+  });
 });
 
 // -------------------------------------------------------------------------

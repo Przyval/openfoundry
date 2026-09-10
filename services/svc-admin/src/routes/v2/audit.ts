@@ -6,6 +6,7 @@ import {
   decodePageToken,
   normalizePageRequest,
 } from "@openfoundry/pagination";
+import { invalidArgument } from "@openfoundry/errors";
 import { requirePermission } from "@openfoundry/permissions";
 import type { AuditStore } from "../../store/audit-store.js";
 
@@ -51,9 +52,17 @@ export async function auditRoutes(
       pageSize,
       pageToken: pageToken as PageToken | undefined,
     });
-    const cursor: PageCursor = req.pageToken
-      ? decodePageToken(req.pageToken)
-      : { offset: 0 };
+    let cursor: PageCursor = { offset: 0 };
+    if (req.pageToken) {
+      try {
+        cursor = decodePageToken(req.pageToken);
+      } catch (err) {
+        throw invalidArgument(
+          "pageToken",
+          err instanceof Error ? err.message : "is not a valid page token",
+        );
+      }
+    }
 
     // Ask for one extra row so `createPageResponse` can detect a next page.
     const entries = await auditStore.listEntries({

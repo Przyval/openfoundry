@@ -17,6 +17,10 @@ import PageHeader from "../components/PageHeader";
 import DataTable, { type ColumnDef } from "../components/DataTable";
 import { useApi } from "../hooks/useApi";
 import { apiErrorMessage } from "../lib/apiError";
+import {
+  MEMBERS_PAGE_SIZE,
+  describeMemberTruncation,
+} from "../lib/groupMembers";
 import { API_BASE_URL } from "../config";
 
 interface Group {
@@ -36,6 +40,7 @@ interface GroupMember {
 
 interface GroupMemberListResponse {
   data: GroupMember[];
+  nextPageToken?: string;
 }
 
 export default function GroupManagement() {
@@ -59,7 +64,8 @@ export default function GroupManagement() {
   } =
     useApi<GroupMemberListResponse>(
       membersGroupId
-        ? `/api/v2/admin/groups/${membersGroupId}/groupMembers`
+        ? `/api/v2/admin/groups/${membersGroupId}/groupMembers` +
+          `?pageSize=${MEMBERS_PAGE_SIZE}`
         : "",
     );
   const [addMemberId, setAddMemberId] = useState("");
@@ -67,6 +73,10 @@ export default function GroupManagement() {
 
   const groups = data?.data ?? [];
   const members = membersData?.data ?? [];
+  const membersTruncated = describeMemberTruncation(
+    members.length,
+    membersData?.nextPageToken,
+  );
 
   const columns: ColumnDef<Group>[] = [
     { key: "name", header: "Name", sortable: true, render: (r) => r.name },
@@ -282,6 +292,16 @@ export default function GroupManagement() {
           ) : members.length === 0 ? (
             <NonIdealState icon="people" title="No members" />
           ) : (
+            <>
+              {membersTruncated && (
+                <Callout
+                  intent={Intent.WARNING}
+                  icon="warning-sign"
+                  style={{ marginBottom: 12 }}
+                >
+                  {membersTruncated}
+                </Callout>
+              )}
             <HTMLTable bordered compact striped style={{ width: "100%" }}>
               <thead>
                 <tr>
@@ -309,6 +329,7 @@ export default function GroupManagement() {
                 ))}
               </tbody>
             </HTMLTable>
+            </>
           )}
 
           <div className="toolbar" style={{ marginTop: 12 }}>

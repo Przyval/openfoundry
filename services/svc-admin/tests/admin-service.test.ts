@@ -984,6 +984,30 @@ describe("Group members", () => {
     expect(res.json().errorName).toBe("GroupMemberNotFound");
   });
 
+  it("GET groupMembers rejects a non-numeric pageSize instead of reporting no members", async () => {
+    await app.inject({
+      method: "POST",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers/add`,
+      payload: { principalIds: [userRid] },
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers?pageSize=abc`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorName).toBe("InvalidArgument");
+  });
+
+  it("GET groupMembers rejects an undecodable pageToken as a client error", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/admin/groups/${groupRid}/groupMembers?pageToken=zzz`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorName).toBe("InvalidArgument");
+  });
+
   it("GET groupMembers returns 404 for an unknown group", async () => {
     const res = await app.inject({
       method: "GET",
@@ -1070,6 +1094,15 @@ describe("Audit log", () => {
     expect(store.calls).toHaveLength(0);
 
     await auditApp.close();
+  });
+
+  it("rejects an undecodable pageToken as a client error", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v2/admin/audit?pageToken=zzz",
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorName).toBe("InvalidArgument");
   });
 
   it("returns audit entries as a page", async () => {
