@@ -16,6 +16,7 @@ import {
   type PageToken,
 } from "@openfoundry/pagination";
 import { requirePermission } from "@openfoundry/permissions";
+import { rejectUnsupportedOntologyScoping } from "@openfoundry/errors";
 import { writeAuditLog } from "@openfoundry/db";
 import {
   applyExcludeRid,
@@ -71,6 +72,7 @@ interface ListQuery {
   orderBy?: string;
   excludeRid?: string;
   snapshot?: string;
+  branch?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +253,7 @@ export async function objectRoutes(
       orderBy?: string;
       excludeRid?: string;
       snapshot?: string;
+      branch?: string;
     };
   }>(
     "/ontologies/:ontologyRid/objects/:objectType",
@@ -258,6 +261,7 @@ export async function objectRoutes(
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
       const { objectType } = request.params;
       const query = request.query as ListQuery;
 
@@ -313,13 +317,14 @@ export async function objectRoutes(
   // Get single object
   app.get<{
     Params: ObjectParams;
-    Querystring: { select?: string | string[]; excludeRid?: string };
+    Querystring: { select?: string | string[]; excludeRid?: string; branch?: string };
   }>(
     "/ontologies/:ontologyRid/objects/:objectType/:primaryKey",
     {
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
       const { objectType, primaryKey } = request.params;
       const select = parseListParam(request.query.select);
       const excludeRid = parseBooleanParam("excludeRid", request.query.excludeRid);
@@ -409,7 +414,7 @@ export async function objectRoutes(
   // ---------------------------------------------------------------------------
   app.post<{
     Params: ListParams;
-    Querystring: { executeInMemoryOnly?: string };
+    Querystring: { executeInMemoryOnly?: string; branch?: string };
     Body: SearchJsonQueryV2;
   }>(
     "/ontologies/:ontologyRid/objects/:objectType/search",
@@ -417,6 +422,7 @@ export async function objectRoutes(
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
       const { objectType } = request.params;
       // `executeInMemoryOnly` asks the service to fail rather than fall back to
       // heavier computation. This handler resolves the whole search from the
@@ -483,12 +489,17 @@ export async function objectRoutes(
   //
   // Returns: { data: [{ group: {...}, metrics: [{...}] }] }
   // ---------------------------------------------------------------------------
-  app.post<{ Params: ListParams; Body: AggregateBody }>(
+  app.post<{
+    Params: ListParams;
+    Querystring: { branch?: string };
+    Body: AggregateBody;
+  }>(
     "/ontologies/:ontologyRid/objects/:objectType/aggregate",
     {
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
       const { objectType } = request.params;
       const { aggregation: aggregations, where, groupBy } = request.body;
 

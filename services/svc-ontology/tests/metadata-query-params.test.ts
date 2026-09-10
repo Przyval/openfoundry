@@ -235,3 +235,55 @@ describe("Full metadata — includeActionTypeFullMetadata", () => {
     expect(res.json().errorCode).toBe("INVALID_ARGUMENT");
   });
 });
+
+// ===========================================================================
+// branch
+// ===========================================================================
+
+describe("Ontology metadata — branch", () => {
+  // OpenFoundry models no ontology branches: every branch in the codebase is a
+  // dataset branch. Any value therefore names something that does not exist.
+  const endpoints = () => [
+    `/api/v2/ontologies/${ontologyRid}/objectTypes`,
+    `/api/v2/ontologies/${ontologyRid}/objectTypes/Employee`,
+    `/api/v2/ontologies/${ontologyRid}/actionTypes`,
+    `/api/v2/ontologies/${ontologyRid}/interfaceTypes`,
+    `/api/v2/ontologies/${ontologyRid}/queryTypes`,
+    `/api/v2/ontologies/${ontologyRid}/fullMetadata`,
+  ];
+
+  it("answers FoundryBranchNotFound naming the branch that was asked for", async () => {
+    for (const url of endpoints()) {
+      const res = await app.inject({ method: "GET", url: `${url}?branch=experiment` });
+      expect(res.statusCode, url).toBe(404);
+      expect(res.json().errorName, url).toBe("FoundryBranchNotFound");
+      expect(res.json().parameters.branch, url).toBe("experiment");
+    }
+  });
+
+  it("rejects the names a real Foundry client might assume, since neither exists here", async () => {
+    for (const branch of ["master", "main"]) {
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/v2/ontologies/${ontologyRid}/objectTypes?branch=${branch}`,
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json().errorName).toBe("FoundryBranchNotFound");
+    }
+  });
+
+  it("serves the ontology normally when no branch is asked for", async () => {
+    for (const url of endpoints()) {
+      const res = await app.inject({ method: "GET", url });
+      expect(res.statusCode, url).toBe(200);
+    }
+  });
+
+  it("also serves normally for an empty branch, which names nothing", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${ontologyRid}/objectTypes?branch=`,
+    });
+    expect(res.statusCode).toBe(200);
+  });
+});

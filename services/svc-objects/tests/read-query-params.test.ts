@@ -482,3 +482,105 @@ describe("executeInMemoryOnly", () => {
     expect(res.json().errorCode).toBe("INVALID_ARGUMENT");
   });
 });
+
+// ===========================================================================
+// branch / scenarioRid / transactionId
+// ===========================================================================
+
+describe("Ontology scoping — branch, scenarioRid, transactionId", () => {
+  // OpenFoundry models no ontology branches, scenarios or transactions, so any
+  // value names something that does not exist and is answered as not found
+  // rather than silently served from the only state there is.
+  beforeEach(() => {
+    seedEmployees();
+    linkStore.createLink("Employee", "emp-1", "peers", "Employee", "emp-2");
+  });
+
+  const reads = () => [
+    ["GET", `${BASE_URL}/objects/Employee`, undefined],
+    ["GET", `${BASE_URL}/objects/Employee/emp-1`, undefined],
+    ["GET", `${BASE_URL}/objects/Employee/emp-1/links/peers`, undefined],
+    ["POST", `${BASE_URL}/objects/Employee/search`, {}],
+    [
+      "POST",
+      `${BASE_URL}/objects/Employee/aggregate`,
+      { aggregation: [{ type: "count" }] },
+    ],
+    [
+      "POST",
+      `${BASE_URL}/objectSets/loadObjects`,
+      { objectSet: { type: "base", objectType: "Employee" } },
+    ],
+    [
+      "POST",
+      `${BASE_URL}/objectSets/aggregate`,
+      {
+        objectSet: { type: "base", objectType: "Employee" },
+        aggregation: [{ type: "count" }],
+      },
+    ],
+  ] as const;
+
+  it("answers FoundryBranchNotFound on every read that declares branch", async () => {
+    for (const [method, url, payload] of reads()) {
+      const res = await app.inject({
+        method,
+        url: `${url}?branch=experiment`,
+        ...(payload !== undefined ? { payload } : {}),
+      });
+      expect(res.statusCode, url).toBe(404);
+      expect(res.json().errorName, url).toBe("FoundryBranchNotFound");
+      expect(res.json().parameters.branch, url).toBe("experiment");
+    }
+  });
+
+  it("serves normally when no branch is asked for", async () => {
+    for (const [method, url, payload] of reads()) {
+      const res = await app.inject({
+        method,
+        url,
+        ...(payload !== undefined ? { payload } : {}),
+      });
+      expect(res.statusCode, url).toBe(200);
+    }
+  });
+
+  it("answers OntologyScenarioNotFound on the object-set endpoints", async () => {
+    for (const url of [
+      `${BASE_URL}/objectSets/loadObjects`,
+      `${BASE_URL}/objectSets/aggregate`,
+    ]) {
+      const res = await app.inject({
+        method: "POST",
+        url: `${url}?scenarioRid=ri.scenario.main.scenario.1`,
+        payload: {
+          objectSet: { type: "base", objectType: "Employee" },
+          aggregation: [{ type: "count" }],
+        },
+      });
+      expect(res.statusCode, url).toBe(404);
+      expect(res.json().errorName, url).toBe("OntologyScenarioNotFound");
+      expect(res.json().parameters.scenarioRid, url).toBe(
+        "ri.scenario.main.scenario.1",
+      );
+    }
+  });
+
+  it("answers OntologyTransactionNotFound on the object-set endpoints", async () => {
+    for (const url of [
+      `${BASE_URL}/objectSets/loadObjects`,
+      `${BASE_URL}/objectSets/aggregate`,
+    ]) {
+      const res = await app.inject({
+        method: "POST",
+        url: `${url}?transactionId=txn-1`,
+        payload: {
+          objectSet: { type: "base", objectType: "Employee" },
+          aggregation: [{ type: "count" }],
+        },
+      });
+      expect(res.statusCode, url).toBe(404);
+      expect(res.json().errorName, url).toBe("OntologyTransactionNotFound");
+    }
+  });
+});

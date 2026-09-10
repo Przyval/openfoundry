@@ -57,6 +57,9 @@ Order by position instead: the in-memory stores are `Map`s and arrays in inserti
 `PgObjectStore` implements only the CRUD subset of `ObjectStore` - it has no `allObjects`, and `svc-objects/src/server.ts` casts it with `store as ObjectStore`.
 Anything reached through `allObjects` (object search, object-set load and aggregate) therefore throws against a Postgres-backed deployment while passing every in-memory test.
 
+There are no ontology branches, scenarios or ontology transactions - every `branch` in this repo is a *dataset* branch, and the console's Scenarios page persists nothing.
+The v2 ontology endpoints therefore reject any `branch`, `scenarioRid` or `transactionId` value rather than serving the only state there is; `packages/errors/src/ontology-scoping.ts` is the single place that policy lives.
+
 ## Secrets
 
 Real credentials live only in `.env`, which is gitignored; `.env.example` lists every key with empty values.

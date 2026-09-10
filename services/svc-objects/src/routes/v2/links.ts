@@ -9,6 +9,7 @@ import {
   type PageToken,
 } from "@openfoundry/pagination";
 import { requirePermission } from "@openfoundry/permissions";
+import { rejectUnsupportedOntologyScoping } from "@openfoundry/errors";
 import {
   applyExcludeRid,
   applyOrderBy,
@@ -75,6 +76,7 @@ export async function linkRoutes(
       orderBy?: string;
       excludeRid?: string;
       snapshot?: string;
+      branch?: string;
     };
   }>(
     "/ontologies/:ontologyRid/objects/:objectType/:primaryKey/links/:linkType",
@@ -82,6 +84,7 @@ export async function linkRoutes(
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
       const { objectType, primaryKey, linkType } = request.params;
       const query = request.query;
 

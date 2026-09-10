@@ -30,3 +30,11 @@ export {
   customClient,
   customServer,
 } from "./error-factories.js";
+
+export {
+  type OntologyScopingParams,
+  foundryBranchNotFound,
+  ontologyScenarioNotFound,
+  ontologyTransactionNotFound,
+  rejectUnsupportedOntologyScoping,
+} from "./ontology-scoping.js";

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { InterfaceTypeDefinition } from "@openfoundry/ontology-schema";
 import type { OntologyStore } from "../../store/ontology-store.js";
 import { requirePermission } from "@openfoundry/permissions";
+import { rejectUnsupportedOntologyScoping } from "@openfoundry/errors";
 import { paginateArray } from "./pagination-helpers.js";
 
 export async function interfaceTypeRoutes(
@@ -13,10 +14,11 @@ export async function interfaceTypeRoutes(
   // List interface types
   app.get<{
     Params: { ontologyRid: string };
-    Querystring: { pageSize?: string; pageToken?: string };
+    Querystring: { pageSize?: string; pageToken?: string; branch?: string };
   }>("/ontologies/:ontologyRid/interfaceTypes", {
     preHandler: requirePermission("ontology:read"),
   }, async (request) => {
+    rejectUnsupportedOntologyScoping(request.query);
     const raw = await store.listInterfaceTypes(request.params.ontologyRid);
     const all = Array.isArray(raw) ? raw : (raw as { items: unknown[] }).items ?? [];
     return paginateArray(all, request.query);
@@ -40,12 +42,14 @@ export async function interfaceTypeRoutes(
   // Get interface type by apiName
   app.get<{
     Params: { ontologyRid: string; interfaceTypeApiName: string };
+    Querystring: { branch?: string };
   }>(
     "/ontologies/:ontologyRid/interfaceTypes/:interfaceTypeApiName",
     {
       preHandler: requirePermission("ontology:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
       return await store.getInterfaceType(
         request.params.ontologyRid,
         request.params.interfaceTypeApiName,

@@ -16,6 +16,7 @@ import {
 import type { LinkStore } from "../../store/link-store.js";
 import { encodePageToken, decodePageToken, type PageToken } from "@openfoundry/pagination";
 import { requirePermission } from "@openfoundry/permissions";
+import { rejectUnsupportedOntologyScoping } from "@openfoundry/errors";
 import { parseBooleanParam } from "./query-params.js";
 
 // ---------------------------------------------------------------------------
@@ -279,7 +280,12 @@ export async function objectSetRoutes(
   // Load objects from an ObjectSet query (enhanced with filter/where support)
   app.post<{
     Params: OntologyParams;
-    Querystring: { executeInMemoryOnly?: string };
+    Querystring: {
+      executeInMemoryOnly?: string;
+      branch?: string;
+      scenarioRid?: string;
+      transactionId?: string;
+    };
     Body: LoadObjectsBody;
   }>(
     "/ontologies/:ontologyRid/objectSets/loadObjects",
@@ -287,6 +293,7 @@ export async function objectSetRoutes(
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
       // The object set is resolved entirely from the in-memory object store,
       // so the in-memory-only guarantee always holds; the flag is validated
       // rather than silently swallowed.
@@ -356,7 +363,12 @@ export async function objectSetRoutes(
   // Aggregate over an ObjectSet
   app.post<{
     Params: OntologyParams;
-    Querystring: { executeInMemoryOnly?: string };
+    Querystring: {
+      executeInMemoryOnly?: string;
+      branch?: string;
+      scenarioRid?: string;
+      transactionId?: string;
+    };
     Body: AggregateBody;
   }>(
     "/ontologies/:ontologyRid/objectSets/aggregate",
@@ -364,6 +376,7 @@ export async function objectSetRoutes(
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
       // See loadObjects: aggregation runs over the in-memory object store.
       parseBooleanParam("executeInMemoryOnly", request.query.executeInMemoryOnly);
       const { objectSet: objectSetDef, aggregation: aggregations, groupBy } = request.body;

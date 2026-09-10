@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { OntologyStore, StoredOntology } from "../../store/ontology-store.js";
 import { requirePermission } from "@openfoundry/permissions";
+import { rejectUnsupportedOntologyScoping } from "@openfoundry/errors";
 import { paginateArray } from "./pagination-helpers.js";
 import { parseBooleanParam } from "./query-params.js";
 
@@ -139,10 +140,11 @@ export async function ontologyRoutes(
   // Full metadata — returns ontology with all type collections
   app.get<{
     Params: { ontologyRid: string };
-    Querystring: { includeActionTypeFullMetadata?: string };
+    Querystring: { includeActionTypeFullMetadata?: string; branch?: string };
   }>("/ontologies/:ontologyRid/fullMetadata", {
     preHandler: requirePermission("ontology:read"),
   }, async (request) => {
+    rejectUnsupportedOntologyScoping(request.query);
     const rid = request.params.ontologyRid;
     const includeActionTypeFullMetadata = parseBooleanParam(
       "includeActionTypeFullMetadata",

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { ObjectTypeDefinition } from "@openfoundry/ontology-schema";
 import type { OntologyStore } from "../../store/ontology-store.js";
 import { requirePermission } from "@openfoundry/permissions";
+import { rejectUnsupportedOntologyScoping } from "@openfoundry/errors";
 import { paginateArray } from "./pagination-helpers.js";
 import { parseBooleanParam } from "./query-params.js";
 
@@ -36,10 +37,12 @@ export async function objectTypeRoutes(
       pageSize?: string;
       pageToken?: string;
       includeDatasources?: string;
+      branch?: string;
     };
   }>("/ontologies/:ontologyRid/objectTypes", {
     preHandler: requirePermission("ontology:read"),
   }, async (request) => {
+    rejectUnsupportedOntologyScoping(request.query);
     const includeDatasources = parseBooleanParam(
       "includeDatasources",
       request.query.includeDatasources,
@@ -71,13 +74,14 @@ export async function objectTypeRoutes(
   // Get object type by apiName
   app.get<{
     Params: { ontologyRid: string; objectTypeApiName: string };
-    Querystring: { includeDatasources?: string };
+    Querystring: { includeDatasources?: string; branch?: string };
   }>(
     "/ontologies/:ontologyRid/objectTypes/:objectTypeApiName",
     {
       preHandler: requirePermission("ontology:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
       const includeDatasources = parseBooleanParam(
         "includeDatasources",
         request.query.includeDatasources,
