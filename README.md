@@ -155,7 +155,9 @@ docker compose up --build
 
 ## API Compatibility
 
-All endpoints are served through the gateway at `http://localhost:8080` and follow Palantir's `/api/v2` prefix convention.
+All endpoints are served through the gateway at `http://localhost:8080`.
+Most follow Palantir's `/api/v2` prefix convention; a subset of the ontology, object, action and dataset
+operations is also served under Palantir's older `/api/v1` prefix, listed at the end of this section.
 
 ### Ontologies
 
@@ -223,6 +225,46 @@ GET    /api/v2/compass/resources/:rid/children         List children
 POST   /api/v2/aip/chat                               Multi-turn chat
 GET    /api/v2/aip/agents                              List agents
 ```
+
+### Foundry v1 API
+
+`/api/v1` is a separate API, not the same one behind another prefix: it serves Foundry's v1 models,
+which differ from v2 in shape (`ObjectType.primaryKey` is a list, an object nests its values under
+`properties`, a branch is keyed `branchId`), so responses are not interchangeable between the two.
+
+```
+GET    /api/v1/ontologies                                       List ontologies (unpaginated)
+GET    /api/v1/ontologies/:rid                                  Get ontology
+GET    /api/v1/ontologies/:rid/objectTypes                      List object types
+GET    /api/v1/ontologies/:rid/objectTypes/:type                Get object type
+GET    /api/v1/ontologies/:rid/objectTypes/:type/outgoingLinkTypes
+                                                                List outgoing link types
+GET    /api/v1/ontologies/:rid/actionTypes                      List action types
+GET    /api/v1/ontologies/:rid/actionTypes/:apiName             Get action type
+GET    /api/v1/ontologies/:rid/queryTypes                       List query types
+GET    /api/v1/ontologies/:rid/objects/:type                    List objects
+GET    /api/v1/ontologies/:rid/objects/:type/:pk                Get object
+GET    /api/v1/ontologies/:rid/objects/:type/:pk/links/:linkType
+                                                                List linked objects
+POST   /api/v1/ontologies/:rid/objects/:type/search             Search objects
+POST   /api/v1/ontologies/:rid/objects/:type/aggregate          Aggregate objects
+POST   /api/v1/ontologies/:rid/actions/:action/apply            Apply action
+POST   /api/v1/ontologies/:rid/actions/:action/applyBatch       Apply action in batch
+POST   /api/v1/ontologies/:rid/actions/:action/validate         Validate action
+POST   /api/v1/datasets                                         Create dataset
+GET    /api/v1/datasets/:rid                                    Get dataset
+GET    /api/v1/datasets/:rid/branches                           List branches
+POST   /api/v1/datasets/:rid/branches                           Create branch
+GET    /api/v1/datasets/:rid/branches/:branchId                 Get branch
+DELETE /api/v1/datasets/:rid/branches/:branchId                 Delete branch
+POST   /api/v1/datasets/:rid/transactions                       Create transaction
+POST   /api/v1/datasets/:rid/transactions/:txRid/commit         Commit transaction
+POST   /api/v1/datasets/:rid/transactions/:txRid/abort          Abort transaction
+DELETE /api/v1/datasets/:rid/files/*                            Delete file
+```
+
+Operations v1 declares that OpenFoundry does not serve -- the file reads and the whole `attachments`
+namespace -- answer 404 rather than a wrong shape; the source records why where each would have gone.
 
 ### Authentication
 
