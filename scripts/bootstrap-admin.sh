@@ -5,12 +5,19 @@
 # In production, dev users (admin/admin123) are disabled. This script creates
 # the first admin user + organization via the signup endpoint.
 #
+# The signup endpoint is OFF by default. Set OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1 on
+# both svc-multipass and the gateway before running this script, and unset it
+# again afterwards - while it is on, anyone who can reach the gateway can mint
+# a valid API token.
+#
 # Usage:
 #   bash scripts/bootstrap-admin.sh
 #   bash scripts/bootstrap-admin.sh --username myuser --password mypass --org "My Company"
 #
 # Environment:
 #   GATEWAY_URL — Gateway base URL (default: http://localhost:8080)
+#   OPENFOUNDRY_ALLOW_OPEN_SIGNUP — must be enabled on the services for signup
+#                                   to be reachable (see note above)
 # ============================================================================
 
 set -euo pipefail
@@ -86,6 +93,13 @@ if [ "$HTTP_CODE" = "201" ]; then
   echo ""
   echo -e "${YELLOW}Then login at:${NC}"
   echo "  http://localhost:3000"
+elif [ "$HTTP_CODE" = "403" ]; then
+  echo -e "${RED}✗ Signup is disabled${NC}"
+  echo "$BODY"
+  echo ""
+  echo -e "${YELLOW}Enable it temporarily by setting OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1${NC}"
+  echo -e "${YELLOW}on svc-multipass and the gateway, then unset it again.${NC}"
+  exit 1
 elif [ "$HTTP_CODE" = "409" ]; then
   echo -e "${RED}✗ Username '${USERNAME}' already exists${NC}"
   exit 1

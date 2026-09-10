@@ -2,7 +2,12 @@ import type { FastifyInstance } from "fastify";
 import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { invalidArgument } from "@openfoundry/errors";
-import { createToken, buildTokenInput } from "@openfoundry/auth-tokens";
+import {
+  createToken,
+  buildTokenInput,
+  isOpenSignupEnabled,
+  OPEN_SIGNUP_ENV_VAR,
+} from "@openfoundry/auth-tokens";
 import { generateRid } from "@openfoundry/rid";
 import { importPKCS8, type CryptoKey } from "jose";
 import type { MultipassConfig } from "../config.js";
@@ -139,6 +144,8 @@ export async function authRoutes(
 
   // -- Signup endpoint -------------------------------------------------------
   // Creates a new user + organization, issues a JWT with org claim.
+  // Disabled unless OPENFOUNDRY_ALLOW_OPEN_SIGNUP is set: an open endpoint that
+  // mints a signed token for any caller-chosen username is not safe by default.
   // NOTE: User/org data is NOT yet persisted to the database. The JWT is valid
   // until expiry, but after a service restart the orgRid is gone and the user
   // will appear to have an empty tenant. Persistence is tracked in:
@@ -146,6 +153,19 @@ export async function authRoutes(
   app.post<{
     Body: { username: string; password: string; email?: string; displayName?: string; orgName?: string };
   }>("/api/v2/auth/signup", async (request, reply) => {
+    if (!isOpenSignupEnabled()) {
+      return reply.status(403).send({
+        errorCode: "PERMISSION_DENIED",
+        errorName: "OpenSignupDisabled",
+        errorInstanceId: crypto.randomUUID(),
+        parameters: { envVar: OPEN_SIGNUP_ENV_VAR },
+        statusCode: 403,
+        message:
+          `Open signup is disabled. Set ${OPEN_SIGNUP_ENV_VAR}=1 on svc-multipass ` +
+          `and the gateway to enable POST /api/v2/auth/signup.`,
+      });
+    }
+
     const { username, password, displayName } = request.body ?? {};
 
     if (!username || username.length < 3) {

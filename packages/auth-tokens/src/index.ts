@@ -31,3 +31,6 @@ export {
   buildScopeString,
   satisfiesScope,
 } from "./scopes.js";
+
+// Open signup switch
+export { isOpenSignupEnabled, OPEN_SIGNUP_ENV_VAR } from "./open-signup.js";

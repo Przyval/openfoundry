@@ -4,6 +4,7 @@ import {
   TokenValidationError,
   type OpenFoundryClaims,
   type ValidateTokenOptions,
+  isOpenSignupEnabled,
 } from "@openfoundry/auth-tokens";
 import { OpenFoundryApiError, ErrorCode } from "@openfoundry/errors";
 import type { GatewayConfig } from "../config.js";
@@ -35,11 +36,13 @@ const SKIP_AUTH_PREFIXES = [
   "/status/",
   "/multipass/api/oauth2/",
   "/multipass/api/auth/login",
-  "/api/v2/auth/signup",
 ];
 
+const OPEN_SIGNUP_PREFIX = "/api/v2/auth/signup";
+
 function shouldSkipAuth(url: string): boolean {
-  return SKIP_AUTH_PREFIXES.some((prefix) => url.startsWith(prefix));
+  if (SKIP_AUTH_PREFIXES.some((prefix) => url.startsWith(prefix))) return true;
+  return isOpenSignupEnabled() && url.startsWith(OPEN_SIGNUP_PREFIX);
 }
 
 // ---------------------------------------------------------------------------
