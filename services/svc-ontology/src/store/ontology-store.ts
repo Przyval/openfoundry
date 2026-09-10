@@ -53,9 +53,16 @@ export interface CreateOntologyInput {
 
 export class OntologyStore {
   private readonly ontologies = new Map<string, StoredOntology>();
-  private readonly DATA_FILE = "/tmp/openfoundry-data/ontology-store.json";
+  private readonly DATA_FILE: string | null;
 
-  constructor() {
+  /**
+   * @param dataFile Where the store persists between restarts. Pass `null` for
+   *   a purely in-memory store, which is what tests need: the default file is
+   *   shared by every instance in the process, so a store constructed after
+   *   another one has written would otherwise start with that state.
+   */
+  constructor(dataFile: string | null = "/tmp/openfoundry-data/ontology-store.json") {
+    this.DATA_FILE = dataFile;
     this.loadFromDisk();
   }
 
@@ -64,6 +71,7 @@ export class OntologyStore {
   // -----------------------------------------------------------------------
 
   private saveToDisk(): void {
+    if (this.DATA_FILE === null) return;
     try {
       const dir = dirname(this.DATA_FILE);
       mkdirSync(dir, { recursive: true });
@@ -94,6 +102,7 @@ export class OntologyStore {
   }
 
   private loadFromDisk(): void {
+    if (this.DATA_FILE === null) return;
     try {
       if (!existsSync(this.DATA_FILE)) return;
 

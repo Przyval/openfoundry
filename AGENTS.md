@@ -28,15 +28,20 @@ Because turbo runs `build` as a dependency of the other tasks, one such gap fail
 
 ## Tests
 
-`pnpm run test` (turbo `test`) FAILS, and not because any assertion fails.
-44 packages declare `test: vitest run` but ship no test files, and vitest exits 1 on "No test files found".
-The CI `test` job runs exactly that, so it is red for this reason alone; `--passWithNoTests` is the one-line remedy if the project wants it.
-Check for real failures with `grep -E "Test Files|AssertionError"` rather than trusting the exit code.
+`pnpm run test` (turbo `test`) is green (96/96).
+A package running `vitest run` inherits the root `vitest.config.ts`, whose `include` globs are
+resolved against the run's root - the package directory, not the repo root.
+Keep those globs relative (`**/tests/**/*.test.ts`); a root-anchored `packages/**` glob matches
+nothing per package and every package then dies on "No test files found".
 
 Integration tests are `pnpm run test:integration` (config in `tests/vitest.config.ts`).
 Most files start their own in-process server; `api-endpoints` and `sdk-compat` need a real gateway on `localhost:8080` via `bash start.sh`, which needs Docker Postgres.
 
-The suite is NOT idempotent. It writes to `/tmp/openfoundry-data/` and a second run fails with 409s on already-created ontologies.
+Suites that start their own server pass `new OntologyStore(null)` / `new ObjectStore(null)` so they
+stay off the shared file store; a store built with the default path loads `/tmp/openfoundry-data/`,
+which the running services and every earlier run also write to.
+The suite is still NOT idempotent against a live gateway: a second run fails with 409s on
+already-created ontologies and with counts inflated by the previous run's objects.
 Run `rm -rf /tmp/openfoundry-data` before re-running, or you will chase failures that are only leftover state.
 
 ## Secrets

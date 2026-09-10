@@ -213,6 +213,17 @@ describe("ClientStore", () => {
 // OAuth route integration tests
 // ---------------------------------------------------------------------------
 
+/**
+ * The authorize endpoint answers with a 302 to the client's redirect_uri, as
+ * OAuth 2.0 (and @osdk/client) require, so the code and state arrive as query
+ * parameters on the Location header rather than in a JSON body.
+ */
+function authorizeRedirectParams(response: { statusCode: number; headers: Record<string, unknown> }): URLSearchParams {
+  expect(response.statusCode).toBe(302);
+  const location = String(response.headers.location);
+  return new URL(location).searchParams;
+}
+
 describe("OAuth routes", () => {
   let app: FastifyInstance;
   let tokenStore: TokenStore;
@@ -270,7 +281,7 @@ describe("OAuth routes", () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.access_token).toBeTruthy();
-    expect(body.token_type).toBe("Bearer");
+    expect(body.token_type).toBe("bearer");
     expect(body.expires_in).toBe(3600);
     expect(body.refresh_token).toBeTruthy();
     expect(body.scope).toBe("api:read api:write");
@@ -290,10 +301,9 @@ describe("OAuth routes", () => {
       },
     });
 
-    expect(authorizeResponse.statusCode).toBe(200);
-    const authorizeBody = authorizeResponse.json();
-    expect(authorizeBody.code).toBeTruthy();
-    expect(authorizeBody.state).toBe("xyz");
+    const authorizeParams = authorizeRedirectParams(authorizeResponse);
+    expect(authorizeParams.get("code")).toBeTruthy();
+    expect(authorizeParams.get("state")).toBe("xyz");
 
     // Step 2: Exchange code for tokens
     const tokenResponse = await app.inject({
@@ -302,7 +312,7 @@ describe("OAuth routes", () => {
       payload: {
         grant_type: "authorization_code",
         client_id: "openfoundry-dev",
-        code: authorizeBody.code,
+        code: authorizeParams.get("code"),
         redirect_uri: "http://localhost:3000/callback",
       },
     });
@@ -332,7 +342,7 @@ describe("OAuth routes", () => {
       },
     });
 
-    const { code } = authorizeResponse.json();
+    const code = authorizeRedirectParams(authorizeResponse).get("code");
 
     // Step 2: Exchange with code_verifier
     const tokenResponse = await app.inject({
@@ -368,7 +378,7 @@ describe("OAuth routes", () => {
       },
     });
 
-    const { code } = authorizeResponse.json();
+    const code = authorizeRedirectParams(authorizeResponse).get("code");
 
     const tokenResponse = await app.inject({
       method: "POST",

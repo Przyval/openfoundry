@@ -33,7 +33,7 @@ let userStore: UserStore;
 let groupStore: GroupStore;
 
 beforeEach(async () => {
-  userStore = new UserStore();
+  userStore = new UserStore(false);
   groupStore = new GroupStore();
   app = await createServer({ config: TEST_CONFIG, userStore, groupStore });
 });

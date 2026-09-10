@@ -32,11 +32,24 @@ describe("Full platform flow: compass, ontology, objects, actions, sentinel, dat
       import("../../services/svc-datasets/src/server.js"),
     ]);
 
+    const [{ OntologyStore }, { ObjectStore }, { LinkStore }] = await Promise.all([
+      import("../../services/svc-ontology/src/store/ontology-store.js"),
+      import("../../services/svc-objects/src/store/object-store.js"),
+      import("../../services/svc-objects/src/store/link-store.js"),
+    ]);
+
+    // In-memory stores (`null` data file) keep this suite off the shared
+    // /tmp/openfoundry-data snapshot, which running services and other suites
+    // also write to; sharing it made object counts depend on run order.
+
     [compassApp, ontologyApp, objectsApp, actionsApp, sentinelApp, datasetsApp] =
       await Promise.all([
         createCompassServer(),
-        createOntologyServer(),
-        createObjectsServer(),
+        createOntologyServer({ store: new OntologyStore(null) }),
+        createObjectsServer({
+          store: new ObjectStore(null),
+          linkStore: new LinkStore(null),
+        }),
         createActionsServer(),
         createSentinelServer(),
         createDatasetsServer(),

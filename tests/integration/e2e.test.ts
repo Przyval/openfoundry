@@ -18,8 +18,24 @@ describe("End-to-end: Ontology → Objects → Actions", () => {
       "../../services/svc-actions/src/server.js"
     );
 
-    ontologyApp = await createOntologyServer();
-    objectsApp = await createObjectsServer();
+    const { OntologyStore } = await import(
+      "../../services/svc-ontology/src/store/ontology-store.js"
+    );
+    const { ObjectStore } = await import(
+      "../../services/svc-objects/src/store/object-store.js"
+    );
+    const { LinkStore } = await import(
+      "../../services/svc-objects/src/store/link-store.js"
+    );
+
+    // In-memory stores (`null` data file) keep this suite off the shared
+    // /tmp/openfoundry-data snapshot, which running services and other suites
+    // also write to; sharing it made object counts depend on run order.
+    ontologyApp = await createOntologyServer({ store: new OntologyStore(null) });
+    objectsApp = await createObjectsServer({
+      store: new ObjectStore(null),
+      linkStore: new LinkStore(null),
+    });
     actionsApp = await createActionsServer();
   });
 

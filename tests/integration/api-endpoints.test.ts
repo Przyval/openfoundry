@@ -505,7 +505,11 @@ describe("OpenFoundry API Integration Tests", () => {
       const typesData = await typesRes.json();
 
       if (typesData.data && typesData.data.length > 0) {
-        const actionApiName = typesData.data[0].apiName;
+        const actionType = typesData.data[0];
+        const actionApiName = actionType.apiName;
+        const requiredParameters = Object.entries(
+          (actionType.parameters ?? {}) as Record<string, { required?: boolean }>,
+        ).filter(([, p]) => p.required);
 
         const res = await api(
           "POST",
@@ -513,10 +517,21 @@ describe("OpenFoundry API Integration Tests", () => {
           { parameters: {} },
         );
 
-        // Action may succeed (200) or return 404 if the action handler is
-        // not registered on svc-actions for this action type.
-        // Both are valid integration outcomes.
-        expect([200, 404]).toContain(res.status);
+        if (requiredParameters.length > 0) {
+          // Applying with no parameters must be rejected, naming every
+          // required parameter that is missing.
+          expect(res.status).toBe(400);
+          const body = await res.json();
+          expect(
+            body.parameters.validationErrors.map(
+              (e: { parameter: string }) => e.parameter,
+            ),
+          ).toEqual(requiredParameters.map(([name]) => name));
+        } else {
+          // Action may succeed (200) or return 404 if the action handler is
+          // not registered on svc-actions for this action type.
+          expect([200, 404]).toContain(res.status);
+        }
       } else {
         // No action types available -- skip by passing
         expect(true).toBe(true);

@@ -95,7 +95,7 @@ async function fetchOntologySchema(): Promise<string> {
  * schemas are included so the LLM understands every object type and relationship.
  */
 export class OntologyAwareLlmClient implements LlmClient {
-  private readonly inner: LlmClient;
+  readonly inner: LlmClient;
   private readonly providerName: string;
 
   constructor(inner: LlmClient, providerName: string) {

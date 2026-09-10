@@ -24,6 +24,12 @@ export interface CreateServerOptions {
 
   /** Provide a pre-populated action log (useful for tests). */
   actionLog?: ActionLog | PgActionLog;
+
+  /**
+   * Seed the four pest-control demo actions into the registry. Tests pass
+   * `false` so the registry holds only what they register themselves.
+   */
+  seedDemoActions?: boolean;
 }
 
 /**
@@ -115,7 +121,9 @@ export async function createServer(
   });
 
   // -- Register pest-control business actions ------------------------------
-  await registerPestControlActions(registry, config.objectsServiceUrl);
+  if (options.seedDemoActions !== false) {
+    await registerPestControlActions(registry, config.objectsServiceUrl);
+  }
 
   // -- Routes -------------------------------------------------------------
   await app.register(healthRoutes);

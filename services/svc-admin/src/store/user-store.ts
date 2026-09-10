@@ -39,7 +39,13 @@ export interface UpdateUserInput {
 export class UserStore {
   private readonly users = new Map<string, StoredUser>();
 
-  constructor() {
+  /**
+   * @param seedDevUsers Seed the three dev users. Tests pass `false` so their
+   *   assertions count only the users they created themselves.
+   */
+  constructor(seedDevUsers = true) {
+    if (!seedDevUsers) return;
+
     // Seed dev users so the User Management page isn't empty (ISSUE-003)
     const devUsers: CreateUserInput[] = [
       { username: "admin", email: "admin@openfoundry.local", displayName: "Admin User", attributes: { role: "admin" } },
