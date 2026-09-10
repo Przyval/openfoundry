@@ -119,9 +119,14 @@ export function parseOrderBy(raw: string | undefined): OrderByTerm[] | undefined
  * the data can never stand in for the declaration. `declared` is `undefined`
  * when no declaration is available, and then no name can be called unknown and
  * no check is made.
+ *
+ * `objectTypes` may name more than one type, as an object-set union does. The
+ * message then lists them all, but the machine-readable `objectType` parameter
+ * is emitted only for a single type, because the contract types it as one api
+ * name and a joined list would name no type at all.
  */
 export function assertPropertiesExist(
-  objectType: string,
+  objectTypes: string | readonly string[],
   declared: ReadonlySet<string> | undefined,
   properties: readonly string[] | undefined,
 ): void {
@@ -130,11 +135,18 @@ export function assertPropertiesExist(
   const unknown = properties.filter((name) => !declared.has(name));
   if (unknown.length === 0) return;
 
+  const names = typeof objectTypes === "string" ? [objectTypes] : objectTypes;
+  const quoted = (values: readonly string[]) =>
+    values.map((v) => `"${v}"`).join(", ");
+
   throw customClient(
     404,
     "PropertiesNotFound",
-    `The properties ${unknown.map((n) => `"${n}"`).join(", ")} were not found on object type "${objectType}".`,
-    [safeArg("objectType", objectType), safeArg("properties", unknown)],
+    `The properties ${quoted(unknown)} were not found on object type ${quoted(names)}.`,
+    [
+      ...(names.length === 1 ? [safeArg("objectType", names[0])] : []),
+      safeArg("properties", unknown),
+    ],
   );
 }
 

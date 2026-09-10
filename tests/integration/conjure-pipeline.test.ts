@@ -136,6 +136,31 @@ describe("Conjure definitions declare the supported query parameters", () => {
     expect(queryParams("admin-service.yml", "getUser")).toEqual(["status"]);
   });
 
+  it("declares includeDatasources on the object-type operations", () => {
+    expect(queryParams("ontology-service.yml", "listObjectTypes")).toEqual([
+      "includeDatasources",
+      "pageSize",
+      "pageToken",
+    ]);
+    expect(queryParams("ontology-service.yml", "getObjectType")).toEqual([
+      "includeDatasources",
+    ]);
+  });
+
+  it("declares includeActionTypeFullMetadata on the full-metadata operation", () => {
+    expect(
+      queryParams("ontology-service.yml", "getOntologyFullMetadata"),
+    ).toEqual(["includeActionTypeFullMetadata"]);
+  });
+
+  it("declares pathPrefix on listFiles, and nothing the handler withdrew", () => {
+    expect(queryParams("dataset-service.yml", "listFiles")).toEqual([
+      "pageSize",
+      "pageToken",
+      "pathPrefix",
+    ]);
+  });
+
   it("declares no ontology scoping parameter the services reject", () => {
     const ir = compileConjureFile(
       readFileSync(join(CONJURE_DIR, "object-service.yml"), "utf-8"),

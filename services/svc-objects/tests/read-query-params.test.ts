@@ -612,8 +612,11 @@ describe("Unknown property names", () => {
       store: typedStore,
       linkStore: typedLinkStore,
       objectTypeSchema: {
-        propertyNames: (_ontologyRid, objectType) =>
-          objectType === "Employee" ? EMPLOYEE_PROPERTIES : undefined,
+        propertyNames: (_ontologyRid, objectType) => {
+          if (objectType === "Employee") return EMPLOYEE_PROPERTIES;
+          if (objectType === "Office") return new Set(["city"]);
+          return undefined;
+        },
         linkTargetObjectType: (_ontologyRid, objectType, linkType) =>
           objectType === "Employee" && linkType === "reportsTo"
             ? "Employee"
@@ -805,10 +808,42 @@ describe("Unknown property names", () => {
     const bad = await union(["nmae"]);
     expect(bad.statusCode).toBe(404);
     expect(bad.json().errorName).toBe("PropertiesNotFound");
+    expect(bad.json().parameters.properties).toEqual(["nmae"]);
 
     const good = await union(["name", "endDate"]);
     expect(good.statusCode).toBe(200);
     expect(good.json().data.length).toBeGreaterThan(0);
+  });
+
+  it("omits objectType from the error when a union spans several types", async () => {
+    const single = await typedApp.inject({
+      method: "POST",
+      url: `${BASE_URL}/objectSets/loadObjects`,
+      payload: {
+        objectSet: { type: "base", objectType: "Employee" },
+        select: ["nmae"],
+      },
+    });
+    expect(single.json().parameters.objectType).toBe("Employee");
+
+    const spanning = await typedApp.inject({
+      method: "POST",
+      url: `${BASE_URL}/objectSets/loadObjects`,
+      payload: {
+        objectSet: {
+          type: "union",
+          objectSets: [
+            { type: "base", objectType: "Employee" },
+            { type: "base", objectType: "Office" },
+          ],
+        },
+        select: ["nmae"],
+      },
+    });
+    expect(spanning.statusCode).toBe(404);
+    // A joined list would name no object type at all.
+    expect(spanning.json().parameters).not.toHaveProperty("objectType");
+    expect(spanning.json().parameters.properties).toEqual(["nmae"]);
   });
 
   it("makes no claim when a union branch has no declaration", async () => {

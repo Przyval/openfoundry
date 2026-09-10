@@ -357,3 +357,148 @@ describe("Full metadata — paginating store shape", () => {
     ).toBe("promoteEmployee");
   });
 });
+
+// ===========================================================================
+// Operations and logic rules derived from modifiedEntities
+// ===========================================================================
+
+describe("Full metadata — derived operations", () => {
+  let derivedApp: FastifyInstance;
+  let derivedRid: string;
+
+  async function registerAction(payload: Record<string, unknown>) {
+    return derivedApp.inject({
+      method: "POST",
+      url: `/api/v2/ontologies/${derivedRid}/actionTypes`,
+      payload,
+    });
+  }
+
+  async function fullMetadata() {
+    const res = await derivedApp.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${derivedRid}/fullMetadata?includeActionTypeFullMetadata=true`,
+    });
+    expect(res.statusCode).toBe(200);
+    return res.json().actionTypesFullMetadata;
+  }
+
+  beforeEach(async () => {
+    derivedApp = await createServer({
+      config: TEST_CONFIG,
+      store: new OntologyStore(null),
+    });
+    const created = await derivedApp.inject({
+      method: "POST",
+      url: "/api/v2/ontologies",
+      payload: {
+        apiName: "derived-ontology",
+        displayName: "Derived Ontology",
+        description: "Fixture ontology",
+      },
+    });
+    derivedRid = created.json().rid;
+  });
+
+  it("reports a modify-only action through operations", async () => {
+    await registerAction({
+      apiName: "reorderProduct",
+      description: "Reorders a product",
+      parameters: {
+        productId: { type: "STRING", required: true },
+        quantity: { type: "INTEGER", required: true },
+      },
+      modifiedEntities: { TreatmentProduct: { created: false, modified: true } },
+      status: "ACTIVE",
+    });
+
+    const entry = (await fullMetadata()).reorderProduct;
+    expect(entry.actionType.operations).toEqual([
+      { type: "modifyObject", objectTypeApiName: "TreatmentProduct" },
+    ]);
+    // No conformant fullLogicRules variant exists without a parameter id.
+    expect(entry.fullLogicRules).toEqual([]);
+  });
+
+  it("reports a create-and-modify entity as createOrModifyObject", async () => {
+    await registerAction({
+      apiName: "upsertEmployee",
+      description: "Creates or updates an employee",
+      parameters: { fullName: { type: "STRING", required: true } },
+      modifiedEntities: { Employee: { created: true, modified: true } },
+      status: "ACTIVE",
+    });
+
+    const entry = (await fullMetadata()).upsertEmployee;
+    expect(entry.fullLogicRules).toEqual([
+      {
+        type: "createOrModifyObject",
+        objectTypeApiName: "Employee",
+        propertyArguments: {},
+        structPropertyArguments: {},
+      },
+    ]);
+    expect(entry.actionType.operations).toEqual([
+      { type: "createObject", objectTypeApiName: "Employee" },
+      { type: "modifyObject", objectTypeApiName: "Employee" },
+    ]);
+  });
+
+  it("keeps a create-only entity as createObject", async () => {
+    await registerAction({
+      apiName: "hireEmployee",
+      description: "Creates an employee",
+      parameters: { fullName: { type: "STRING", required: true } },
+      modifiedEntities: { Employee: { created: true, modified: false } },
+      status: "ACTIVE",
+    });
+
+    const entry = (await fullMetadata()).hireEmployee;
+    expect(entry.fullLogicRules).toEqual([
+      {
+        type: "createObject",
+        objectTypeApiName: "Employee",
+        propertyArguments: {},
+        structPropertyArguments: {},
+      },
+    ]);
+    expect(entry.actionType.operations).toEqual([
+      { type: "createObject", objectTypeApiName: "Employee" },
+    ]);
+  });
+
+  it("reports every entity of a multi-entity action through operations", async () => {
+    await registerAction({
+      apiName: "assignTechnician",
+      description: "Assigns a technician",
+      parameters: { technicianId: { type: "STRING", required: true } },
+      modifiedEntities: {
+        Technician: { created: false, modified: true },
+        WorkOrder: { created: false, modified: true },
+      },
+      status: "ACTIVE",
+    });
+
+    const entry = (await fullMetadata()).assignTechnician;
+    expect(entry.actionType.operations).toEqual([
+      { type: "modifyObject", objectTypeApiName: "Technician" },
+      { type: "modifyObject", objectTypeApiName: "WorkOrder" },
+    ]);
+  });
+
+  it("leaves the always-present actionTypes list without operations", async () => {
+    await registerAction({
+      apiName: "reorderProduct",
+      description: "Reorders a product",
+      parameters: { productId: { type: "STRING", required: true } },
+      modifiedEntities: { TreatmentProduct: { created: false, modified: true } },
+      status: "ACTIVE",
+    });
+
+    const res = await derivedApp.inject({
+      method: "GET",
+      url: `/api/v2/ontologies/${derivedRid}/fullMetadata?includeActionTypeFullMetadata=true`,
+    });
+    expect(res.json().actionTypes[0]).not.toHaveProperty("operations");
+  });
+});

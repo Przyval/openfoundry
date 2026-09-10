@@ -30,11 +30,28 @@ type ActionLogicRule =
       structPropertyArguments: Record<string, unknown>;
     }
   | {
+      type: "createOrModifyObject";
+      objectTypeApiName: string;
+      propertyArguments: Record<string, unknown>;
+      structPropertyArguments: Record<string, unknown>;
+    }
+  | {
       type: "modifyObject";
       objectToModify: string;
       propertyArguments: Record<string, unknown>;
       structPropertyArguments: Record<string, unknown>;
     };
+
+/**
+ * One entry of the `operations` list Foundry returns on an action type.
+ *
+ * `LogicRule` is keyed by the object type alone - unlike the `ActionLogicRule`
+ * of `fullLogicRules`, it names no parameter - so both variants are fully
+ * derivable from `modifiedEntities`.
+ */
+type LogicRule =
+  | { type: "createObject"; objectTypeApiName: string }
+  | { type: "modifyObject"; objectTypeApiName: string };
 
 /** The subset of an action type definition this module reads. */
 interface ActionTypeShape {
@@ -44,16 +61,46 @@ interface ActionTypeShape {
 }
 
 /**
+ * Derives an action type's operations from the entities it declares it
+ * modifies.
+ *
+ * Every entity is represented: a `created` one as `createObject`, a `modified`
+ * one as `modifyObject`. Neither variant carries a parameter, so nothing here
+ * depends on parameter wiring the action type may not record.
+ */
+function deriveOperations(actionType: ActionTypeShape): LogicRule[] {
+  const operations: LogicRule[] = [];
+
+  for (const [objectTypeApiName, entity] of Object.entries(
+    actionType.modifiedEntities ?? {},
+  )) {
+    if (entity?.created) {
+      operations.push({ type: "createObject", objectTypeApiName });
+    }
+    if (entity?.modified) {
+      operations.push({ type: "modifyObject", objectTypeApiName });
+    }
+  }
+
+  return operations;
+}
+
+/**
  * Derives an action type's logic rules from the entities it declares it
  * modifies.
  *
- * `modifiedEntities` is the same information Foundry publishes as an action
- * type's operations, so a `created` entity becomes a `createObject` rule and a
- * `modified` entity becomes a `modifyObject` rule. A `modifyObject` rule names
- * the parameter carrying the object to modify, which is derivable only when a
- * parameter declares that object type; when none does, the rule is omitted
- * rather than invented. Property-level argument wiring is left empty because
- * OpenFoundry action types do not record which parameter feeds which property.
+ * An entity that is both created and modified becomes a
+ * `createOrModifyObject` rule, one that is only created a `createObject` rule.
+ * Both are keyed by the object type and need no parameter.
+ *
+ * A modify-only entity emits nothing unless a parameter declares that object
+ * type: the only conformant `ActionLogicRule` variant for it is
+ * `modifyObject`, whose `objectToModify` is a parameter id, and putting an
+ * object type name there would publish a shape Foundry never emits. The
+ * modification is still reported, through `operations`.
+ *
+ * Property-level argument wiring is left empty because OpenFoundry action
+ * types do not record which parameter feeds which property.
  */
 function deriveLogicRules(actionType: ActionTypeShape): ActionLogicRule[] {
   const rules: ActionLogicRule[] = [];
@@ -64,11 +111,12 @@ function deriveLogicRules(actionType: ActionTypeShape): ActionLogicRule[] {
   )) {
     if (entity?.created) {
       rules.push({
-        type: "createObject",
+        type: entity.modified ? "createOrModifyObject" : "createObject",
         objectTypeApiName,
         propertyArguments: {},
         structPropertyArguments: {},
       });
+      continue;
     }
     if (entity?.modified) {
       const objectToModify = Object.entries(parameters).find(
@@ -168,7 +216,13 @@ export async function ontologyRoutes(
       ? Object.fromEntries(
           actionTypeList.map((actionType) => [
             actionType.apiName,
-            { actionType, fullLogicRules: deriveLogicRules(actionType) },
+            {
+              actionType: {
+                ...actionType,
+                operations: deriveOperations(actionType),
+              },
+              fullLogicRules: deriveLogicRules(actionType),
+            },
           ]),
         )
       : undefined;

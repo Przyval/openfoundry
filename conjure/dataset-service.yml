@@ -241,6 +241,10 @@ services:
           pageToken:
             type: optional<PageToken>
             param-type: query
+          pathPrefix:
+            type: optional<string>
+            param-type: query
+            docs: Return only files whose path starts with this prefix
         returns: ListFilesResponse
 
       uploadFile:

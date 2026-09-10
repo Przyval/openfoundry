@@ -62,6 +62,14 @@ types:
           dataType: string
           required: optional<boolean>
 
+      LogicRule:
+        docs: |
+          One operation an action type performs, keyed by object type.
+          `type` is `createObject` or `modifyObject`.
+        fields:
+          type: string
+          objectTypeApiName: string
+
       ActionTypeV2:
         fields:
           apiName: string
@@ -70,6 +78,39 @@ types:
           parameters: map<string, ParameterDefinition>
           rid: optional<Rid>
           status: optional<string>
+          operations: optional<list<LogicRule>>
+
+      ActionLogicRule:
+        docs: |
+          One entry of an action type's `fullLogicRules`. `type` is
+          `createObject`, `createOrModifyObject` or `modifyObject`;
+          `objectTypeApiName` is set on the first two and `objectToModify`,
+          a parameter id, on the last.
+        fields:
+          type: string
+          objectTypeApiName: optional<string>
+          objectToModify: optional<string>
+          propertyArguments: map<string, any>
+          structPropertyArguments: map<string, any>
+
+      ActionTypeFullMetadata:
+        fields:
+          actionType: ActionTypeV2
+          fullLogicRules: list<ActionLogicRule>
+
+      OntologyFullMetadata:
+        docs: An ontology together with every type it declares.
+        fields:
+          rid: Rid
+          apiName: string
+          displayName: string
+          description: string
+          version: string
+          objectTypes: list<ObjectTypeV2>
+          actionTypes: list<ActionTypeV2>
+          linkTypes: list<LinkTypeV2>
+          interfaceTypes: list<InterfaceTypeV2>
+          actionTypesFullMetadata: optional<map<string, ActionTypeFullMetadata>>
 
       ListActionTypesResponse:
         fields:
@@ -159,6 +200,19 @@ services:
             param-type: path
 
       # -- Object Type CRUD ----------------------------------------------------
+      getOntologyFullMetadata:
+        http: GET /ontologies/{ontologyRid}/fullMetadata
+        docs: Get an ontology together with every type it declares
+        args:
+          ontologyRid:
+            type: Rid
+            param-type: path
+          includeActionTypeFullMetadata:
+            type: optional<boolean>
+            param-type: query
+            docs: Include each action type's derived logic rules
+        returns: OntologyFullMetadata
+
       listObjectTypes:
         http: GET /ontologies/{ontologyRid}/objectTypes
         docs: List all object types in an ontology
@@ -172,6 +226,10 @@ services:
           pageToken:
             type: optional<PageToken>
             param-type: query
+          includeDatasources:
+            type: optional<boolean>
+            param-type: query
+            docs: Include each object type's backing datasources
         returns: ListObjectTypesResponse
 
       createObjectType:
@@ -196,6 +254,10 @@ services:
           objectTypeApiName:
             type: string
             param-type: path
+          includeDatasources:
+            type: optional<boolean>
+            param-type: query
+            docs: Include each object type's backing datasources
         returns: ObjectTypeV2
 
       updateObjectType:

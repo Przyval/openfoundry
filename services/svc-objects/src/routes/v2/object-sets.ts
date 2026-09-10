@@ -346,17 +346,16 @@ export async function objectSetRoutes(
   const declaredForSet = async (
     ontologyRid: string,
     objectSetDef: Record<string, unknown>,
-  ): Promise<{ objectType: string; properties?: ReadonlySet<string> }> => {
+  ): Promise<{ objectTypes: string[]; properties?: ReadonlySet<string> }> => {
     const types = objectSetLeafTypes(objectSetDef);
-    if (!types || types.length === 0) return { objectType: "" };
+    if (!types || types.length === 0) return { objectTypes: [] };
 
-    const objectType = types.join(", ");
     const sets = await Promise.all(
       types.map((type) => declaredProperties(ontologyRid, type)),
     );
-    if (sets.some((set) => set === undefined)) return { objectType };
+    if (sets.some((set) => set === undefined)) return { objectTypes: types };
     return {
-      objectType,
+      objectTypes: types,
       properties: new Set((sets as ReadonlySet<string>[]).flatMap((s) => [...s])),
     };
   };
@@ -388,9 +387,9 @@ export async function objectSetRoutes(
         request.params.ontologyRid,
         objectSetDef,
       );
-      assertPropertiesExist(declared.objectType, declared.properties, select);
+      assertPropertiesExist(declared.objectTypes, declared.properties, select);
       assertPropertiesExist(
-        declared.objectType,
+        declared.objectTypes,
         declared.properties,
         orderBy?.map((clause) => clause.field),
       );
