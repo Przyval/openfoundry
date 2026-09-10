@@ -7,6 +7,9 @@ import { paginateArray } from "./pagination-helpers.js";
 /** Serialize a StoredGroup to the wire format. */
 function serializeGroup(g: StoredGroup) {
   return {
+    // Foundry's Group model identifies a group by `id`; `rid` is OpenFoundry's
+    // own name for the same value and is kept for existing callers.
+    id: g.rid,
     rid: g.rid,
     name: g.name,
     description: g.description,
@@ -95,7 +98,7 @@ export async function groupRoutes(
   }>("/admin/groups/:groupRid/members", {
     preHandler: requirePermission("admin:manage"),
   }, async (request) => {
-    const memberRids = groupStore.getMembers(request.params.groupRid);
+    const memberRids = await groupStore.getMembers(request.params.groupRid);
     const members = memberRids.map((rid) => {
       const user = userStore.getUser(rid);
       return {
@@ -107,5 +110,65 @@ export async function groupRoutes(
       };
     });
     return members;
+  });
+
+  // -----------------------------------------------------------------------
+  // Group members - the Foundry `admin.GroupMember` resource
+  //
+  // Foundry names this sub-resource `groupMembers` and mutates it with
+  // `add` / `remove` actions carrying a `principalIds` body, rather than with
+  // per-principal POST/DELETE.  These routes follow that contract.
+  // -----------------------------------------------------------------------
+
+  // List group members (paginated) - Foundry's ListGroupMembersResponse.
+  app.get<{
+    Params: { groupRid: string };
+    Querystring: {
+      includeExpirations?: string;
+      pageSize?: string;
+      pageToken?: string;
+      transitive?: string;
+    };
+  }>("/admin/groups/:groupRid/groupMembers", {
+    preHandler: requirePermission("admin:manage"),
+  }, async (request) => {
+    const memberRids = await groupStore.getMembers(request.params.groupRid);
+    // OpenFoundry groups only ever contain users, so every member is a USER
+    // principal and nested groups (`transitive`) add nothing to resolve.
+    const members = memberRids.map((principalId) => ({
+      principalType: "USER" as const,
+      principalId,
+    }));
+    return paginateArray(members, request.query);
+  });
+
+  // Add group members.
+  app.post<{
+    Params: { groupRid: string };
+    Body: { principalIds: string[] };
+  }>("/admin/groups/:groupRid/groupMembers/add", {
+    preHandler: requirePermission("admin:manage"),
+  }, async (request, reply) => {
+    for (const principalId of request.body.principalIds) {
+      // Verify the principal exists before adding it
+      userStore.getUser(principalId);
+      await groupStore.addMember(request.params.groupRid, principalId);
+    }
+    reply.status(204);
+    return;
+  });
+
+  // Remove group members.
+  app.post<{
+    Params: { groupRid: string };
+    Body: { principalIds: string[] };
+  }>("/admin/groups/:groupRid/groupMembers/remove", {
+    preHandler: requirePermission("admin:manage"),
+  }, async (request, reply) => {
+    for (const principalId of request.body.principalIds) {
+      await groupStore.removeMember(request.params.groupRid, principalId);
+    }
+    reply.status(204);
+    return;
   });
 }

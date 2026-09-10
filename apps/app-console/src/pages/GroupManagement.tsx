@@ -100,8 +100,12 @@ export default function GroupManagement() {
   const handleAddMember = useCallback(async () => {
     if (!membersGroupId || !addMemberId) return;
     await fetch(
-      `${API_BASE_URL}/api/v2/admin/groups/${membersGroupId}/groupMembers/${addMemberId}`,
-      { method: "POST", headers: { "Content-Type": "application/json" } },
+      `${API_BASE_URL}/api/v2/admin/groups/${membersGroupId}/groupMembers/add`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ principalIds: [addMemberId] }),
+      },
     );
     setAddMemberId("");
     refetchMembers();
@@ -111,8 +115,12 @@ export default function GroupManagement() {
     async (principalId: string) => {
       if (!membersGroupId) return;
       await fetch(
-        `${API_BASE_URL}/api/v2/admin/groups/${membersGroupId}/groupMembers/${principalId}`,
-        { method: "DELETE" },
+        `${API_BASE_URL}/api/v2/admin/groups/${membersGroupId}/groupMembers/remove`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ principalIds: [principalId] }),
+        },
       );
       refetchMembers();
     },

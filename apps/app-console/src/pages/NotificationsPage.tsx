@@ -81,9 +81,10 @@ export default function NotificationsPage() {
 
   const handleMarkRead = useCallback(
     async (rid: string) => {
+      // No Content-Type header: this request carries no body, and declaring
+      // one makes the server reject it as an empty JSON payload.
       await fetch(`${API_BASE_URL}/api/v2/notifications/${rid}/read`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "PUT",
       });
       refetch();
     },
@@ -93,9 +94,9 @@ export default function NotificationsPage() {
   const handleMarkAllRead = useCallback(async () => {
     setMarkingAll(true);
     try {
+      // Bodyless, so no Content-Type header (see handleMarkRead).
       await fetch(`${API_BASE_URL}/api/v2/notifications/read-all`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
       });
       refetch();
     } finally {
