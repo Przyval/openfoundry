@@ -299,3 +299,18 @@ describe("v1 files", () => {
     }
   });
 });
+
+describe("v1 create dataset validation", () => {
+  it("POST /api/v1/datasets refuses a request with no name", async () => {
+    // `Dataset.name` is required on the way out too, so a dataset created
+    // without one could not be serialized back as a conformant v1 response.
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/datasets",
+      payload: { parentFolderRid: PARENT_FOLDER_RID },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().parameters.param).toBe("name");
+  });
+});

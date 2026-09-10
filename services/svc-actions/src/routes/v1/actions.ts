@@ -1,8 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { customClient, invalidArgument, notFound, safeArg } from "@openfoundry/errors";
 import { requirePermission } from "@openfoundry/permissions";
-import type { ActionRegistry, RegisteredAction } from "../../store/action-registry.js";
-import type { ActionLog } from "../../store/action-log.js";
+import type {
+  ActionRegistrySource,
+  RegisteredAction,
+} from "../../store/action-registry.js";
+import type { ActionExecutionLog } from "../../store/action-log.js";
 import { validateActionParameters } from "../../validation.js";
 
 /**
@@ -78,12 +81,14 @@ function actionValidationFailed(actionApiName: string): never {
 
 export async function actionRoutesV1(
   app: FastifyInstance,
-  options: { registry: ActionRegistry; log: ActionLog },
+  options: { registry: ActionRegistrySource; log: ActionExecutionLog },
 ): Promise<void> {
   const { registry, log } = options;
 
-  const requireAction = (actionApiName: string): RegisteredAction => {
-    const action = registry.getAction(actionApiName);
+  const requireAction = async (
+    actionApiName: string,
+  ): Promise<RegisteredAction> => {
+    const action = await registry.getAction(actionApiName);
     if (!action) throw notFound("Action", actionApiName);
     return action;
   };
@@ -106,20 +111,23 @@ export async function actionRoutesV1(
   }, async (request) => {
     const { ontologyRid, actionType } = request.params;
     const parameters = request.body?.parameters ?? {};
-    const action = requireAction(actionType);
+    const action = await requireAction(actionType);
 
     if (!validateActionParameters(parameters, action).valid) {
       actionValidationFailed(actionType);
     }
 
-    const execution = log.logStart(actionType, parameters);
+    const execution = await log.logStart(actionType, parameters);
     try {
       const result = action.handler
         ? (await action.handler(parameters, { ontologyRid, actionApiName: actionType })).result
         : undefined;
-      log.logComplete(execution.rid, result);
+      await log.logComplete(execution.rid, result);
     } catch (err) {
-      log.logFailure(execution.rid, err instanceof Error ? err.message : String(err));
+      await log.logFailure(
+        execution.rid,
+        err instanceof Error ? err.message : String(err),
+      );
       throw err;
     }
 
@@ -143,7 +151,7 @@ export async function actionRoutesV1(
     if (!Array.isArray(requests)) {
       throw invalidArgument("requests", "must be an array");
     }
-    const action = requireAction(actionType);
+    const action = await requireAction(actionType);
 
     const parameterSets = requests.map((entry) => entry?.parameters ?? {});
     for (const parameters of parameterSets) {
@@ -153,14 +161,17 @@ export async function actionRoutesV1(
     }
 
     for (const parameters of parameterSets) {
-      const execution = log.logStart(actionType, parameters);
+      const execution = await log.logStart(actionType, parameters);
       try {
         const result = action.handler
           ? (await action.handler(parameters, { ontologyRid, actionApiName: actionType })).result
           : undefined;
-        log.logComplete(execution.rid, result);
+        await log.logComplete(execution.rid, result);
       } catch (err) {
-        log.logFailure(execution.rid, err instanceof Error ? err.message : String(err));
+        await log.logFailure(
+        execution.rid,
+        err instanceof Error ? err.message : String(err),
+      );
         throw err;
       }
     }
@@ -183,7 +194,7 @@ export async function actionRoutesV1(
   }>("/ontologies/:ontologyRid/actions/:actionType/validate", {
     preHandler: requirePermission("actions:read"),
   }, async (request) => {
-    const action = requireAction(request.params.actionType);
+    const action = await requireAction(request.params.actionType);
     return validateForV1(request.body?.parameters ?? {}, action);
   });
 }

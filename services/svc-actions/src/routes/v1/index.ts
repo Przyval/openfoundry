@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import type { ActionRegistry } from "../../store/action-registry.js";
-import type { ActionLog } from "../../store/action-log.js";
+import type { ActionRegistrySource } from "../../store/action-registry.js";
+import type { ActionExecutionLog } from "../../store/action-log.js";
 import { actionRoutesV1 } from "./actions.js";
 
 /**
@@ -13,7 +13,7 @@ import { actionRoutesV1 } from "./actions.js";
  */
 export async function v1Routes(
   app: FastifyInstance,
-  opts: { registry: ActionRegistry; log: ActionLog },
+  opts: { registry: ActionRegistrySource; log: ActionExecutionLog },
 ): Promise<void> {
   // Rebuilt rather than passed through: `opts` still carries this plugin's own
   // `prefix`, which would otherwise be applied a second time.

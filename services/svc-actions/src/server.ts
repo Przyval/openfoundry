@@ -135,8 +135,8 @@ export async function createServer(
   });
   await app.register(v1Routes, {
     prefix: "/api/v1",
-    registry: registry as ActionRegistry,
-    log: actionLog as ActionLog,
+    registry,
+    log: actionLog,
   });
 
   return app;

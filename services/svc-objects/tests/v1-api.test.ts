@@ -310,3 +310,88 @@ describe("v1 aggregate", () => {
     expect(res.statusCode).toBe(400);
   });
 });
+
+describe("v1 approximateDistinct", () => {
+  it("counts the distinct values rather than reporting 0", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `${BASE}/objects/Employee/aggregate`,
+      payload: {
+        aggregation: [{ type: "approximateDistinct", field: "department" }],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    // Engineering and Research — the engine's own case label is
+    // `approximate_distinct`, so the v1 wire name has to be translated.
+    expect(res.json().data).toEqual([
+      { group: {}, metrics: [{ name: "approximateDistinct", value: 2 }] },
+    ]);
+  });
+});
+
+describe("v1 pageSize validation", () => {
+  const urls = [
+    `${BASE}/objects/Employee`,
+    `${BASE}/objects/Employee/e1/links/worksIn`,
+  ];
+
+  for (const url of urls) {
+    it(`rejects a non-numeric pageSize on GET ${url}`, async () => {
+      const res = await app.inject({ method: "GET", url: `${url}?pageSize=abc` });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().parameters.param).toBe("pageSize");
+    });
+
+    it(`rejects pageSize=0 on GET ${url}`, async () => {
+      const res = await app.inject({ method: "GET", url: `${url}?pageSize=0` });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().parameters.param).toBe("pageSize");
+    });
+
+    it(`still pages GET ${url} with a valid pageSize`, async () => {
+      const res = await app.inject({ method: "GET", url: `${url}?pageSize=1` });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data).toHaveLength(1);
+    });
+  }
+
+  it("rejects a non-positive pageSize in the search body", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `${BASE}/objects/Employee/search`,
+      payload: { pageSize: 0 },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().parameters.param).toBe("pageSize");
+  });
+
+  it("still pages search with a valid pageSize", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `${BASE}/objects/Employee/search`,
+      payload: { pageSize: 2 },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toHaveLength(2);
+    expect(res.json().nextPageToken).toBeDefined();
+  });
+});
+
+describe("v1 search orderBy validation", () => {
+  it("reports a non-string sort direction as a 400, not a 500", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `${BASE}/objects/Employee/search`,
+      payload: { orderBy: { fields: [{ field: "name", direction: 1 }] } },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().parameters.param).toBe("orderBy.fields");
+  });
+});

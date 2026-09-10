@@ -183,3 +183,92 @@ describe("v1 validate", () => {
     expect(res.json().parameters.firstName.result).toBe("INVALID");
   });
 });
+
+/**
+ * With `DATABASE_URL` set the routes are handed `PgActionRegistry` and
+ * `PgActionLog`, whose methods are async. The promise-returning facades here
+ * stand in for them: unawaited, `getAction` hands the handler a pending promise
+ * whose `parameters` is `undefined`, and every route 500s.
+ */
+describe("v1 actions against an async registry and log", () => {
+  let asyncApp: FastifyInstance;
+  let asyncLog: ActionLog;
+
+  beforeEach(async () => {
+    const backingRegistry = new ActionRegistry();
+    backingRegistry.registerAction(testAction());
+    asyncLog = new ActionLog();
+
+    const asyncRegistry = {
+      getAction: async (apiName: string) => backingRegistry.getAction(apiName),
+    };
+    const asyncLogFacade = {
+      logStart: async (apiName: string, parameters: Record<string, unknown>) =>
+        asyncLog.logStart(apiName, parameters),
+      logComplete: async (rid: string, result?: Record<string, unknown>) =>
+        asyncLog.logComplete(rid, result),
+      logFailure: async (rid: string, error: string) =>
+        asyncLog.logFailure(rid, error),
+    };
+
+    asyncApp = await createServer({
+      config: {
+        port: 0,
+        host: "127.0.0.1",
+        logLevel: "silent",
+        nodeEnv: "test",
+      } as never,
+      registry: asyncRegistry as never,
+      actionLog: asyncLogFacade as never,
+      seedDemoActions: false,
+    });
+  });
+
+  it("applies an action and records the execution as succeeded", async () => {
+    const res = await asyncApp.inject({
+      method: "POST",
+      url: `${BASE}/apply`,
+      payload: { parameters: { firstName: "Ada" } },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({});
+    expect(applied).toEqual([{ firstName: "Ada" }]);
+    const { data: executions } = asyncLog.listExecutions("create-employee");
+    expect(executions).toHaveLength(1);
+    expect(executions[0].status).toBe("SUCCEEDED");
+  });
+
+  it("applies a batch", async () => {
+    const res = await asyncApp.inject({
+      method: "POST",
+      url: `${BASE}/applyBatch`,
+      payload: { requests: [{ parameters: { firstName: "Ada" } }] },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({});
+    expect(applied).toEqual([{ firstName: "Ada" }]);
+  });
+
+  it("validates parameters", async () => {
+    const res = await asyncApp.inject({
+      method: "POST",
+      url: `${BASE}/validate`,
+      payload: { parameters: { firstName: "Ada" } },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().result).toBe("VALID");
+  });
+
+  it("reports an unknown action as a 404", async () => {
+    const res = await asyncApp.inject({
+      method: "POST",
+      url: `/api/v1/ontologies/${ONTOLOGY_RID}/actions/absent/apply`,
+      payload: { parameters: {} },
+    });
+
+    expect(res.statusCode).toBe(404);
+  });
+});

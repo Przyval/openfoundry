@@ -47,6 +47,14 @@ export async function datasetRoutesV1(
     const { name, parentFolderRid } = request.body ?? {};
 
     // Required in `datasets_models.CreateDatasetRequest`, and required again on
+    // the way out: `Dataset.name` has no optional form either, so a dataset
+    // stored without one is permanently unnamed and serializes back short of a
+    // required field.
+    if (!name) {
+      throw invalidArgument("name", "is required");
+    }
+
+    // Required in `datasets_models.CreateDatasetRequest`, and required again on
     // the way out: `Dataset.parentFolderRid` has no optional form, so a dataset
     // stored without one could not be serialized back as a conformant v1
     // response.

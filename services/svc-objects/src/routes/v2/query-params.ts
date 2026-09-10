@@ -43,6 +43,25 @@ export function parseBooleanParam(
 }
 
 /**
+ * Parses a `pageSize` query parameter.
+ *
+ * A value that is not a positive integer is a client mistake: left alone, `abc`
+ * reaches the slice as NaN and yields an empty page reported as a successful
+ * listing, and `0` yields a next-page token identical to the cursor it was cut
+ * from, which a paging client follows forever.
+ */
+export function parsePageSize(
+  raw: string | number | undefined,
+): number | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw invalidArgument("pageSize", `must be a positive integer, got "${raw}"`);
+  }
+  return parsed;
+}
+
+/**
  * Normalises an exploded list query parameter into an array.
  *
  * `select=a&select=b` reaches Fastify as `["a", "b"]`; a single occurrence

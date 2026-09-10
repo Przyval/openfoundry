@@ -113,3 +113,18 @@ export class ActionRegistry {
     return true;
   }
 }
+
+/**
+ * The registry surface a route handler may depend on.
+ *
+ * Both the in-memory `ActionRegistry` and the Postgres-backed
+ * `PgActionRegistry` satisfy it. `getAction` may answer synchronously or with a
+ * promise, so a handler that awaits its result is correct against either
+ * backend - which is what keeps a Postgres deployment from treating a pending
+ * promise as a resolved action.
+ */
+export interface ActionRegistrySource {
+  getAction(
+    apiName: string,
+  ): RegisteredAction | undefined | Promise<RegisteredAction | undefined>;
+}

@@ -21,6 +21,7 @@ import {
   assertStringListBody,
   parseListParam,
   parseOrderBy,
+  parsePageSize,
   type OrderByTerm,
 } from "../v2/query-params.js";
 import { matchesV1Query, queryFields, type V1SearchQuery } from "./search-query.js";
@@ -33,14 +34,21 @@ const queryEngine = new ObjectSetQueryEngine();
 
 const DEFAULT_PAGE_SIZE = 100;
 
-/** The aggregation functions the shared query engine implements. */
-const SUPPORTED_AGGREGATIONS = new Set([
-  "count",
-  "min",
-  "max",
-  "avg",
-  "sum",
-  "approximateDistinct",
+/**
+ * The aggregation functions the shared query engine implements, keyed by the v1
+ * wire name and valued by the engine's own type label.
+ *
+ * The two differ for `approximateDistinct`, which the engine matches as
+ * `approximate_distinct`; passing the wire name through reaches the engine's
+ * default branch and reports every such metric as 0.
+ */
+const SUPPORTED_AGGREGATIONS = new Map([
+  ["count", "count"],
+  ["min", "min"],
+  ["max", "max"],
+  ["avg", "avg"],
+  ["sum", "sum"],
+  ["approximateDistinct", "approximate_distinct"],
 ]);
 
 interface ListParams {
@@ -101,7 +109,13 @@ function page(
 }
 
 /** The sort direction of one v1 `SearchOrdering`; ascending when unstated. */
-function parseDirection(raw: string | undefined): OrderByTerm["direction"] {
+function parseDirection(raw: unknown): OrderByTerm["direction"] {
+  if (raw !== undefined && raw !== null && typeof raw !== "string") {
+    throw invalidArgument(
+      "orderBy.fields",
+      `sort direction must be "asc" or "desc", got ${typeof raw}`,
+    );
+  }
   const direction = (raw ?? "asc").toLowerCase();
   if (direction === "asc") return "asc";
   if (direction === "desc") return "desc";
@@ -189,9 +203,7 @@ export async function objectRoutesV1(
       orderBy?.map((term) => term.property),
     );
 
-    const pageSize = request.query.pageSize
-      ? Number(request.query.pageSize)
-      : DEFAULT_PAGE_SIZE;
+    const pageSize = parsePageSize(request.query.pageSize) ?? DEFAULT_PAGE_SIZE;
 
     // Ordering spans the whole collection, so only that case needs every object
     // read; a plain listing stays on the store's paged path, which is a
@@ -306,9 +318,7 @@ export async function objectRoutesV1(
       .filter((object): object is StoredObject => object !== undefined);
     if (orderBy) objects = applyOrderBy(objects, orderBy);
 
-    const pageSize = request.query.pageSize
-      ? Number(request.query.pageSize)
-      : DEFAULT_PAGE_SIZE;
+    const pageSize = parsePageSize(request.query.pageSize) ?? DEFAULT_PAGE_SIZE;
     const result = page(objects, cursorOf(request.query.pageToken), pageSize);
     return {
       data: applySelect(result.data, properties).map(toV1OntologyObject),
@@ -353,7 +363,7 @@ export async function objectRoutesV1(
       if (orderBy) objects = applyOrderBy(objects, orderBy);
       const totalCount = objects.length;
 
-      const pageSize = body.pageSize ?? DEFAULT_PAGE_SIZE;
+      const pageSize = parsePageSize(body.pageSize) ?? DEFAULT_PAGE_SIZE;
       const result = page(objects, cursorOf(body.pageToken), pageSize);
       return {
         data: applySelect(result.data, fields).map(toV1OntologyObject),
@@ -387,7 +397,7 @@ export async function objectRoutesV1(
         if (!SUPPORTED_AGGREGATIONS.has(aggregation?.type)) {
           throw invalidArgument(
             "aggregation",
-            `"${aggregation?.type}" is not implemented; supported: ${[...SUPPORTED_AGGREGATIONS].join(", ")}`,
+            `"${aggregation?.type}" is not implemented; supported: ${[...SUPPORTED_AGGREGATIONS.keys()].join(", ")}`,
           );
         }
       }
@@ -428,7 +438,7 @@ export async function objectRoutesV1(
       }
 
       const aggregationDefs: AggregationDef[] = aggregations.map((aggregation) => ({
-        type: aggregation.type,
+        type: SUPPORTED_AGGREGATIONS.get(aggregation.type)!,
         field: aggregation.field,
         name: aggregation.name ?? aggregation.type,
       }));
