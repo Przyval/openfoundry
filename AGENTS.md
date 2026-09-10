@@ -34,6 +34,10 @@ resolved against the run's root - the package directory, not the repo root.
 Keep those globs relative (`**/tests/**/*.test.ts`); a root-anchored `packages/**` glob matches
 nothing per package and every package then dies on "No test files found".
 
+Read that message carefully before acting on it: here it meant the glob missed, not that tests were absent.
+46 of the 47 packages declaring a `test` script do contain test files; only `@openfoundry/app-workshop` has none.
+Reaching for `--passWithNoTests` would have turned the job green while suppressing a monorepo of suites that were never running.
+
 Integration tests are `pnpm run test:integration` (config in `tests/vitest.config.ts`).
 Most files start their own in-process server; `api-endpoints` and `sdk-compat` need a real gateway on `localhost:8080` via `bash start.sh`, which needs Docker Postgres.
 
