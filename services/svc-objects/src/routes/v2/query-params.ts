@@ -13,7 +13,7 @@
  *   `:desc`.
  */
 
-import { invalidArgument } from "@openfoundry/errors";
+import { customClient, invalidArgument, safeArg } from "@openfoundry/errors";
 import type { StoredObject } from "../../store/object-store.js";
 
 /** One parsed term of an `orderBy` command. */
@@ -104,6 +104,45 @@ export function parseOrderBy(raw: string | undefined): OrderByTerm[] | undefined
   }
 
   return terms.length > 0 ? terms : undefined;
+}
+
+/**
+ * Rejects `select` / `orderBy` property names that no object of the type
+ * carries.
+ *
+ * Foundry answers an unknown property with `PropertiesNotFound`; without this
+ * check `select=nmae` returns 200 with `properties: {}` and `orderBy=p.nmae`
+ * returns 200 in insertion order, both telling the client its request was
+ * honoured when it was not.
+ *
+ * Limitation: svc-objects does not hold the ontology schema (that lives in
+ * svc-ontology), so the only signal available here is the population itself.
+ * A property that is declared on the object type but set on no object is
+ * therefore reported as unknown, and on an empty collection nothing can be
+ * checked at all. Both are deliberate: the check is skipped rather than
+ * guessed when the population cannot answer.
+ */
+export function assertPropertiesExist(
+  objectType: string,
+  population: readonly StoredObject[],
+  properties: readonly string[] | undefined,
+): void {
+  if (!properties || properties.length === 0 || population.length === 0) return;
+
+  const known = new Set<string>();
+  for (const obj of population) {
+    for (const name of Object.keys(obj.properties)) known.add(name);
+  }
+
+  const unknown = properties.filter((name) => !known.has(name));
+  if (unknown.length === 0) return;
+
+  throw customClient(
+    404,
+    "PropertiesNotFound",
+    `The properties ${unknown.map((n) => `"${n}"`).join(", ")} were not found on object type "${objectType}".`,
+    [safeArg("objectType", objectType), safeArg("properties", unknown)],
+  );
 }
 
 /**

@@ -584,3 +584,91 @@ describe("Ontology scoping — branch, scenarioRid, transactionId", () => {
     }
   });
 });
+
+// ===========================================================================
+// Unknown property names
+// ===========================================================================
+
+describe("Unknown property names", () => {
+  it("answers PropertiesNotFound for a select typo instead of an empty bag", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?select=nmae`,
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("PropertiesNotFound");
+    expect(res.json().parameters.properties).toEqual(["nmae"]);
+  });
+
+  it("names only the properties that are unknown", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?select=name&select=nmae`,
+    });
+
+    expect(res.json().parameters.properties).toEqual(["nmae"]);
+  });
+
+  it("answers PropertiesNotFound for an orderBy typo instead of insertion order", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?orderBy=properties.nonexistent`,
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("PropertiesNotFound");
+  });
+
+  it("accepts a property that only some objects carry", async () => {
+    seedEmployees();
+    store.createObject("Employee", "emp-4", { name: "Dave", nickname: "D" });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?select=nickname`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(
+      res.json().data.map((o: any) => o.properties.nickname),
+    ).toContain("D");
+  });
+
+  it("answers PropertiesNotFound on the single-object endpoint", async () => {
+    seedEmployees();
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee/emp-1?select=nmae`,
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("PropertiesNotFound");
+  });
+
+  it("serves a property this object lacks but its type has, rather than 404ing", async () => {
+    seedEmployees();
+    store.createObject("Employee", "emp-4", { name: "Dave", nickname: "D" });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee/emp-1?select=name&select=nickname`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().properties).toEqual({ name: "Carol" });
+  });
+
+  it("cannot check anything on an empty collection, so it lists nothing", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `${BASE_URL}/objects/Employee?select=whatever`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual([]);
+  });
+});

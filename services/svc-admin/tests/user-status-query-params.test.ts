@@ -147,3 +147,85 @@ describe("Get user — status", () => {
     expect(res.json().errorCode).toBe("INVALID_ARGUMENT");
   });
 });
+
+// ===========================================================================
+// SUSPENDED — a state Foundry's two-value UserStatus cannot name
+// ===========================================================================
+
+describe("Suspended users", () => {
+  /** Creates a suspended user and returns its rid. */
+  function suspendedUser(): string {
+    const rid = userStore.createUser({
+      username: "carol",
+      email: "carol@example.com",
+      displayName: "Carol",
+    }).rid;
+    userStore.updateUser(rid, { status: "SUSPENDED" });
+    return rid;
+  }
+
+  it("does not call a suspended user deleted when status=ACTIVE is asserted", async () => {
+    const rid = suspendedUser();
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/admin/users/${rid}?status=ACTIVE`,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorName).not.toBe("UserDeleted");
+    expect(res.json().errorName).toBe("UserSuspended");
+  });
+
+  it("does not call a suspended user active when status=DELETED is asserted", async () => {
+    const rid = suspendedUser();
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/admin/users/${rid}?status=DELETED`,
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorName).not.toBe("UserIsActive");
+    expect(res.json().errorName).toBe("UserSuspended");
+  });
+
+  it("still reports a genuinely deleted user as deleted", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/admin/users/${deletedRid}?status=ACTIVE`,
+    });
+
+    expect(res.json().errorName).toBe("UserDeleted");
+  });
+
+  it("still reports a genuinely active user as active", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/admin/users/${activeRid}?status=DELETED`,
+    });
+
+    expect(res.json().errorName).toBe("UserIsActive");
+  });
+
+  it("returns the suspended user when status is omitted", async () => {
+    const rid = suspendedUser();
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v2/admin/users/${rid}`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("SUSPENDED");
+  });
+
+  it("excludes a suspended user from both include values but lists it unfiltered", async () => {
+    const rid = suspendedUser();
+    const rids = async (query: string) =>
+      (
+        await app.inject({ method: "GET", url: `/api/v2/admin/users${query}` })
+      ).json().data.map((u: any) => u.rid);
+
+    expect(await rids("?include=ACTIVE")).not.toContain(rid);
+    expect(await rids("?include=DELETED")).not.toContain(rid);
+    expect(await rids("")).toContain(rid);
+  });
+});

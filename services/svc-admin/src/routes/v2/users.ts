@@ -55,9 +55,35 @@ function parseUserStatus(
   );
 }
 
-/** Whether a stored user is in the requested Foundry lifecycle state. */
+/**
+ * Whether a stored user is in the requested Foundry lifecycle state.
+ *
+ * A `SUSPENDED` user matches neither: it is genuinely not active and it has
+ * not been deleted, so it is excluded from both `include=ACTIVE` and
+ * `include=DELETED` rather than being counted under a state it is not in.
+ * Omitting `include` still lists it.
+ */
 function matchesStatus(user: StoredUser, status: FoundryUserStatus): boolean {
   return status === "ACTIVE" ? user.status === "ACTIVE" : user.status === "INACTIVE";
+}
+
+/**
+ * The error for a user who is not in the asserted lifecycle state.
+ *
+ * Named from the state the user is actually in, never from the one that was
+ * asked for: a suspended user is neither deleted nor active, so answering
+ * either of those names would tell the caller something untrue about the
+ * account.
+ */
+function statusMismatchError(user: StoredUser) {
+  switch (user.status) {
+    case "INACTIVE":
+      return customClient(400, "UserDeleted", "The user is deleted.");
+    case "ACTIVE":
+      return customClient(400, "UserIsActive", "The user is an active user.");
+    default:
+      return customClient(400, "UserSuspended", "The user is suspended.");
+  }
 }
 
 export async function userRoutes(
@@ -115,16 +141,14 @@ export async function userRoutes(
     preHandler: requirePermission("admin:manage"),
   }, async (request) => {
     // `status` asserts which lifecycle state the caller expects the user to be
-    // in. Foundry answers a mismatch with `UserDeleted` or `UserIsActive`
-    // rather than the user record. Omitting it returns the user either way,
-    // which is what this endpoint has always done.
+    // in. Foundry answers a mismatch with an error naming the state the user
+    // is actually in rather than the user record. Omitting it returns the user
+    // either way, which is what this endpoint has always done.
     const status = parseUserStatus("status", request.query.status);
     const user = userStore.getUser(request.params.userRid);
 
     if (status !== undefined && !matchesStatus(user, status)) {
-      throw status === "ACTIVE"
-        ? customClient(400, "UserDeleted", "The user is deleted.")
-        : customClient(400, "UserIsActive", "The user is an active user.");
+      throw statusMismatchError(user);
     }
 
     return serializeUser(user);

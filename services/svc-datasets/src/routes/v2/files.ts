@@ -134,14 +134,24 @@ export async function fileRoutes(
   });
 
   // Upload file (raw body)
+  //
+  // Foundry attributes an upload to an open transaction via `transactionRid`;
+  // that attribution is what the listing's `branchName` and transaction-range
+  // filters resolve against, so a file written without it belongs to the
+  // dataset's latest view on every branch and to no transaction range.
   app.put<{
     Params: { datasetRid: string; "*": string };
+    Querystring: { transactionRid?: string };
   }>("/datasets/:datasetRid/files/*", {
     preHandler: requirePermission("datasets:write"),
   }, async (request, reply) => {
     const datasetRid = request.params.datasetRid;
-    // Ensure dataset exists
-    datasetStore.getDataset(datasetRid);
+    const dataset = datasetStore.getDataset(datasetRid);
+
+    const { transactionRid } = request.query;
+    if (transactionRid !== undefined && !dataset.transactions.has(transactionRid)) {
+      throw notFound("Transaction", transactionRid);
+    }
 
     const filePath = request.params["*"];
     const body = request.body as Buffer | string | null;
@@ -157,7 +167,7 @@ export async function fileRoutes(
       filePath,
       content,
       contentType,
-      "", // transactionRid is optional for direct upload
+      transactionRid ?? "",
     );
     reply.status(201);
     return serializeFile(file);

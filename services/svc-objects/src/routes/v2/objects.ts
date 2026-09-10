@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import {
-  type ObjectStore,
+  type ObjectReadWriteStore,
   type StoredObject,
 } from "../../store/object-store.js";
 import {
@@ -21,6 +21,7 @@ import { writeAuditLog } from "@openfoundry/db";
 import {
   applyExcludeRid,
   applyOrderBy,
+  assertPropertiesExist,
   applySelect as applySelectedProperties,
   applySnapshot,
   parseBooleanParam,
@@ -239,7 +240,7 @@ function paginate(
 
 export async function objectRoutes(
   app: FastifyInstance,
-  opts: { store: ObjectStore; pool?: import("pg").Pool },
+  opts: { store: ObjectReadWriteStore; pool?: import("pg").Pool },
 ): Promise<void> {
   const { store, pool } = opts;
 
@@ -277,7 +278,17 @@ export async function objectRoutes(
 
       // A snapshot listing freezes its view at the size the collection had
       // when paging began and carries that boundary forward in every token.
-      const all = store.allObjects(objectType);
+      const all = await store.allObjects(objectType);
+
+      // Validated against the whole collection before any paging, so a typo
+      // fails the same way regardless of which page was asked for.
+      assertPropertiesExist(objectType, all, select);
+      assertPropertiesExist(
+        objectType,
+        all,
+        orderBy?.map((term) => term.property),
+      );
+
       const snapshotSize = resolveSnapshotSize(
         snapshot,
         cursor.snapshotSize,
@@ -329,7 +340,21 @@ export async function objectRoutes(
       const select = parseListParam(request.query.select);
       const excludeRid = parseBooleanParam("excludeRid", request.query.excludeRid);
 
-      const object = store.getObject(objectType, primaryKey);
+      const object = await store.getObject(objectType, primaryKey);
+
+      // A single object is not a population: a property it happens not to
+      // carry may still be a real property of the type. Only when the object
+      // itself cannot answer is the type's collection consulted, which keeps
+      // the extra read off the successful path.
+      const unverified = select?.filter((name) => !(name in object.properties));
+      if (unverified && unverified.length > 0) {
+        assertPropertiesExist(
+          objectType,
+          await store.allObjects(objectType),
+          unverified,
+        );
+      }
+
       const [result] = applyExcludeRid(
         applySelectedProperties([object], select),
         excludeRid,
@@ -348,8 +373,8 @@ export async function objectRoutes(
       const { objectType } = request.params;
       const { primaryKey, properties } = request.body;
       const upsert = (request.body as unknown as Record<string, unknown>).upsert === true;
-      const obj = upsert && "upsertObject" in store
-        ? await (store as any).upsertObject(objectType, primaryKey, properties)
+      const obj = upsert && store.upsertObject
+        ? await store.upsertObject(objectType, primaryKey, properties)
         : await store.createObject(objectType, primaryKey, properties);
       if (pool) {
         const claims = (request as unknown as Record<string, unknown>).claims as Record<string, unknown> | undefined;
@@ -375,7 +400,7 @@ export async function objectRoutes(
     async (request) => {
       const { objectType, primaryKey } = request.params;
       const { properties } = request.body;
-      return store.updateObject(objectType, primaryKey, properties);
+      return await store.updateObject(objectType, primaryKey, properties);
     },
   );
 
@@ -387,7 +412,7 @@ export async function objectRoutes(
     },
     async (request, reply) => {
       const { objectType, primaryKey } = request.params;
-      store.deleteObject(objectType, primaryKey);
+      await store.deleteObject(objectType, primaryKey);
       if (pool) {
         const claims = (request as unknown as Record<string, unknown>).claims as Record<string, unknown> | undefined;
         writeAuditLog(pool, {
@@ -432,7 +457,7 @@ export async function objectRoutes(
       const { where, orderBy, pageSize = 100, pageToken, select } = request.body;
 
       // Start with all objects of this type
-      let objects = store.allObjects(objectType);
+      let objects = await store.allObjects(objectType);
 
       // Apply where filter
       if (where) {
@@ -504,7 +529,7 @@ export async function objectRoutes(
       const { aggregation: aggregations, where, groupBy } = request.body;
 
       // Start with all objects of this type
-      let objects = store.allObjects(objectType);
+      let objects = await store.allObjects(objectType);
 
       // Apply optional where filter
       if (where) {

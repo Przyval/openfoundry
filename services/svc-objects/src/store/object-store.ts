@@ -34,6 +34,39 @@ export interface ListResult {
   totalCount: number;
 }
 
+/**
+ * The object-store surface the v2 object routes depend on.
+ *
+ * Both the in-memory `ObjectStore` and the Postgres-backed `PgObjectStore`
+ * satisfy it. Every method may answer synchronously or with a promise, so a
+ * handler that awaits its result is correct against either backend - which is
+ * what keeps a Postgres deployment from silently serving the unresolved
+ * promise instead of the object.
+ */
+export interface ObjectReadWriteStore {
+  allObjects(objectType: string): StoredObject[] | Promise<StoredObject[]>;
+  getObject(
+    objectType: string,
+    primaryKey: string,
+  ): StoredObject | Promise<StoredObject>;
+  createObject(
+    objectType: string,
+    primaryKey: string,
+    properties: Record<string, unknown>,
+  ): StoredObject | Promise<StoredObject>;
+  upsertObject?(
+    objectType: string,
+    primaryKey: string,
+    properties: Record<string, unknown>,
+  ): StoredObject | Promise<StoredObject>;
+  updateObject(
+    objectType: string,
+    primaryKey: string,
+    properties: Record<string, unknown>,
+  ): StoredObject | Promise<StoredObject>;
+  deleteObject(objectType: string, primaryKey: string): void | Promise<void>;
+}
+
 export interface AggregationResult {
   type: string;
   property?: string;

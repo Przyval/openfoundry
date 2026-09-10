@@ -29,7 +29,22 @@ let firstTxnRid: string;
 let secondTxnRid: string;
 let featureTxnRid: string;
 
-const bytes = (s: string) => new TextEncoder().encode(s);
+/**
+ * Uploads through the public route, which is the only way a real client
+ * writes a file. Seeding `fileStore` directly would bypass the code that
+ * attributes the upload to a transaction, and the scoping parameters below
+ * would then be asserted against state no client can produce.
+ */
+async function upload(path: string, body: string, transactionRid?: string) {
+  return app.inject({
+    method: "PUT",
+    url:
+      `/api/v2/datasets/${datasetRid}/files/${path}` +
+      (transactionRid !== undefined ? `?transactionRid=${transactionRid}` : ""),
+    headers: { "content-type": "text/csv" },
+    payload: body,
+  });
+}
 
 beforeEach(async () => {
   datasetStore = new DatasetStore();
@@ -55,17 +70,11 @@ beforeEach(async () => {
     type: "APPEND",
   }).rid;
 
-  fileStore.putFile(datasetRid, "raw/a.csv", bytes("a"), "text/csv", firstTxnRid);
-  fileStore.putFile(datasetRid, "raw/b.csv", bytes("b"), "text/csv", secondTxnRid);
-  fileStore.putFile(
-    datasetRid,
-    "curated/c.csv",
-    bytes("c"),
-    "text/csv",
-    featureTxnRid,
-  );
-  // Written outside any transaction, as the direct upload route does.
-  fileStore.putFile(datasetRid, "notes.txt", bytes("n"), "text/plain", "");
+  await upload("raw/a.csv", "a", firstTxnRid);
+  await upload("raw/b.csv", "b", secondTxnRid);
+  await upload("curated/c.csv", "c", featureTxnRid);
+  // Uploaded without naming a transaction, which stays valid and unscoped.
+  await upload("notes.txt", "n");
 });
 
 function listFiles(query = "") {
@@ -175,5 +184,58 @@ describe("List files — transaction range", () => {
     const res = await listFiles("?endTransactionRid=ri.datasets.main.transaction.absent");
     expect(res.statusCode).toBe(404);
     expect(res.json().errorName).toBe("TransactionNotFound");
+  });
+});
+
+// ===========================================================================
+// PUT /datasets/{rid}/files/* — transaction attribution
+// ===========================================================================
+
+describe("Upload file — transactionRid", () => {
+  it("records the transaction the upload was attributed to", async () => {
+    const res = await upload("raw/d.csv", "d", secondTxnRid);
+    expect(res.statusCode).toBe(201);
+    expect(res.json().transactionRid).toBe(secondTxnRid);
+  });
+
+  it("makes the uploaded file fall inside that transaction's range", async () => {
+    await upload("raw/d.csv", "d", secondTxnRid);
+    const res = await listFiles(
+      `?startTransactionRid=${secondTxnRid}&endTransactionRid=${secondTxnRid}`,
+    );
+    expect(paths(res)).toEqual(["raw/b.csv", "raw/d.csv"]);
+  });
+
+  it("scopes the uploaded file to that transaction's branch", async () => {
+    await upload("curated/d.csv", "d", featureTxnRid);
+    expect(paths(await listFiles("?branchName=feature"))).toContain(
+      "curated/d.csv",
+    );
+    expect(paths(await listFiles("?branchName=main"))).not.toContain(
+      "curated/d.csv",
+    );
+  });
+
+  it("leaves the file unscoped when the parameter is omitted", async () => {
+    const res = await upload("loose.csv", "l");
+    expect(res.json().transactionRid).toBe("");
+    // Visible on every branch, and in no transaction range.
+    expect(paths(await listFiles("?branchName=main"))).toContain("loose.csv");
+    expect(paths(await listFiles("?branchName=feature"))).toContain("loose.csv");
+    expect(
+      paths(await listFiles(`?endTransactionRid=${featureTxnRid}`)),
+    ).not.toContain("loose.csv");
+  });
+
+  it("answers TransactionNotFound for a transaction the dataset does not have", async () => {
+    const res = await upload(
+      "raw/d.csv",
+      "d",
+      "ri.datasets.main.transaction.absent",
+    );
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("TransactionNotFound");
+    // Nothing was written.
+    expect(paths(await listFiles())).not.toContain("raw/d.csv");
   });
 });

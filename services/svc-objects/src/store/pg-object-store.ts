@@ -269,6 +269,28 @@ export class PgObjectStore {
     };
   }
 
+  /**
+   * Returns every object of a type, matching `ObjectStore.allObjects`.
+   *
+   * The read endpoints resolve `orderBy`, `snapshot` and `totalCount` over the
+   * whole collection, so they need the same unpaginated view from either
+   * backend. Ordering is by insertion time with the primary key as a
+   * tiebreaker, because `created_at` alone collides for rows written in the
+   * same instant and would leave paging offsets unstable.
+   */
+  async allObjects(objectType: string): Promise<StoredObject[]> {
+    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+
+    const { rows } = await this.pool.query<ObjectRow>({
+      text: `SELECT * FROM objects
+             WHERE object_type_rid = $1
+             ORDER BY created_at ASC, primary_key ASC`,
+      values: [objectTypeRid],
+    });
+
+    return rows.map((r) => rowToStoredObject(r, objectType));
+  }
+
   async updateObject(
     objectType: string,
     primaryKey: string,
