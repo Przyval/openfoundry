@@ -34,23 +34,21 @@ interface OntologyMeta {
   displayName: string;
 }
 
-interface AggBucket {
-  group: Record<string, any>;
-  metrics: { name: string; value: number }[];
-}
-
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const OBJECT_TYPES = [
-  "ServiceJob",
-  "Customer",
-  "Technician",
-  "TreatmentProduct",
-  "Invoice",
-  "Vehicle",
-  "Schedule",
+// Object types are now fetched dynamically from the selected ontology.
+// This fallback list is used only if metadata fetch fails.
+const FALLBACK_OBJECT_TYPES = [
+  "KelavaCustomer",
+  "KelavaTechnician",
+  "KelavaRoadPlan",
+  "KelavaVisit",
+  "KelavaKPI",
+  "KelavaFlag",
+  "KelavaSchedule",
+  "KelavaServiceArea",
 ];
 
 const BOARD_META: Record<
@@ -181,32 +179,6 @@ async function loadObjects(
   }
 }
 
-async function aggregateObjects(
-  ontologyRid: string,
-  objectType: string,
-  groupByField: string,
-): Promise<AggBucket[]> {
-  try {
-    const res = await fetch(
-      `${API_BASE_URL}/api/v2/ontologies/${ontologyRid}/objectSets/aggregate`,
-      {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({
-          objectSet: { type: "base", objectType },
-          groupBy: [{ field: groupByField, type: "exact" }],
-          aggregation: [{ type: "count" }],
-        }),
-      },
-    );
-    if (!res.ok) return [];
-    const body = await res.json();
-    return body?.data ?? [];
-  } catch {
-    return [];
-  }
-}
-
 /* ------------------------------------------------------------------ */
 /*  Mock data                                                          */
 /* ------------------------------------------------------------------ */
@@ -328,9 +300,10 @@ export default function Contour() {
   /* --- State --- */
   const [ontologies, setOntologies] = useState<OntologyMeta[]>([]);
   const [selectedOntology, setSelectedOntology] = useState("");
-  const [objectType, setObjectType] = useState("ServiceJob");
+  const [objectType, setObjectType] = useState("KelavaCustomer");
   const [rows, setRows] = useState<Record<string, any>[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dynamicObjectTypes, setDynamicObjectTypes] = useState<string[]>([]);
 
   const [boards, setBoards] = useState<Board[]>([]);
 
@@ -344,9 +317,31 @@ export default function Contour() {
     (async () => {
       const onts = await fetchOntologies();
       setOntologies(onts);
-      if (onts.length > 0) setSelectedOntology(onts[0].rid);
+      if (onts.length > 0) {
+        // Prefer sanocare-kelava if available
+        const sanocare = onts.find((o) => o.apiName === "sanocare-kelava");
+        setSelectedOntology(sanocare?.rid ?? onts[0].rid);
+      }
     })();
   }, []);
+
+  /* --- Fetch object types when ontology changes --- */
+  useEffect(() => {
+    if (!selectedOntology) return;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/v2/ontologies/${selectedOntology}/fullMetadata`, { headers: authHeaders() });
+        if (res.ok) {
+          const meta = await res.json();
+          const types = (meta.objectTypes ?? []).map((ot: { apiName: string }) => ot.apiName);
+          setDynamicObjectTypes(types);
+          if (types.length > 0 && !types.includes(objectType)) {
+            setObjectType(types[0]);
+          }
+        }
+      } catch { /* use fallback */ }
+    })();
+  }, [selectedOntology]);
 
   /* --- Load objects whenever ontology or objectType changes --- */
   useEffect(() => {
@@ -566,7 +561,7 @@ export default function Contour() {
     const display = data.slice(0, maxRows);
     return (
       <div style={S.tableWrap}>
-        <HTMLTable bordered condensed striped style={{ width: "100%", fontSize: "0.8rem" }}>
+        <HTMLTable bordered compact striped style={{ width: "100%", fontSize: "0.8rem" }}>
           <thead>
             <tr>
               {cols.map((c) => (
@@ -855,7 +850,7 @@ export default function Contour() {
               setBoards([]);
               setDefaultLoaded(false);
             }}
-            options={OBJECT_TYPES}
+            options={dynamicObjectTypes.length > 0 ? dynamicObjectTypes : FALLBACK_OBJECT_TYPES}
             style={{ minWidth: 160 }}
           />
 

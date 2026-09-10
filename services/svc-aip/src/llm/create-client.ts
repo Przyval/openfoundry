@@ -9,7 +9,7 @@ import { OntologyAwareLlmClient } from "./real-client.js";
 // Supported provider names
 // ---------------------------------------------------------------------------
 
-export type LlmProvider = "openai" | "anthropic" | "ollama" | "mock";
+export type LlmProvider = "glm" | "openai" | "anthropic" | "ollama" | "mock";
 
 // ---------------------------------------------------------------------------
 // Factory options — all optional; auto-detected from env when omitted
@@ -33,6 +33,7 @@ export interface CreateLlmClientOptions {
 // ---------------------------------------------------------------------------
 
 function detectProvider(): LlmProvider {
+  if (process.env.GLM_API_KEY) return "glm";
   if (process.env.OPENAI_API_KEY) return "openai";
   if (process.env.ANTHROPIC_API_KEY) return "anthropic";
   if (process.env.OLLAMA_URL) return "ollama";
@@ -68,6 +69,18 @@ export function createLlmClient(options: CreateLlmClientOptions = {}): LlmClient
   console.log(`[LLM] Using provider: ${providerLabel}`);
 
   switch (provider) {
+    case "glm": {
+      const model = options.model ?? process.env.GLM_MODEL ?? "glm-4-flash";
+      console.log(`[LLM] GLM (Zhipu) model: ${model}`);
+      const inner = new OpenAiClient({
+        baseUrl: options.baseUrl ?? process.env.GLM_BASE_URL ?? "https://open.bigmodel.cn/api/paas/v4",
+        apiKey: options.apiKey ?? process.env.GLM_API_KEY ?? "",
+        model,
+        embeddingModel: options.embeddingModel ?? "embedding-3",
+      });
+      return new OntologyAwareLlmClient(inner, `GLM Zhipu (${model})`);
+    }
+
     case "openai": {
       const model = options.model ?? "gpt-4o";
       console.log(`[LLM] OpenAI model: ${model}`);

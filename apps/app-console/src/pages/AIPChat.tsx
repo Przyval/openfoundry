@@ -238,7 +238,7 @@ function renderMarkdown(
           >
             <HTMLTable
               bordered
-              condensed
+              compact
               striped
               style={{
                 width: "100%",

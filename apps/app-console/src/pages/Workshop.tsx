@@ -610,7 +610,7 @@ function RenderActionButton({ widget }: { widget: WidgetDef }) {
   );
 }
 
-function RenderFilterBar({ widget }: { widget: WidgetDef }) {
+function RenderFilterBar(_props: { widget: WidgetDef }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
       <Icon icon="filter" size={14} style={{ color: "#5C7080" }} />

@@ -252,14 +252,14 @@ export class PgOntologyStore {
         rid,
         ontology_rid: ontologyRid,
         api_name: def.apiName,
-        display_name: def.apiName,
-        description: def.description,
-        primary_key_api_name: def.primaryKeyApiName,
-        primary_key_type: def.primaryKeyType,
-        title_property_api_name: def.titlePropertyApiName,
-        properties: jsonbSet(def.properties as unknown as Record<string, unknown>),
-        implements: def.implements as unknown as string[],
-        status: def.status,
+        display_name: def.displayName ?? def.apiName,
+        description: def.description ?? null,
+        primary_key_api_name: def.primaryKeyApiName ?? "id",
+        primary_key_type: def.primaryKeyType ?? "string",
+        title_property_api_name: def.titlePropertyApiName ?? null,
+        properties: jsonbSet((def.properties ?? {}) as Record<string, unknown>),
+        implements: (def.implements ?? []) as unknown as string[],
+        status: def.status ?? "ACTIVE",
       })
       .returning();
 

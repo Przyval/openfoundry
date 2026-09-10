@@ -23,6 +23,7 @@ export {
 // Audit
 export { AuditLogger, type AuditEntry } from "./audit-logger.js";
 export { auditHook } from "./audit-hook.js";
+export { writeAuditLog, type AuditEvent, type AuditAction } from "./audit.js";
 
 // Standalone pg client (singleton pool from DATABASE_URL)
 export {

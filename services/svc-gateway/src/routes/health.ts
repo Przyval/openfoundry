@@ -54,6 +54,31 @@ export async function healthRoutes(app: FastifyInstance): Promise<void> {
     return HEALTHY_RESPONSE;
   });
 
+  // -- Alert system health check ---------------------------------------------
+  // Reports the last time alert rules were scanned.  Monitoring systems can
+  // page if lastScanAge exceeds a threshold (e.g. 15 minutes).
+  let lastAlertScan: Date | null = null;
+
+  /** Called by the alert cron job after each successful scan. */
+  app.post("/status/alerts/heartbeat", async (_request, _reply) => {
+    lastAlertScan = new Date();
+    return { recorded: true };
+  });
+
+  app.get("/status/alerts", async (_request, _reply) => {
+    const now = new Date();
+    const lastScanAge = lastAlertScan
+      ? Math.round((now.getTime() - lastAlertScan.getTime()) / 1000)
+      : null;
+
+    return {
+      status: lastAlertScan ? "ACTIVE" : "NO_SCANS_YET",
+      lastScanAt: lastAlertScan?.toISOString() ?? null,
+      lastScanAgeSec: lastScanAge,
+      healthy: lastScanAge === null ? false : lastScanAge < 900, // <15 min
+    };
+  });
+
   // -------------------------------------------------------------------------
   // Metrics: proxy to downstream services
   // Note: GET /metrics is registered by the metricsPlugin from @openfoundry/health

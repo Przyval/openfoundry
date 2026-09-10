@@ -20,6 +20,10 @@ import {
   type LogEffectConfig,
   type LogEffectContext,
 } from "./log-effect.js";
+import {
+  executeEmailEffect,
+  type EmailEffectConfig,
+} from "./email-effect.js";
 
 // ---------------------------------------------------------------------------
 // Shared context passed to every effect execution
@@ -69,6 +73,12 @@ export class EffectExecutor {
         return executeLogEffect(
           effect.config as unknown as LogEffectConfig,
           context as LogEffectContext,
+        );
+
+      case "EMAIL":
+        return executeEmailEffect(
+          effect.config as unknown as EmailEffectConfig,
+          context,
         );
 
       default:

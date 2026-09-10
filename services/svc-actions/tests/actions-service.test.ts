@@ -59,6 +59,7 @@ async function buildApp(): Promise<FastifyInstance> {
     config: TEST_CONFIG,
     registry,
     actionLog,
+    seedDemoActions: false,
   });
   return app;
 }

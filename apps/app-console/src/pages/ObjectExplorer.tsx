@@ -47,6 +47,11 @@ interface OntologyObject {
   properties: Record<string, unknown>;
 }
 
+/** Safely access object properties — never returns null/undefined. */
+function safeProps(obj: OntologyObject): Record<string, unknown> {
+  return obj?.properties ?? {};
+}
+
 interface LoadObjectsResponse {
   data: OntologyObject[];
   totalCount: number;
@@ -374,7 +379,12 @@ export default function ObjectExplorer() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const data = (await res.json()) as LoadObjectsResponse;
-      setObjects(data.data);
+      // Normalize: ensure every object has a properties object (never null/undefined)
+      const normalized = (data.data ?? []).map((obj) => ({
+        ...obj,
+        properties: obj.properties ?? {},
+      }));
+      setObjects(normalized);
       setTotalCount(data.totalCount);
       setNextPageToken(data.nextPageToken);
     } catch (err) {
@@ -580,7 +590,7 @@ export default function ObjectExplorer() {
       // Search primary key
       if (obj.primaryKey?.toLowerCase().includes(q)) return true;
       // Search all properties
-      return Object.values(obj.properties).some((v) =>
+      return Object.values(safeProps(obj)).some((v) =>
         String(v ?? "").toLowerCase().includes(q),
       );
     });
@@ -597,8 +607,8 @@ export default function ObjectExplorer() {
         aVal = a.primaryKey;
         bVal = b.primaryKey;
       } else {
-        aVal = a.properties[tableSortCol];
-        bVal = b.properties[tableSortCol];
+        aVal = safeProps(a)[tableSortCol];
+        bVal = safeProps(b)[tableSortCol];
       }
       // Handle nulls
       if (aVal == null && bVal == null) return 0;
@@ -625,7 +635,7 @@ export default function ObjectExplorer() {
       propertyFields.length > 0
         ? propertyFields
         : objects.length > 0
-          ? Object.keys(objects[0].properties)
+          ? Object.keys(safeProps(objects[0]))
           : [];
 
     return [
@@ -825,7 +835,7 @@ export default function ObjectExplorer() {
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.entries(selectedObject.properties).map(([key, value]) => (
+                      {Object.entries(safeProps(selectedObject)).map(([key, value]) => (
                         <tr key={key}>
                           <td>
                             <code style={{ fontSize: "0.85rem" }}>{key}</code>
@@ -894,7 +904,7 @@ export default function ObjectExplorer() {
                               >
                                 {linked.map((linkedObj) => {
                                   // Show up to 4 property previews
-                                  const previewProps = Object.entries(linkedObj.properties).slice(0, 4);
+                                  const previewProps = Object.entries(safeProps(linkedObj)).slice(0, 4);
                                   return (
                                     <Card
                                       key={linkedObj.rid}
@@ -1103,7 +1113,7 @@ export default function ObjectExplorer() {
                 {aggData && aggData.length > 0 && (
                   <Card style={{ padding: 12, marginBottom: 12 }}>
                     <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                      {Object.entries(aggData[0].metrics).map(([key, val]) => (
+                      {Object.entries(aggData[0].metrics ?? aggData[0] ?? {}).map(([key, val]) => (
                         <div key={key} style={{ textAlign: "center" }}>
                           <div style={{ fontSize: 11, color: "#888", marginBottom: 2 }}>
                             {key}
@@ -1193,7 +1203,7 @@ export default function ObjectExplorer() {
                                 >
                                   {col.key === "__primaryKey"
                                     ? row.primaryKey
-                                    : renderCellValue(col.key, row.properties[col.key])}
+                                    : renderCellValue(col.key, safeProps(row)[col.key])}
                                 </td>
                               ))}
                             </tr>

@@ -1,6 +1,6 @@
 import { notFound } from "@openfoundry/errors";
 import { writeFileSync, readFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,9 +26,16 @@ export interface StoredLink {
 export class LinkStore {
   /** Map<compositeKey, StoredLink[]> */
   private readonly links = new Map<string, StoredLink[]>();
-  private readonly DATA_FILE = "/tmp/openfoundry-data/link-store.json";
+  private readonly DATA_FILE: string | null;
 
-  constructor() {
+  /**
+   * @param dataFile Where the store persists between restarts. Pass `null` for
+   *   a purely in-memory store, which is what tests need: the default file is
+   *   shared by every instance in the process, so a store constructed after
+   *   another one has written would otherwise start with that state.
+   */
+  constructor(dataFile: string | null = "/tmp/openfoundry-data/link-store.json") {
+    this.DATA_FILE = dataFile;
     this.loadFromDisk();
   }
 
@@ -37,6 +44,7 @@ export class LinkStore {
   // -----------------------------------------------------------------------
 
   private saveToDisk(): void {
+    if (this.DATA_FILE === null) return;
     try {
       const dir = dirname(this.DATA_FILE);
       mkdirSync(dir, { recursive: true });
@@ -52,6 +60,7 @@ export class LinkStore {
   }
 
   private loadFromDisk(): void {
+    if (this.DATA_FILE === null) return;
     try {
       if (!existsSync(this.DATA_FILE)) return;
 

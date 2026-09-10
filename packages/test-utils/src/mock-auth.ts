@@ -1,4 +1,4 @@
-import { generateKeyPair, SignJWT } from "jose";
+import { generateKeyPair, SignJWT, type CryptoKey } from "jose";
 import type { OpenFoundryClaims } from "@openfoundry/auth-tokens";
 
 /**

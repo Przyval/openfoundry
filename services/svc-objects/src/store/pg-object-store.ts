@@ -146,7 +146,31 @@ function rowToStoredObject(row: ObjectRow, objectType: string): StoredObject {
  * interface of the in-memory `ObjectStore`.
  */
 export class PgObjectStore {
-  constructor(private pool: pg.Pool) {}
+  constructor(
+    private pool: pg.Pool,
+    private orgRid?: string,
+  ) {}
+
+  // Wrap fn in an explicit transaction with SET LOCAL so the tenant context
+  // is guaranteed to reset at COMMIT/ROLLBACK and never leaks to the next
+  // request on a pooled connection.
+  private async withTenant<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      if (this.orgRid) {
+        await client.query("SET LOCAL app.current_org_rid = $1", [this.orgRid]);
+      }
+      const result = await fn(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (err) {
+      try { await client.query("ROLLBACK"); } catch { /* ignore rollback error */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
 
   // -----------------------------------------------------------------------
   // CRUD
@@ -159,15 +183,18 @@ export class PgObjectStore {
   ): Promise<StoredObject> {
     const objectTypeRid = await this.resolveObjectTypeRid(objectType);
     const rid = generateRid("phonograph2-objects", "object").toString();
+    const orgRid = this.orgRid ?? null;
 
     try {
-      const { rows } = await this.pool.query<ObjectRow>({
-        text: `INSERT INTO objects (rid, object_type_rid, primary_key, properties)
-               VALUES ($1, $2, $3, $4)
-               RETURNING *`,
-        values: [rid, objectTypeRid, primaryKey, JSON.stringify(properties)],
+      return await this.withTenant(async (client) => {
+        const { rows } = await client.query<ObjectRow>({
+          text: `INSERT INTO objects (rid, object_type_rid, primary_key, properties, org_rid)
+                 VALUES ($1, $2, $3, $4, $5)
+                 RETURNING *`,
+          values: [rid, objectTypeRid, primaryKey, JSON.stringify(properties), orgRid],
+        });
+        return rowToStoredObject(rows[0], objectType);
       });
-      return rowToStoredObject(rows[0], objectType);
     } catch (err: unknown) {
       if (isPgUniqueViolation(err)) {
         throw conflict(
@@ -177,6 +204,28 @@ export class PgObjectStore {
       }
       throw err;
     }
+  }
+
+  async upsertObject(
+    objectType: string,
+    primaryKey: string,
+    properties: Record<string, unknown>,
+  ): Promise<StoredObject> {
+    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+    const rid = generateRid("phonograph2-objects", "object").toString();
+    const orgRid = this.orgRid ?? null;
+
+    return this.withTenant(async (client) => {
+      const { rows } = await client.query<ObjectRow>({
+        text: `INSERT INTO objects (rid, object_type_rid, primary_key, properties, org_rid)
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (object_type_rid, primary_key)
+               DO UPDATE SET properties = $4::jsonb, updated_at = NOW()
+               RETURNING *`,
+        values: [rid, objectTypeRid, primaryKey, JSON.stringify(properties), orgRid],
+      });
+      return rowToStoredObject(rows[0], objectType);
+    });
   }
 
   async getObject(objectType: string, primaryKey: string): Promise<StoredObject> {

@@ -10,6 +10,8 @@ import { healthRoutes } from "./routes/health.js";
 import { objectRoutes } from "./routes/v2/objects.js";
 import { objectSetRoutes } from "./routes/v2/object-sets.js";
 import { linkRoutes } from "./routes/v2/links.js";
+import { importRoutes } from "./routes/v2/import.js";
+import { semanticSearchRoutes } from "./routes/v2/semantic-search.js";
 
 // ---------------------------------------------------------------------------
 // Server factory
@@ -30,12 +32,13 @@ export async function createServer(
   const config = options.config ?? loadConfig();
 
   let store: ObjectStore | PgObjectStore;
+  let pgPool: import("pg").Pool | undefined;
   if (options.store) {
     store = options.store;
   } else if (config.databaseUrl) {
     console.log("Using PostgreSQL storage (DATABASE_URL is set)");
-    const pool = createPool({ connectionString: config.databaseUrl });
-    store = new PgObjectStore(pool);
+    pgPool = createPool({ connectionString: config.databaseUrl });
+    store = new PgObjectStore(pgPool);
   } else {
     console.log("Using JSON file storage (DATABASE_URL is not set)");
     store = new ObjectStore();
@@ -107,9 +110,14 @@ export async function createServer(
 
   // -- Routes -------------------------------------------------------------
   await app.register(healthRoutes);
-  await app.register(objectRoutes, { prefix: "/api/v2", store: store as ObjectStore });
+  await app.register(objectRoutes, { prefix: "/api/v2", store: store as ObjectStore, pool: pgPool });
   await app.register(objectSetRoutes, { prefix: "/api/v2", store: store as ObjectStore, linkStore });
   await app.register(linkRoutes, { prefix: "/api/v2", linkStore, objectStore: store as ObjectStore });
+  await app.register(importRoutes, { prefix: "/api/v2", objectStore: store as ObjectStore });
+  await app.register(semanticSearchRoutes, {
+    prefix: "/api/v2",
+    aipServiceUrl: config.aipServiceUrl ?? "http://localhost:8092",
+  });
 
   return app;
 }

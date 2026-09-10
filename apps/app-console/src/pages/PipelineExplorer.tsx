@@ -451,7 +451,7 @@ export default function PipelineExplorer() {
                               <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>
                                 {step.name}
                               </div>
-                              <Tag minimal small>
+                              <Tag minimal>
                                 {step.type}
                               </Tag>
                             </div>
@@ -707,7 +707,6 @@ export default function PipelineExplorer() {
                                       <Tag
                                         key={sr.stepId}
                                         minimal
-                                        small
                                         intent={statusIntent(sr.status)}
                                         title={`${sr.stepId}: ${sr.rowsIn}->${sr.rowsOut} (${sr.durationMs}ms)`}
                                       >

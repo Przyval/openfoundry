@@ -4,7 +4,7 @@ import { requirePermission } from "@openfoundry/permissions";
 
 export async function queryTypeRoutes(
   app: FastifyInstance,
-  opts: { store: OntologyStore },
+  _opts: { store: OntologyStore },
 ): Promise<void> {
   // List query types (returns empty list when none are registered)
   app.get<{

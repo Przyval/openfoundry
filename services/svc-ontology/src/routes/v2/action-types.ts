@@ -17,7 +17,8 @@ export async function actionTypeRoutes(
   }>("/ontologies/:ontologyRid/actionTypes", {
     preHandler: requirePermission("ontology:read"),
   }, async (request) => {
-    const all = store.listActionTypes(request.params.ontologyRid);
+    const raw = await store.listActionTypes(request.params.ontologyRid);
+    const all = Array.isArray(raw) ? raw : (raw as { items: unknown[] }).items ?? [];
     return paginateArray(all, request.query);
   });
 
@@ -28,7 +29,7 @@ export async function actionTypeRoutes(
   }>("/ontologies/:ontologyRid/actionTypes", {
     preHandler: requirePermission("ontology:write"),
   }, async (request, reply) => {
-    const actionType = store.createActionType(
+    const actionType = await store.createActionType(
       request.params.ontologyRid,
       request.body,
     );
@@ -45,7 +46,7 @@ export async function actionTypeRoutes(
       preHandler: requirePermission("ontology:read"),
     },
     async (request) => {
-      return store.getActionType(
+      return await store.getActionType(
         request.params.ontologyRid,
         request.params.actionTypeApiName,
       );
@@ -62,7 +63,7 @@ export async function actionTypeRoutes(
       preHandler: requirePermission("ontology:write"),
     },
     async (request) => {
-      return store.updateActionType(
+      return await store.updateActionType(
         request.params.ontologyRid,
         request.params.actionTypeApiName,
         request.body,

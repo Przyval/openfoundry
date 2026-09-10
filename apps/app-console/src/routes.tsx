@@ -18,7 +18,7 @@ const GroupManagement = React.lazy(() => import("./pages/GroupManagement"));
 const ActionExplorer = React.lazy(() => import("./pages/ActionExplorer"));
 const FunctionList = React.lazy(() => import("./pages/FunctionList"));
 const AuditLog = React.lazy(() => import("./pages/AuditLog"));
-const PestControlDashboard = React.lazy(() => import("./pages/PestControlDashboard"));
+// Archived: PestControlDashboard replaced by SanocareDashboard (live data)
 const WebhookList = React.lazy(() => import("./pages/WebhookList"));
 const MonitorList = React.lazy(() => import("./pages/MonitorList"));
 const CompassExplorer = React.lazy(() => import("./pages/CompassExplorer"));
@@ -33,6 +33,8 @@ const CodeWorkbook = React.lazy(() => import("./pages/CodeWorkbook"));
 const Scenarios = React.lazy(() => import("./pages/Scenarios"));
 const AIPChat = React.lazy(() => import("./pages/AIPChat"));
 const DataHealth = React.lazy(() => import("./pages/DataHealth"));
+const SanocareDashboard = React.lazy(() => import("./pages/SanocareDashboard"));
+const WorkshopEditor = React.lazy(() => import("./pages/WorkshopEditor"));
 
 /* Shared loading fallback */
 const PageSpinner = (
@@ -85,12 +87,14 @@ const routes: RouteObject[] = [
   { path: "workshop", element: lazyProtect(Workshop) },
   { path: "contour", element: lazyProtect(Contour) },
   { path: "data-connection", element: lazyProtect(DataConnection) },
-  { path: "pest-control", element: lazyProtect(PestControlDashboard) },
+  // pest-control route archived — use /sanocare for live data
   { path: "lineage", element: lazyProtect(DataLineage) },
   { path: "workbook", element: lazyProtect(CodeWorkbook) },
   { path: "scenarios", element: lazyProtect(Scenarios) },
   { path: "aip", element: lazyProtect(AIPChat) },
   { path: "data-health", element: lazyProtect(DataHealth) },
+  { path: "sanocare", element: lazyProtect(SanocareDashboard) },
+  { path: "workshop/edit", element: lazyProtect(WorkshopEditor) },
 ];
 
 export default routes;

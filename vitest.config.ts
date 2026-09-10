@@ -21,12 +21,11 @@ export default defineConfig({
     alias: packageAliases,
   },
   test: {
-    include: [
-      "packages/**/tests/**/*.test.ts",
-      "services/**/tests/**/*.test.ts",
-      "services/**/*.test.ts",
-      "tests/integration/**/*.test.ts",
-    ],
+    // Relative to the run's root, which is the repo root for a root-level run
+    // but the package directory when a workspace package runs `vitest` and
+    // inherits this config. Root-anchored globs (`packages/**`) match nothing
+    // in the latter case, which made every package fail with "No test files".
+    include: ["**/tests/**/*.test.ts", "**/src/**/*.test.ts"],
     testTimeout: 30000,
   },
 });

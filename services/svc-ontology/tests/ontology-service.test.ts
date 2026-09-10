@@ -94,7 +94,7 @@ let app: FastifyInstance;
 let store: OntologyStore;
 
 beforeEach(async () => {
-  store = new OntologyStore();
+  store = new OntologyStore(null);
   app = await createServer({ config: TEST_CONFIG, store });
 });
 

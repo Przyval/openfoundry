@@ -8,7 +8,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 const PLATFORM_ITEMS = [
   { path: "/", label: "Dashboard", icon: "dashboard" as const },
-  { path: "/pest-control", label: "Pest Control", icon: "bug" as const },
+  { path: "/sanocare", label: "Sanocare (Live)", icon: "pulse" as const },
   { path: "/aip", label: "AIP Chat", icon: "chat" as const },
   { path: "/compass", label: "Compass", icon: "folder-open" as const },
   { path: "/notifications", label: "Notifications", icon: "notifications" as const },

@@ -505,7 +505,13 @@ export class MockLlmClient implements LlmClient {
       systemMsg?.content?.includes("ontology") ||
       systemMsg?.content?.includes("OpenFoundry");
 
-    if (isOntologyChat) {
+    // /aip/query asks for a JSON-structured answer, and its prompt also
+    // mentions the ontology; honour the structured request first, otherwise
+    // the endpoint only ever sees prose it cannot parse.
+    const wantsStructuredJson =
+      systemMsg?.content?.includes("structure your response as JSON") ?? false;
+
+    if (isOntologyChat && !wantsStructuredJson) {
       // Generate a smart, ontology-aware response
       const content = await generateSmartResponse(lastUserMessage, messages);
       const tokens = content.length;

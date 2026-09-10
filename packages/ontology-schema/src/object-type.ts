@@ -28,6 +28,12 @@ export interface ObjectTypeDefinition {
   /** Unique API name used to reference this object type programmatically. */
   readonly apiName: string;
 
+  /**
+   * Human-readable label for this object type. Persisted in the
+   * `object_types.display_name` column; falls back to `apiName` when absent.
+   */
+  readonly displayName?: string;
+
   /** Human-readable description of what this object type represents. */
   readonly description: string;
 

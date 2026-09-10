@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Seed script: Healthcare Management demo data for OpenFoundry
-# Usage: bash scripts/seed-healthcare.sh
+# Usage: bash scripts/demo/seed-healthcare.sh
 # =============================================================================
 set -uo pipefail
 

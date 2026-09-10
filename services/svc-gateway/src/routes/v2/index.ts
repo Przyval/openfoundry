@@ -14,6 +14,7 @@ import { notificationRoutes } from "./notifications.js";
 import { pipelineRoutes } from "./pipelines.js";
 import { searchRoutes } from "./search.js";
 import { aipRoutes } from "./aip.js";
+import { authRoutes } from "./auth.js";
 
 // ---------------------------------------------------------------------------
 // v2 route registration
@@ -51,4 +52,5 @@ export async function v2Routes(
   await app.register(pipelineRoutes, { prefix: "/pipelines" });
   await app.register(searchRoutes, { prefix: "/search" });
   await app.register(aipRoutes, { prefix: "/aip" });
+  await app.register(authRoutes, { prefix: "/auth" });
 }

@@ -17,7 +17,8 @@ export async function interfaceTypeRoutes(
   }>("/ontologies/:ontologyRid/interfaceTypes", {
     preHandler: requirePermission("ontology:read"),
   }, async (request) => {
-    const all = store.listInterfaceTypes(request.params.ontologyRid);
+    const raw = await store.listInterfaceTypes(request.params.ontologyRid);
+    const all = Array.isArray(raw) ? raw : (raw as { items: unknown[] }).items ?? [];
     return paginateArray(all, request.query);
   });
 
@@ -28,7 +29,7 @@ export async function interfaceTypeRoutes(
   }>("/ontologies/:ontologyRid/interfaceTypes", {
     preHandler: requirePermission("ontology:write"),
   }, async (request, reply) => {
-    const interfaceType = store.createInterfaceType(
+    const interfaceType = await store.createInterfaceType(
       request.params.ontologyRid,
       request.body,
     );
@@ -45,7 +46,7 @@ export async function interfaceTypeRoutes(
       preHandler: requirePermission("ontology:read"),
     },
     async (request) => {
-      return store.getInterfaceType(
+      return await store.getInterfaceType(
         request.params.ontologyRid,
         request.params.interfaceTypeApiName,
       );

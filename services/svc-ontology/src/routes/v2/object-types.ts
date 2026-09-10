@@ -17,7 +17,8 @@ export async function objectTypeRoutes(
   }>("/ontologies/:ontologyRid/objectTypes", {
     preHandler: requirePermission("ontology:read"),
   }, async (request) => {
-    const all = store.listObjectTypes(request.params.ontologyRid);
+    const raw = await store.listObjectTypes(request.params.ontologyRid);
+    const all = Array.isArray(raw) ? raw : (raw as { items: unknown[] }).items ?? [];
     return paginateArray(all, request.query);
   });
 
@@ -28,7 +29,7 @@ export async function objectTypeRoutes(
   }>("/ontologies/:ontologyRid/objectTypes", {
     preHandler: requirePermission("ontology:write"),
   }, async (request, reply) => {
-    const objectType = store.createObjectType(
+    const objectType = await store.createObjectType(
       request.params.ontologyRid,
       request.body,
     );
@@ -45,7 +46,7 @@ export async function objectTypeRoutes(
       preHandler: requirePermission("ontology:read"),
     },
     async (request) => {
-      return store.getObjectType(
+      return await store.getObjectType(
         request.params.ontologyRid,
         request.params.objectTypeApiName,
       );
@@ -62,7 +63,7 @@ export async function objectTypeRoutes(
       preHandler: requirePermission("ontology:write"),
     },
     async (request) => {
-      return store.updateObjectType(
+      return await store.updateObjectType(
         request.params.ontologyRid,
         request.params.objectTypeApiName,
         request.body,

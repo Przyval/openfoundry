@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Seed script: Pest Control demo data for OpenFoundry
-# Usage: bash scripts/seed-pest-control.sh
+# Usage: bash scripts/demo/seed-pest-control.sh
 # =============================================================================
 set -uo pipefail
 

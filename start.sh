@@ -6,6 +6,14 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
+# Load .env and export all vars so child processes (pnpm services) inherit them
+if [ -f "$ROOT/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT/.env"
+  set +a
+fi
+
 # Parse flags
 RESEED=false
 INDUSTRY="pest-control"
@@ -45,6 +53,32 @@ echo "╚═══════════════════════�
 echo ""
 echo "  Industry: $INDUSTRY"
 
+# Ensure Docker + Postgres is running (data persistence)
+echo ""
+echo "→ Checking database..."
+if ! docker info &>/dev/null; then
+  echo "  Starting Docker Desktop..."
+  open -a Docker
+  for i in $(seq 1 15); do
+    sleep 2
+    docker info &>/dev/null && break
+    echo "  Waiting for Docker... ($((i*2))s)"
+  done
+fi
+if docker info &>/dev/null; then
+  if ! docker compose ps postgres 2>/dev/null | grep -q "healthy"; then
+    echo "  Starting Postgres..."
+    docker compose up -d postgres 2>/dev/null
+    for i in $(seq 1 10); do
+      sleep 2
+      psql "${DATABASE_URL:-postgresql://openfoundry:openfoundry_dev@localhost:5434/openfoundry}" -c "SELECT 1" &>/dev/null && break
+    done
+  fi
+  echo "  ✓ Postgres running (data persists across restarts)"
+else
+  echo "  ⚠ Docker not available — using in-memory store (data lost on restart)"
+fi
+
 # Kill existing processes by port (reliable)
 echo ""
 echo "→ Stopping existing services..."
@@ -68,7 +102,7 @@ sleep 1
 
 # Start backend services using pnpm (resolves workspace deps correctly)
 echo "→ Starting backend services..."
-SERVICES=(svc-ontology svc-objects svc-multipass svc-admin svc-actions svc-datasets svc-functions svc-aip svc-gateway)
+SERVICES=(svc-ontology svc-objects svc-multipass svc-admin svc-actions svc-datasets svc-functions svc-aip svc-sentinel svc-gateway)
 for svc in "${SERVICES[@]}"; do
   > "/tmp/${svc}.log"
   pnpm --filter "@openfoundry/${svc}" run dev >> "/tmp/${svc}.log" 2>&1 &
@@ -122,7 +156,7 @@ fi
 # --- Helper: seed a single industry ---
 seed_industry() {
   local ind="$1"
-  local script="$ROOT/scripts/seed-${ind}.sh"
+  local script="$ROOT/scripts/demo/seed-${ind}.sh"
   if [ ! -f "$script" ]; then
     echo "  ⚠ Seed script not found: $script (skipping)"
     return 1

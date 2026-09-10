@@ -29,8 +29,8 @@ let store: ObjectStore;
 let linkStore: LinkStore;
 
 beforeEach(async () => {
-  store = new ObjectStore();
-  linkStore = new LinkStore();
+  store = new ObjectStore(null);
+  linkStore = new LinkStore(null);
   app = await createServer({
     config: { port: 0, host: "127.0.0.1", logLevel: "silent" },
     store,

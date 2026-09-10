@@ -8,7 +8,7 @@ import {
   type PageToken,
 } from "@openfoundry/pagination";
 import { writeFileSync, readFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -201,9 +201,16 @@ export function evaluateAggregation(
 export class ObjectStore {
   /** Map<objectType, Map<primaryKey, StoredObject>> */
   private readonly objects = new Map<string, Map<string, StoredObject>>();
-  private readonly DATA_FILE = "/tmp/openfoundry-data/object-store.json";
+  private readonly DATA_FILE: string | null;
 
-  constructor() {
+  /**
+   * @param dataFile Where the store persists between restarts. Pass `null` for
+   *   a purely in-memory store, which is what tests need: the default file is
+   *   shared by every instance in the process, so a store constructed after
+   *   another one has written would otherwise start with that state.
+   */
+  constructor(dataFile: string | null = "/tmp/openfoundry-data/object-store.json") {
+    this.DATA_FILE = dataFile;
     this.loadFromDisk();
   }
 
@@ -212,6 +219,7 @@ export class ObjectStore {
   // -----------------------------------------------------------------------
 
   private saveToDisk(): void {
+    if (this.DATA_FILE === null) return;
     try {
       const dir = dirname(this.DATA_FILE);
       mkdirSync(dir, { recursive: true });
@@ -230,6 +238,7 @@ export class ObjectStore {
   }
 
   private loadFromDisk(): void {
+    if (this.DATA_FILE === null) return;
     try {
       if (!existsSync(this.DATA_FILE)) return;
 
@@ -279,6 +288,22 @@ export class ObjectStore {
     typeMap.set(primaryKey, obj);
     this.saveToDisk();
     return obj;
+  }
+
+  upsertObject(
+    objectType: string,
+    primaryKey: string,
+    properties: Record<string, unknown>,
+  ): StoredObject {
+    const typeMap = this.getTypeMap(objectType);
+    const existing = typeMap.get(primaryKey);
+    if (existing) {
+      existing.properties = { ...existing.properties, ...properties };
+      existing.updatedAt = new Date().toISOString();
+      this.saveToDisk();
+      return existing;
+    }
+    return this.createObject(objectType, primaryKey, properties);
   }
 
   getObject(objectType: string, primaryKey: string): StoredObject {

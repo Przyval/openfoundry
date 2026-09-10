@@ -4,7 +4,17 @@ import { AnthropicClient } from "../src/llm/anthropic-client.js";
 import { OllamaClient } from "../src/llm/ollama-client.js";
 import { MockLlmClient } from "../src/llm/mock-client.js";
 import { createLlmClient } from "../src/llm/create-client.js";
-import type { ChatMessage } from "../src/llm/llm-client.js";
+import { OntologyAwareLlmClient } from "../src/llm/real-client.js";
+import type { ChatMessage, LlmClient } from "../src/llm/llm-client.js";
+
+/**
+ * Real providers are returned wrapped in an OntologyAwareLlmClient, which
+ * enriches prompts and delegates. Unwrap so the assertions below stay about
+ * which provider the factory selected.
+ */
+function selectedClient(client: LlmClient): LlmClient {
+  return client instanceof OntologyAwareLlmClient ? client.inner : client;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -482,17 +492,17 @@ describe("createLlmClient", () => {
 
   it("creates OpenAI client when provider is explicit", () => {
     const client = createLlmClient({ provider: "openai", apiKey: "test" });
-    expect(client).toBeInstanceOf(OpenAiClient);
+    expect(selectedClient(client)).toBeInstanceOf(OpenAiClient);
   });
 
   it("creates Anthropic client when provider is explicit", () => {
     const client = createLlmClient({ provider: "anthropic", apiKey: "test" });
-    expect(client).toBeInstanceOf(AnthropicClient);
+    expect(selectedClient(client)).toBeInstanceOf(AnthropicClient);
   });
 
   it("creates Ollama client when provider is explicit", () => {
     const client = createLlmClient({ provider: "ollama" });
-    expect(client).toBeInstanceOf(OllamaClient);
+    expect(selectedClient(client)).toBeInstanceOf(OllamaClient);
   });
 
   it("creates Mock client when provider is explicit", () => {
@@ -506,7 +516,7 @@ describe("createLlmClient", () => {
     delete process.env.OLLAMA_URL;
 
     const client = createLlmClient();
-    expect(client).toBeInstanceOf(OpenAiClient);
+    expect(selectedClient(client)).toBeInstanceOf(OpenAiClient);
   });
 
   it("auto-detects Anthropic from ANTHROPIC_API_KEY env var", () => {
@@ -515,7 +525,7 @@ describe("createLlmClient", () => {
     delete process.env.OLLAMA_URL;
 
     const client = createLlmClient();
-    expect(client).toBeInstanceOf(AnthropicClient);
+    expect(selectedClient(client)).toBeInstanceOf(AnthropicClient);
   });
 
   it("auto-detects Ollama from OLLAMA_URL env var", () => {
@@ -524,7 +534,7 @@ describe("createLlmClient", () => {
     process.env.OLLAMA_URL = "http://localhost:11434";
 
     const client = createLlmClient();
-    expect(client).toBeInstanceOf(OllamaClient);
+    expect(selectedClient(client)).toBeInstanceOf(OllamaClient);
   });
 
   it("falls back to MockLlmClient when no env vars are set", () => {
@@ -541,7 +551,7 @@ describe("createLlmClient", () => {
     process.env.ANTHROPIC_API_KEY = "sk-ant-test";
 
     const client = createLlmClient();
-    expect(client).toBeInstanceOf(OpenAiClient);
+    expect(selectedClient(client)).toBeInstanceOf(OpenAiClient);
   });
 
   it("explicit provider overrides env var detection", () => {

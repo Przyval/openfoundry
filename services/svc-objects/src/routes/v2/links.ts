@@ -70,6 +70,7 @@ export async function linkRoutes(
 
       return {
         data: resolvedObjects,
+        totalCount: linkResult.totalCount,
         ...(linkResult.nextPageToken
           ? { nextPageToken: linkResult.nextPageToken }
           : {}),

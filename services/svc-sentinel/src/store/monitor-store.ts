@@ -11,7 +11,7 @@ export interface TriggerDef {
 }
 
 export interface EffectDef {
-  type: "WEBHOOK" | "ACTION" | "NOTIFICATION" | "LOG";
+  type: "WEBHOOK" | "ACTION" | "NOTIFICATION" | "LOG" | "EMAIL";
   config: Record<string, unknown>;
 }
 

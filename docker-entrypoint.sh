@@ -75,12 +75,12 @@ if [ "$RESEED" = true ]; then
   rm -f /tmp/openfoundry-data/object-store.json
   rm -f /tmp/openfoundry-data/link-store.json
   echo "-> Seeding pest control data..."
-  bash "$ROOT/scripts/seed-pest-control.sh" 2>&1 | grep -E "ontology|types|Inserting|links|Done|Error" | head -20
+  bash "$ROOT/scripts/demo/seed-pest-control.sh" 2>&1 | grep -E "ontology|types|Inserting|links|Done|Error" | head -20
 elif [ -f /tmp/openfoundry-data/ontology-store.json ] && [ -s /tmp/openfoundry-data/ontology-store.json ]; then
   echo "-> Data persisted from previous run, skipping seed"
 else
   echo "-> Seeding pest control data..."
-  bash "$ROOT/scripts/seed-pest-control.sh" 2>&1 | grep -E "ontology|types|Inserting|links|Done|Error" | head -20
+  bash "$ROOT/scripts/demo/seed-pest-control.sh" 2>&1 | grep -E "ontology|types|Inserting|links|Done|Error" | head -20
 fi
 
 # Start frontend — bind to 0.0.0.0 so it's accessible from outside the container

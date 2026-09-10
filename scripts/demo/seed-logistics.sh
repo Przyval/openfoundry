@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Seed script: Logistics Operations demo data for OpenFoundry
-# Usage: bash scripts/seed-logistics.sh
+# Usage: bash scripts/demo/seed-logistics.sh
 # =============================================================================
 set -uo pipefail
 

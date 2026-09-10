@@ -15,6 +15,7 @@ import {
   type PageToken,
 } from "@openfoundry/pagination";
 import { requirePermission } from "@openfoundry/permissions";
+import { writeAuditLog } from "@openfoundry/db";
 
 // ---------------------------------------------------------------------------
 // Shared query engine
@@ -232,9 +233,9 @@ function paginate(
 
 export async function objectRoutes(
   app: FastifyInstance,
-  opts: { store: ObjectStore },
+  opts: { store: ObjectStore; pool?: import("pg").Pool },
 ): Promise<void> {
-  const { store } = opts;
+  const { store, pool } = opts;
 
   // List objects (paginated)
   app.get<{ Params: ListParams; Querystring: ListQuery }>(
@@ -273,7 +274,21 @@ export async function objectRoutes(
     async (request, reply) => {
       const { objectType } = request.params;
       const { primaryKey, properties } = request.body;
-      const obj = store.createObject(objectType, primaryKey, properties);
+      const upsert = (request.body as unknown as Record<string, unknown>).upsert === true;
+      const obj = upsert && "upsertObject" in store
+        ? await (store as any).upsertObject(objectType, primaryKey, properties)
+        : await store.createObject(objectType, primaryKey, properties);
+      if (pool) {
+        const claims = (request as unknown as Record<string, unknown>).claims as Record<string, unknown> | undefined;
+        writeAuditLog(pool, {
+          userRid: typeof claims?.sub === "string" ? claims.sub : undefined,
+          action: upsert ? "object.update" : "object.create",
+          resourceRid: obj.rid,
+          resourceType: objectType,
+          details: { primaryKey, ontologyRid: request.params.ontologyRid },
+          ipAddress: request.ip,
+        });
+      }
       return reply.status(201).send(obj);
     },
   );
@@ -300,6 +315,16 @@ export async function objectRoutes(
     async (request, reply) => {
       const { objectType, primaryKey } = request.params;
       store.deleteObject(objectType, primaryKey);
+      if (pool) {
+        const claims = (request as unknown as Record<string, unknown>).claims as Record<string, unknown> | undefined;
+        writeAuditLog(pool, {
+          userRid: typeof claims?.sub === "string" ? claims.sub : undefined,
+          action: "object.delete",
+          resourceType: objectType,
+          details: { primaryKey, ontologyRid: request.params.ontologyRid },
+          ipAddress: request.ip,
+        });
+      }
       return reply.status(204).send();
     },
   );

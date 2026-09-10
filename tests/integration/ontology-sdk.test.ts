@@ -9,7 +9,14 @@ describe("Ontology-to-SDK flow: define, generate TypeScript SDK", () => {
     const { createServer: createOntologyServer } = await import(
       "../../services/svc-ontology/src/server.js"
     );
-    ontologyApp = await createOntologyServer();
+    const { OntologyStore } = await import(
+      "../../services/svc-ontology/src/store/ontology-store.js"
+    );
+
+    // In-memory stores (`null` data file) keep this suite off the shared
+    // /tmp/openfoundry-data snapshot, which running services and other suites
+    // also write to; sharing it made object counts depend on run order.
+    ontologyApp = await createOntologyServer({ store: new OntologyStore(null) });
   });
 
   afterAll(async () => {

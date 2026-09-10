@@ -2,9 +2,9 @@ name: Integration Tests
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 concurrency:
   group: integration-${{ github.ref }}
@@ -29,7 +29,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build workspace packages
+        # Services run from source via tsx, but they import workspace packages
+        # through their published entry points (dist/index.js), so those must be
+        # compiled first or every service dies with ERR_MODULE_NOT_FOUND.
+        run: pnpm run build
+
       - name: Start services in background
+        env:
+          # Enables POST /api/v2/auth/signup for tests/integration/tenant-isolation.test.ts.
+          # CI-only: the switch stays off by default everywhere else.
+          OPENFOUNDRY_ALLOW_OPEN_SIGNUP: "1"
         run: |
           # Start all backend services (skip frontend for CI)
           SERVICES=(svc-ontology svc-objects svc-multipass svc-admin svc-actions svc-datasets svc-functions svc-aip svc-gateway)
@@ -61,10 +71,10 @@ jobs:
 
       - name: Seed test data
         run: |
-          # Attempt to seed pest-control data if script exists
-          if [ -f scripts/seed-pest-control.sh ]; then
-            bash scripts/seed-pest-control.sh || echo "Seed script had warnings (non-fatal)"
-          fi
+          # Fail loudly if the seed script has moved: a silently skipped seed step
+          # makes the integration tests pass against an empty database.
+          test -f scripts/demo/seed-pest-control.sh
+          bash scripts/demo/seed-pest-control.sh || echo "Seed script had warnings (non-fatal)"
 
       - name: Run integration tests
         run: npx vitest run tests/integration/ --reporter=verbose
