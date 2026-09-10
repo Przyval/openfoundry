@@ -592,7 +592,7 @@ export default function Contour() {
     const display = data.slice(0, maxRows);
     return (
       <div style={S.tableWrap}>
-        <HTMLTable bordered condensed striped style={{ width: "100%", fontSize: "0.8rem" }}>
+        <HTMLTable bordered compact striped style={{ width: "100%", fontSize: "0.8rem" }}>
           <thead>
             <tr>
               {cols.map((c) => (

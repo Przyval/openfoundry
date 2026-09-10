@@ -423,7 +423,6 @@ function ImportWizard({ isOpen, onClose, fileType }: ImportWizardProps) {
           properties[tgtProp] = row[srcCol];
         }
       }
-      const pkProp = columnMapping[primaryKeyCol] || "id";
       const pkValue = row[primaryKeyCol] || `row-${i}`;
 
       try {
@@ -831,7 +830,7 @@ export default function DataConnection() {
               </Tag>
               {c.functional && (
                 <div style={{ marginTop: 6 }}>
-                  <Tag intent={Intent.PRIMARY} minimal small>
+                  <Tag intent={Intent.PRIMARY} minimal>
                     Functional
                   </Tag>
                 </div>

@@ -143,7 +143,7 @@ function ExecutionForm({ action, effectiveRid }: ExecutionFormProps) {
                 <div style={{ width: 180, flexShrink: 0 }}>
                   <code style={{ fontSize: "0.85rem" }}>{key}</code>
                   {def.required && (
-                    <Tag intent={Intent.PRIMARY} minimal small style={{ marginLeft: 4 }}>
+                    <Tag intent={Intent.PRIMARY} minimal style={{ marginLeft: 4 }}>
                       required
                     </Tag>
                   )}

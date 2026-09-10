@@ -66,7 +66,7 @@ export default function DataTableWidget({
       ) : (
         <>
           <div style={{ overflowX: "auto" }}>
-            <HTMLTable condensed striped style={{ width: "100%" }}>
+            <HTMLTable compact striped style={{ width: "100%" }}>
               <thead>
                 <tr>
                   {effectiveColumns.map((col) => (

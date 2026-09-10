@@ -297,7 +297,7 @@ export default function SanocareDashboard() {
               <Icon icon="person" style={{ marginRight: 6 }} />
               Technician Performance ({currentMonth})
             </h4>
-            <HTMLTable condensed striped style={{ width: "100%" }}>
+            <HTMLTable compact striped style={{ width: "100%" }}>
               <thead>
                 <tr>
                   <th>Technician</th>
@@ -365,7 +365,7 @@ export default function SanocareDashboard() {
               <Icon icon="warning-sign" style={{ marginRight: 6, color: "#DB3737" }} />
               Unresolved Flags ({unresolvedFlags.length})
             </h4>
-            <HTMLTable condensed striped style={{ width: "100%" }}>
+            <HTMLTable compact striped style={{ width: "100%" }}>
               <thead>
                 <tr>
                   <th>Type</th>
@@ -406,7 +406,7 @@ export default function SanocareDashboard() {
               <Icon icon="timeline-events" style={{ marginRight: 6 }} />
               Recent Road Plans
             </h4>
-            <HTMLTable condensed striped style={{ width: "100%" }}>
+            <HTMLTable compact striped style={{ width: "100%" }}>
               <thead>
                 <tr>
                   <th>Date</th>
