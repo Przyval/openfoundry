@@ -147,6 +147,30 @@ describe("Conjure definitions declare the supported query parameters", () => {
     ]);
   });
 
+  it("declares the datasources field the includeDatasources flag produces", () => {
+    const ir = compileConjureFile(
+      readFileSync(join(CONJURE_DIR, "ontology-service.yml"), "utf-8"),
+      "ontology-service.yml",
+    );
+    const objectType = ir.types.find(
+      (t) => "typeName" in t && t.typeName.name === "ObjectTypeV2",
+    );
+    const fields = (objectType as { fields: { fieldName: string; type: unknown }[] })
+      .fields;
+    const datasources = fields.find((f) => f.fieldName === "datasources");
+
+    expect(datasources).toBeDefined();
+    expect(datasources!.type).toEqual({
+      type: "optional",
+      optional: {
+        itemType: {
+          type: "list",
+          list: { itemType: { type: "primitive", primitive: "ANY" } },
+        },
+      },
+    });
+  });
+
   it("declares includeActionTypeFullMetadata on the full-metadata operation", () => {
     expect(
       queryParams("ontology-service.yml", "getOntologyFullMetadata"),

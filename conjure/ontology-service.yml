@@ -47,6 +47,9 @@ types:
           titleProperty: optional<string>
           status: optional<string>
           implementsInterfaces: optional<list<string>>
+          datasources:
+            type: optional<list<any>>
+            docs: Present only when includeDatasources=true was requested.
 
       ListObjectTypesResponse:
         fields:
@@ -105,6 +108,10 @@ types:
           apiName: string
           displayName: string
           description: string
+          # Declared `string` to match the pre-existing OntologyV2 above, but
+          # StoredOntology.version is a number and is served as a JSON number.
+          # Reconciling the two is user-visible on an existing endpoint and is
+          # deliberately left out of this change.
           version: string
           objectTypes: list<ObjectTypeV2>
           actionTypes: list<ActionTypeV2>

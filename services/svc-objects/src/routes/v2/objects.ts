@@ -64,8 +64,8 @@ interface UpdateBody {
 /**
  * Query parameters of `GET /v2/ontologies/{ontology}/objects/{objectType}`.
  *
- * Declared inline rather than as a named type so the contract is legible in the
- * route registration itself.
+ * Named so the route generic and the handler read the same declaration; a
+ * second inline copy in the registration would have to be kept in step by hand.
  */
 interface ListQuery {
   pageSize?: number;
@@ -255,18 +255,7 @@ export async function objectRoutes(
       : store.propertyNames?.(ontologyRid, objectType);
 
   // List objects (paginated)
-  app.get<{
-    Params: ListParams;
-    Querystring: {
-      pageSize?: number;
-      pageToken?: string;
-      select?: string | string[];
-      orderBy?: string;
-      excludeRid?: string;
-      snapshot?: string;
-      branch?: string;
-    };
-  }>(
+  app.get<{ Params: ListParams; Querystring: ListQuery }>(
     "/ontologies/:ontologyRid/objects/:objectType",
     {
       preHandler: requirePermission("objects:read"),
@@ -274,7 +263,7 @@ export async function objectRoutes(
     async (request) => {
       rejectUnsupportedOntologyScoping(request.query);
       const { ontologyRid, objectType } = request.params;
-      const query = request.query as ListQuery;
+      const query = request.query;
 
       const select = parseListParam(query.select);
       const orderBy = parseOrderBy(query.orderBy);
@@ -286,8 +275,6 @@ export async function objectRoutes(
         ? decodePageToken(query.pageToken as PageToken)
         : { offset: 0 };
 
-      // A snapshot listing freezes its view at the size the collection had
-      // when paging began and carries that boundary forward in every token.
       const declared = await declaredProperties(ontologyRid, objectType);
       assertPropertiesExist(objectType, declared, select);
       assertPropertiesExist(
@@ -318,6 +305,9 @@ export async function objectRoutes(
       }
 
       const all = await store.allObjects(objectType);
+
+      // A snapshot listing freezes its view at the size the collection had
+      // when paging began and carries that boundary forward in every token.
       const snapshotSize = resolveSnapshotSize(
         snapshot,
         cursor.snapshotSize,

@@ -150,20 +150,41 @@ export async function linkRoutes(
         orderBy?.map((term) => term.property),
       );
 
-      const resolved = await Promise.all(
-        links.map(async (link) => {
-          try {
-            return await objectStore.getObject(
-              link.targetObjectType,
-              link.targetPrimaryKey,
-            );
-          } catch {
-            // Object may have been deleted after the link was created; skip it
-            return null;
-          }
+      // Resolved one batch per distinct target type rather than one read per
+      // link: the whole set has to be resolved before the page is cut, so a
+      // per-link read would fire the entire link count on every page.
+      const keysByType = new Map<string, Set<string>>();
+      for (const link of links) {
+        const keys = keysByType.get(link.targetObjectType) ?? new Set<string>();
+        keys.add(link.targetPrimaryKey);
+        keysByType.set(link.targetObjectType, keys);
+      }
+
+      const batches = await Promise.all(
+        [...keysByType].map(async ([targetObjectType, keys]) => {
+          const resolved = await objectStore.getObjectsByKeys(targetObjectType, [
+            ...keys,
+          ]);
+          return [targetObjectType, resolved] as const;
         }),
       );
-      let objects = resolved.filter((obj): obj is StoredObject => obj !== null);
+
+      const byTypeAndKey = new Map<string, StoredObject>();
+      for (const [targetObjectType, resolved] of batches) {
+        for (const obj of resolved) {
+          byTypeAndKey.set(`${targetObjectType}::${obj.primaryKey}`, obj);
+        }
+      }
+
+      // Reassembled in link order, and a link whose target no longer exists is
+      // simply absent from the batch and drops out here.
+      let objects = links
+        .map((link) =>
+          byTypeAndKey.get(
+            `${link.targetObjectType}::${link.targetPrimaryKey}`,
+          ),
+        )
+        .filter((obj): obj is StoredObject => obj !== undefined);
 
       if (orderBy) {
         objects = applyOrderBy(objects, orderBy);

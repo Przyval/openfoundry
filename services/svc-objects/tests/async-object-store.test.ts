@@ -28,9 +28,13 @@ const BASE_URL = `/api/v2/ontologies/${ONTOLOGY_RID}/objects`;
  * `PgObjectStore` method does.
  */
 class AsyncObjectStore implements ObjectReadWriteStore {
+  /** How many times each read method was called, for cost assertions. */
+  readonly calls = { getObject: 0, getObjectsByKeys: 0, allObjects: 0 };
+
   constructor(private readonly inner: ObjectStore) {}
 
   async allObjects(objectType: string): Promise<StoredObject[]> {
+    this.calls.allObjects++;
     return this.inner.allObjects(objectType);
   }
 
@@ -42,6 +46,7 @@ class AsyncObjectStore implements ObjectReadWriteStore {
   }
 
   async getObject(objectType: string, primaryKey: string): Promise<StoredObject> {
+    this.calls.getObject++;
     return this.inner.getObject(objectType, primaryKey);
   }
 
@@ -77,6 +82,7 @@ class AsyncObjectStore implements ObjectReadWriteStore {
     objectType: string,
     primaryKeys: string[],
   ): Promise<StoredObject[]> {
+    this.calls.getObjectsByKeys++;
     return this.inner.getObjectsByKeys(objectType, primaryKeys);
   }
 }
@@ -84,15 +90,17 @@ class AsyncObjectStore implements ObjectReadWriteStore {
 let app: FastifyInstance;
 let inner: ObjectStore;
 let linkStore: LinkStore;
+let asyncStore: AsyncObjectStore;
 
 beforeEach(async () => {
   inner = new ObjectStore(null);
   linkStore = new LinkStore(null);
+  asyncStore = new AsyncObjectStore(inner);
   app = await createServer({
     config: { port: 0, host: "127.0.0.1", logLevel: "silent" },
     // The object-set and import routes still need the richer in-memory store;
     // the object and link routes under test are driven through the double.
-    store: new AsyncObjectStore(inner) as unknown as ObjectStore,
+    store: asyncStore as unknown as ObjectStore,
     linkStore,
   });
 
@@ -216,6 +224,43 @@ describe("Linked objects against an async store", () => {
     expect(res.json().data.map((o: any) => o.properties.name)).toEqual([
       "Bob",
       "Alice",
+    ]);
+  });
+
+  it("resolves one batch per target type, not one read per link", async () => {
+    for (let i = 3; i <= 40; i++) {
+      inner.createObject("Employee", `emp-${i}`, { name: `E${i}`, salary: i });
+      linkStore.createLink("Employee", "emp-1", "reportsTo", "Employee", `emp-${i}`);
+    }
+    inner.createObject("Office", "off-1", { name: "HQ" });
+    linkStore.createLink("Employee", "emp-1", "reportsTo", "Office", "off-1");
+
+    asyncStore.calls.getObject = 0;
+    asyncStore.calls.getObjectsByKeys = 0;
+
+    const res = await links("?pageSize=5");
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().totalCount).toBe(40);
+    expect(res.json().data).toHaveLength(5);
+    // Two distinct target types, so two batched reads regardless of the 40
+    // links or the page size.
+    expect(asyncStore.calls.getObjectsByKeys).toBe(2);
+    expect(asyncStore.calls.getObject).toBe(0);
+  });
+
+  it("keeps link order and content when resolving in batches", async () => {
+    inner.createObject("Office", "off-1", { name: "HQ" });
+    linkStore.createLink("Employee", "emp-1", "reportsTo", "Office", "off-1");
+    inner.createObject("Employee", "emp-3", { name: "Bob", salary: 150000 });
+    linkStore.createLink("Employee", "emp-1", "reportsTo", "Employee", "emp-3");
+
+    const res = await links();
+
+    expect(res.json().data.map((o: any) => o.primaryKey)).toEqual([
+      "emp-2",
+      "off-1",
+      "emp-3",
     ]);
   });
 
