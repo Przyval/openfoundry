@@ -6,17 +6,26 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 ## Build sharp edges
 
-`pnpm run build` still fails, and it is not your change.
-Roughly 40 pre-existing type errors remain across 7 packages, in two clusters.
-Blueprint v4 table and tag props (`condensed`, `striped`, `bordered`, `minimal` on `Tag`) are checked against v5 types, and `CryptoKey` is missing because `tsconfig.base.json` sets `lib: ["ES2022"]` with no DOM.
-`noUnusedLocals` and `noUnusedParameters` are on, so unused imports are hard errors too.
+`pnpm run build` is green (49/49), as are `typecheck` (45/45) and `lint` (21/21). Keep it that way.
 Run `npx turbo run build --continue` to see every failure at once; plain `build` stops at the first.
+
+`noUnusedLocals` and `noUnusedParameters` are on, so an unused import or local is a hard error.
+Prefix a deliberately unused parameter with `_`; that exemption does not apply to locals.
+
+The console is on `@blueprintjs/*` v5. Do not copy v4 props from older code: `HTMLTable` uses `compact`, not `condensed`, and `Tag` has no small size at all, since v5 types it as `size?: NonSmallSize` = `Exclude<Size, "small">`. `Button` still accepts `small`.
+
+`CryptoKey` is not a global here: `tsconfig.base.json` sets `lib: ["ES2022"]` with no DOM, and `@types/node` 20 declares `CryptoKey` only inside the `webcrypto` namespace. Import the type from `jose`, which exports its own and is what `generateKeyPair` returns.
 
 Any package using Node builtins or Node globals must declare `@types/node` itself.
 Nothing hoists it for you, and the failure looks like `Cannot find module 'node:fs'` or `Cannot find name 'Buffer' / 'console' / 'setInterval'`.
 Because turbo runs `build` as a dependency of the other tasks, one such gap fails `build`, `typecheck`, `lint` and `test` together.
 
 ## Tests
+
+`pnpm run test` (turbo `test`) FAILS, and not because any assertion fails.
+44 packages declare `test: vitest run` but ship no test files, and vitest exits 1 on "No test files found".
+The CI `test` job runs exactly that, so it is red for this reason alone; `--passWithNoTests` is the one-line remedy if the project wants it.
+Check for real failures with `grep -E "Test Files|AssertionError"` rather than trusting the exit code.
 
 Integration tests are `pnpm run test:integration` (config in `tests/vitest.config.ts`).
 Most files start their own in-process server; `api-endpoints` and `sdk-compat` need a real gateway on `localhost:8080` via `bash start.sh`, which needs Docker Postgres.
