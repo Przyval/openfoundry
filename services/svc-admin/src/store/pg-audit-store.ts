@@ -68,16 +68,13 @@ export class PgAuditStore implements AuditStore {
     }
 
     if (query.user) {
-      values.push(query.user);
-      const exact = `$${values.length}`;
       values.push(`%${escapeLikePattern(query.user)}%`);
       const partial = `$${values.length}`;
       // The console renders raw RIDs but its filter is a free-text box, so a
       // person types either part of a RID or the name they know the principal
-      // by; match the whole RID, part of it, or the principal's own names.
+      // by; match part of the RID or part of the principal's own names.
       conditions.push(
-        `(LOWER(user_rid) = LOWER(${exact})` +
-          ` OR user_rid ILIKE ${partial}` +
+        `(user_rid ILIKE ${partial}` +
           ` OR user_rid IN (SELECT rid FROM users` +
           ` WHERE username ILIKE ${partial}` +
           ` OR display_name ILIKE ${partial}` +

@@ -111,16 +111,17 @@ export async function groupRoutes(
     preHandler: requirePermission("admin:manage"),
   }, async (request) => {
     const memberRids = await groupStore.getMembers(request.params.groupRid);
-    const members = memberRids.map((rid) => {
-      const user = userStore.getUser(rid);
-      return {
+    const members = [];
+    for (const rid of memberRids) {
+      const user = await userStore.getUser(rid);
+      members.push({
         rid: user.rid,
         username: user.username,
         email: user.email,
         displayName: user.displayName,
         status: user.status,
-      };
-    });
+      });
+    }
     return members;
   });
 

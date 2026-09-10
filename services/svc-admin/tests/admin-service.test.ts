@@ -11,6 +11,7 @@ import type {
 } from "../src/store/audit-store.js";
 import { PgAuditStore } from "../src/store/pg-audit-store.js";
 import { setEnforcePermissions } from "@openfoundry/permissions";
+import { notFound } from "@openfoundry/errors";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -601,6 +602,66 @@ describe("Permission enforcement", () => {
 });
 
 // -------------------------------------------------------------------------
+// Membership against asynchronous (database-backed) stores
+// -------------------------------------------------------------------------
+
+describe("Membership with async stores", () => {
+  let asyncApp: FastifyInstance;
+
+  const user = {
+    rid: "ri.multipass.main.user.1",
+    username: "async-user",
+    email: "async@test.com",
+    displayName: "Async User",
+    attributes: {},
+    status: "ACTIVE" as const,
+    createdAt: "2026-09-11T12:00:00.000Z",
+    updatedAt: "2026-09-11T12:00:00.000Z",
+  };
+
+  beforeEach(async () => {
+    // The Pg stores expose the same methods as their in-memory counterparts
+    // but return promises; routes must await them in both modes.
+    const asyncUserStore = {
+      getUser: (rid: string) =>
+        rid === user.rid
+          ? Promise.resolve(user)
+          : Promise.reject(notFound("User", rid)),
+    } as unknown as UserStore;
+    const asyncGroupStore = {
+      getMembers: () => Promise.resolve([user.rid]),
+    } as unknown as GroupStore;
+
+    asyncApp = await createServer({
+      config: TEST_CONFIG,
+      userStore: asyncUserStore,
+      groupStore: asyncGroupStore,
+    });
+  });
+
+  afterEach(async () => {
+    await asyncApp.close();
+  });
+
+  it("GET members resolves each member into a full user record", async () => {
+    const res = await asyncApp.inject({
+      method: "GET",
+      url: "/api/v2/admin/groups/ri.multipass.main.group.1/members",
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([
+      {
+        rid: user.rid,
+        username: user.username,
+        email: user.email,
+        displayName: user.displayName,
+        status: user.status,
+      },
+    ]);
+  });
+});
+
+// -------------------------------------------------------------------------
 // Group members (Foundry `admin.GroupMember` contract)
 // -------------------------------------------------------------------------
 
@@ -1023,7 +1084,6 @@ describe("PgAuditStore", () => {
 
     expect(captured.values).toEqual([
       "CREATE",
-      "alice",
       "%alice%",
       "2026-09-01",
       "2026-09-30",
@@ -1045,13 +1105,12 @@ describe("PgAuditStore", () => {
 
     await store.listEntries({ user: "Admin", offset: 0, limit: 11 });
 
-    // The value is bound twice: once whole, once as a contains-pattern.
-    expect(captured.values).toEqual(["Admin", "%Admin%", 11, 0]);
+    // The value is bound once, as a contains-pattern.
+    expect(captured.values).toEqual(["%Admin%", 11, 0]);
     expect(captured.text).not.toContain("Admin");
     // Neither the RID nor the name match may be case-sensitive.
-    expect(captured.text).toContain("LOWER(user_rid) = LOWER($1)");
-    expect(captured.text).toContain("user_rid ILIKE $2");
-    expect(captured.text).toContain("username ILIKE $2");
+    expect(captured.text).toContain("user_rid ILIKE $1");
+    expect(captured.text).toContain("username ILIKE $1");
   });
 
   it("escapes LIKE wildcards in the user filter", async () => {
@@ -1060,7 +1119,7 @@ describe("PgAuditStore", () => {
 
     await store.listEntries({ user: "100%_x", offset: 0, limit: 11 });
 
-    expect(captured.values?.[1]).toBe("%100\\%\\_x%");
+    expect(captured.values?.[0]).toBe("%100\\%\\_x%");
   });
 
   it("maps a row onto the console's audit entry shape", async () => {
