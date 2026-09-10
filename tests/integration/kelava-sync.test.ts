@@ -56,6 +56,16 @@ async function ensureObjectType(ontRid: string, apiName: string): Promise<void> 
   });
 }
 
+// The suite needs a running gateway (bash start.sh). Probe once so an absent
+// gateway skips these tests instead of erroring the whole suite in beforeAll.
+const GATEWAY_UP = await fetch(`${BASE}/api/v2/ontologies`)
+  .then(() => true)
+  .catch(() => false);
+
+if (!GATEWAY_UP) {
+  console.warn(`[skip] gateway unreachable at ${BASE} - integration suite skipped`);
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -63,6 +73,7 @@ async function ensureObjectType(ontRid: string, apiName: string): Promise<void> 
 let ontRid: string;
 
 beforeAll(async () => {
+  if (!GATEWAY_UP) return;
   ontRid = await getOrCreateOntology();
   await ensureObjectType(ontRid, "TestUpsertObj");
 });
@@ -71,7 +82,7 @@ beforeAll(async () => {
 // Test 1: Upsert — create + update same object
 // ---------------------------------------------------------------------------
 
-describe("Upsert behavior", () => {
+describe.skipIf(!GATEWAY_UP)("Upsert behavior", () => {
   it("should create object on first upsert", async () => {
     const res = await fetch(
       `${BASE}/api/v2/ontologies/${ontRid}/objects/TestUpsertObj`,
@@ -138,7 +149,7 @@ describe("Upsert behavior", () => {
 // Test 2: Sync with empty result — no crash
 // ---------------------------------------------------------------------------
 
-describe("Empty sync handling", () => {
+describe.skipIf(!GATEWAY_UP)("Empty sync handling", () => {
   it("should handle loadObjects for non-existent type gracefully", async () => {
     const res = await fetch(
       `${BASE}/api/v2/ontologies/${ontRid}/objectSets/loadObjects`,
@@ -178,7 +189,7 @@ describe("Empty sync handling", () => {
 // Test 3: Dashboard API — error returns valid JSON, not 500
 // ---------------------------------------------------------------------------
 
-describe("Dashboard data availability", () => {
+describe.skipIf(!GATEWAY_UP)("Dashboard data availability", () => {
   it("should return ontology list without error", async () => {
     const res = await fetch(`${BASE}/api/v2/ontologies`);
     expect(res.status).toBe(200);
@@ -209,7 +220,7 @@ describe("Dashboard data availability", () => {
 // Test 4: Create without upsert should still reject duplicates
 // ---------------------------------------------------------------------------
 
-describe("Non-upsert duplicate rejection", () => {
+describe.skipIf(!GATEWAY_UP)("Non-upsert duplicate rejection", () => {
   it("should reject duplicate primaryKey without upsert flag", async () => {
     // First create
     await fetch(`${BASE}/api/v2/ontologies/${ontRid}/objects/TestUpsertObj`, {
@@ -242,7 +253,7 @@ describe("Non-upsert duplicate rejection", () => {
 // Test 5: Full metadata endpoint for LLM schema injection
 // ---------------------------------------------------------------------------
 
-describe("LLM schema fetching", () => {
+describe.skipIf(!GATEWAY_UP)("LLM schema fetching", () => {
   it("should return fullMetadata with object types and properties", async () => {
     const res = await fetch(
       `${BASE}/api/v2/ontologies/${ontRid}/fullMetadata`,

@@ -67,11 +67,21 @@ async function api(
   });
 }
 
+// The suite needs a running gateway (bash start.sh). Probe once so an absent
+// gateway skips these tests instead of erroring the whole suite in beforeAll.
+const GATEWAY_UP = await fetch(`${BASE}/api/v2/ontologies`)
+  .then(() => true)
+  .catch(() => false);
+
+if (!GATEWAY_UP) {
+  console.warn(`[skip] gateway unreachable at ${BASE} - integration suite skipped`);
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
 
-describe("Tenant Isolation (Multi-Tenancy RLS)", () => {
+describe.skipIf(!GATEWAY_UP)("Tenant Isolation (Multi-Tenancy RLS)", () => {
   // -------------------------------------------------------------------------
   // Setup: create two tenants
   // -------------------------------------------------------------------------
