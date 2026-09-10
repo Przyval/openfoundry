@@ -14,6 +14,16 @@ export interface PageCursor {
   lastId?: string;
   /** Optional sort field values from the last item, for multi-column keyset pagination. */
   sortValues?: unknown[];
+  /**
+   * Optional size the collection had when snapshot paging began.
+   *
+   * Present only when the caller asked for snapshot consistency. Later pages
+   * read it back and look no further than that many items, so entries appended
+   * after paging started cannot shift the ones already being read. A count is
+   * used rather than a timestamp because two items can share a millisecond,
+   * which would leave the boundary ambiguous exactly when it matters.
+   */
+  snapshotSize?: number;
 }
 
 /**
@@ -100,11 +110,25 @@ export function decodePageToken(token: PageToken): PageCursor {
     );
   }
 
+  if (
+    obj.snapshotSize !== undefined &&
+    (typeof obj.snapshotSize !== "number" ||
+      !Number.isInteger(obj.snapshotSize) ||
+      obj.snapshotSize < 0)
+  ) {
+    throw new Error(
+      `Invalid page token: "snapshotSize" must be a non-negative integer if present`,
+    );
+  }
+
   return {
     offset: obj.offset,
     ...(obj.lastId !== undefined && { lastId: obj.lastId as string }),
     ...(obj.sortValues !== undefined && {
       sortValues: obj.sortValues as unknown[],
+    }),
+    ...(obj.snapshotSize !== undefined && {
+      snapshotSize: obj.snapshotSize as number,
     }),
   };
 }

@@ -7,7 +7,8 @@ import {
   type GroupByDef,
 } from "@openfoundry/object-set";
 import {
-  type ObjectStore,
+  type ObjectReadWriteStore,
+  type ObjectTypeSchemaSource,
   type StoredObject,
   type OrderByClause,
   evaluateFilter,
@@ -16,6 +17,13 @@ import {
 import type { LinkStore } from "../../store/link-store.js";
 import { encodePageToken, decodePageToken, type PageToken } from "@openfoundry/pagination";
 import { requirePermission } from "@openfoundry/permissions";
+import { rejectUnsupportedOntologyScoping } from "@openfoundry/errors";
+import {
+  assertOrderByClauseListBody,
+  assertPropertiesExist,
+  assertStringListBody,
+  parseBooleanParam,
+} from "./query-params.js";
 
 // ---------------------------------------------------------------------------
 // Query engine singleton
@@ -27,23 +35,25 @@ const queryEngine = new ObjectSetQueryEngine();
 // ObjectSet resolver
 // ---------------------------------------------------------------------------
 
-function resolveObjectSet(
+async function resolveObjectSet(
   objectSetDef: ObjectSet,
-  store: ObjectStore,
+  store: ObjectReadWriteStore,
   linkStore: LinkStore,
-): StoredObject[] {
+): Promise<StoredObject[]> {
   switch (objectSetDef.type) {
     case "BASE":
       return store.allObjects(objectSetDef.objectType);
 
     case "FILTER": {
-      const source = resolveObjectSet(objectSetDef.objectSet, store, linkStore);
+      const source = await resolveObjectSet(objectSetDef.objectSet, store, linkStore);
       return source.filter((obj) => evaluateFilter(obj, objectSetDef.filter));
     }
 
     case "UNION": {
-      const sets = objectSetDef.objectSets.map((s) =>
-        resolveObjectSet(s, store, linkStore),
+      const sets = await Promise.all(
+        objectSetDef.objectSets.map((s) =>
+          resolveObjectSet(s, store, linkStore),
+        ),
       );
       // Deduplicate by rid
       const seen = new Set<string>();
@@ -60,8 +70,10 @@ function resolveObjectSet(
     }
 
     case "INTERSECT": {
-      const sets = objectSetDef.objectSets.map((s) =>
-        resolveObjectSet(s, store, linkStore),
+      const sets = await Promise.all(
+        objectSetDef.objectSets.map((s) =>
+          resolveObjectSet(s, store, linkStore),
+        ),
       );
       if (sets.length === 0) return [];
       const ridSets = sets.map((s) => new Set(s.map((o) => o.rid)));
@@ -72,9 +84,9 @@ function resolveObjectSet(
 
     case "SUBTRACT": {
       const [left, right] = objectSetDef.objectSets;
-      const leftObjects = resolveObjectSet(left, store, linkStore);
+      const leftObjects = await resolveObjectSet(left, store, linkStore);
       const rightRids = new Set(
-        resolveObjectSet(right, store, linkStore).map((o) => o.rid),
+        (await resolveObjectSet(right, store, linkStore)).map((o) => o.rid),
       );
       return leftObjects.filter((obj) => !rightRids.has(obj.rid));
     }
@@ -83,7 +95,7 @@ function resolveObjectSet(
       return store.getObjectsByKeys(objectSetDef.objectType, objectSetDef.primaryKeys);
 
     case "SEARCH_AROUND": {
-      const sourceObjects = resolveObjectSet(objectSetDef.objectSet, store, linkStore);
+      const sourceObjects = await resolveObjectSet(objectSetDef.objectSet, store, linkStore);
       const result: StoredObject[] = [];
       const seen = new Set<string>();
       for (const source of sourceObjects) {
@@ -94,7 +106,7 @@ function resolveObjectSet(
         );
         for (const target of targets) {
           try {
-            const obj = store.getObject(target.targetObjectType, target.targetPrimaryKey);
+            const obj = await store.getObject(target.targetObjectType, target.targetPrimaryKey);
             if (!seen.has(obj.rid)) {
               seen.add(obj.rid);
               result.push(obj);
@@ -121,11 +133,11 @@ function resolveObjectSet(
  * lowercase type names ("base", "filter") and "where" clauses in addition
  * to the internal canonical format.
  */
-function resolveApiObjectSet(
+async function resolveApiObjectSet(
   objectSetDef: Record<string, unknown>,
-  store: ObjectStore,
+  store: ObjectReadWriteStore,
   linkStore: LinkStore,
-): StoredObject[] {
+): Promise<StoredObject[]> {
   const type = String(objectSetDef.type ?? "").toUpperCase();
 
   // First, try to use it as a canonical ObjectSet if the type matches
@@ -136,7 +148,7 @@ function resolveApiObjectSet(
   if (type === "FILTER") {
     const inner = objectSetDef.objectSet as Record<string, unknown> | undefined;
     const source = inner
-      ? resolveApiObjectSet(inner, store, linkStore)
+      ? await resolveApiObjectSet(inner, store, linkStore)
       : [];
 
     // Support "where" clause (API wire format)
@@ -162,7 +174,7 @@ function resolveApiObjectSet(
     const seen = new Set<string>();
     const result: StoredObject[] = [];
     for (const setDef of sets) {
-      for (const obj of resolveApiObjectSet(setDef, store, linkStore)) {
+      for (const obj of await resolveApiObjectSet(setDef, store, linkStore)) {
         if (!seen.has(obj.rid)) {
           seen.add(obj.rid);
           result.push(obj);
@@ -175,7 +187,9 @@ function resolveApiObjectSet(
   if (type === "INTERSECT") {
     const sets = (objectSetDef.objectSets as Record<string, unknown>[]) ?? [];
     if (sets.length === 0) return [];
-    const resolved = sets.map((s) => resolveApiObjectSet(s, store, linkStore));
+    const resolved = await Promise.all(
+      sets.map((s) => resolveApiObjectSet(s, store, linkStore)),
+    );
     const ridSets = resolved.map((s) => new Set(s.map((o) => o.rid)));
     return resolved[0].filter((obj) =>
       ridSets.every((rids) => rids.has(obj.rid)),
@@ -185,9 +199,9 @@ function resolveApiObjectSet(
   if (type === "SUBTRACT") {
     const sets = (objectSetDef.objectSets as Record<string, unknown>[]) ?? [];
     if (sets.length < 2) return [];
-    const left = resolveApiObjectSet(sets[0], store, linkStore);
+    const left = await resolveApiObjectSet(sets[0], store, linkStore);
     const rightRids = new Set(
-      resolveApiObjectSet(sets[1], store, linkStore).map((o) => o.rid),
+      (await resolveApiObjectSet(sets[1], store, linkStore)).map((o) => o.rid),
     );
     return left.filter((obj) => !rightRids.has(obj.rid));
   }
@@ -200,7 +214,7 @@ function resolveApiObjectSet(
   if (type === "SEARCH_AROUND" || type === "SEARCHAROUND") {
     const inner = objectSetDef.objectSet as Record<string, unknown> | undefined;
     const sourceObjects = inner
-      ? resolveApiObjectSet(inner, store, linkStore)
+      ? await resolveApiObjectSet(inner, store, linkStore)
       : [];
     const link = String(objectSetDef.link ?? "");
     const result: StoredObject[] = [];
@@ -213,7 +227,7 @@ function resolveApiObjectSet(
       );
       for (const target of targets) {
         try {
-          const obj = store.getObject(target.targetObjectType, target.targetPrimaryKey);
+          const obj = await store.getObject(target.targetObjectType, target.targetPrimaryKey);
           if (!seen.has(obj.rid)) {
             seen.add(obj.rid);
             result.push(obj);
@@ -228,10 +242,52 @@ function resolveApiObjectSet(
 
   // Fallback: try canonical resolver
   try {
-    return resolveObjectSet(objectSetDef as unknown as ObjectSet, store, linkStore);
+    return await resolveObjectSet(objectSetDef as unknown as ObjectSet, store, linkStore);
   } catch {
     return [];
   }
+}
+
+/**
+ * The object types a set draws its results from, per the definition alone.
+ *
+ * Only `base` and `static` name a type; every other form has to be walked to
+ * its leaves. `intersect` and `subtract` draw only from their first operand,
+ * `union` from all of them. Returns `undefined` whenever the definition cannot
+ * say - an unnamed leaf, an empty set, or a `searchAround`, whose results are
+ * of the link type's target rather than of anything the body names - so the
+ * caller makes no claim it has no grounds for.
+ */
+function objectSetLeafTypes(
+  objectSetDef: Record<string, unknown>,
+): string[] | undefined {
+  const type = String(objectSetDef.type ?? "").toUpperCase();
+
+  if (type === "BASE" || type === "STATIC") {
+    return typeof objectSetDef.objectType === "string"
+      ? [objectSetDef.objectType]
+      : undefined;
+  }
+
+  if (type === "FILTER") {
+    const inner = objectSetDef.objectSet as Record<string, unknown> | undefined;
+    return inner ? objectSetLeafTypes(inner) : undefined;
+  }
+
+  if (type === "INTERSECT" || type === "SUBTRACT") {
+    const sets = (objectSetDef.objectSets as Record<string, unknown>[]) ?? [];
+    return sets.length > 0 ? objectSetLeafTypes(sets[0]) : undefined;
+  }
+
+  if (type === "UNION") {
+    const sets = (objectSetDef.objectSets as Record<string, unknown>[]) ?? [];
+    if (sets.length === 0) return undefined;
+    const nested = sets.map(objectSetLeafTypes);
+    if (nested.some((types) => types === undefined)) return undefined;
+    return [...new Set((nested as string[][]).flat())];
+  }
+
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,20 +327,81 @@ interface SearchBody {
 
 export async function objectSetRoutes(
   app: FastifyInstance,
-  opts: { store: ObjectStore; linkStore: LinkStore },
+  opts: {
+    store: ObjectReadWriteStore;
+    linkStore: LinkStore;
+    objectTypeSchema?: ObjectTypeSchemaSource;
+  },
 ): Promise<void> {
-  const { store, linkStore } = opts;
+  const { store, linkStore, objectTypeSchema } = opts;
+
+  const declaredProperties = (ontologyRid: string, objectType: string) =>
+    objectTypeSchema
+      ? objectTypeSchema.propertyNames(ontologyRid, objectType)
+      : store.propertyNames?.(ontologyRid, objectType);
+
+  /**
+   * The properties declared across the object types an object set draws from.
+   *
+   * A union spans several types, so a name is known when any of them declares
+   * it. `properties` stays `undefined` if the leaves cannot be resolved or any
+   * one of them has no declaration, since an incomplete union would call a
+   * legitimate name unknown.
+   */
+  const declaredForSet = async (
+    ontologyRid: string,
+    objectSetDef: Record<string, unknown>,
+  ): Promise<{ objectTypes: string[]; properties?: ReadonlySet<string> }> => {
+    const types = objectSetLeafTypes(objectSetDef);
+    if (!types || types.length === 0) return { objectTypes: [] };
+
+    const sets = await Promise.all(
+      types.map((type) => declaredProperties(ontologyRid, type)),
+    );
+    if (sets.some((set) => set === undefined)) return { objectTypes: types };
+    return {
+      objectTypes: types,
+      properties: new Set((sets as ReadonlySet<string>[]).flatMap((s) => [...s])),
+    };
+  };
 
   // Load objects from an ObjectSet query (enhanced with filter/where support)
-  app.post<{ Params: OntologyParams; Body: LoadObjectsBody }>(
+  app.post<{
+    Params: OntologyParams;
+    Querystring: {
+      executeInMemoryOnly?: string;
+      branch?: string;
+      scenarioRid?: string;
+      transactionId?: string;
+    };
+    Body: LoadObjectsBody;
+  }>(
     "/ontologies/:ontologyRid/objectSets/loadObjects",
     {
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
-      const { objectSet: objectSetDef, select, pageSize = 100, pageToken, orderBy } = request.body;
+      rejectUnsupportedOntologyScoping(request.query);
+      // The object set is resolved entirely from the in-memory object store,
+      // so the in-memory-only guarantee always holds; the flag is validated
+      // rather than silently swallowed.
+      parseBooleanParam("executeInMemoryOnly", request.query.executeInMemoryOnly);
+      const { objectSet: objectSetDef, pageSize = 100, pageToken } = request.body;
+      const select = assertStringListBody("select", request.body.select);
+      const orderBy = assertOrderByClauseListBody("orderBy", request.body.orderBy);
 
-      let objects = resolveApiObjectSet(objectSetDef, store, linkStore);
+      const declared = await declaredForSet(
+        request.params.ontologyRid,
+        objectSetDef,
+      );
+      assertPropertiesExist(declared.objectTypes, declared.properties, select);
+      assertPropertiesExist(
+        declared.objectTypes,
+        declared.properties,
+        orderBy?.map((clause) => clause.field),
+      );
+
+      let objects = await resolveApiObjectSet(objectSetDef, store, linkStore);
 
       // Apply ordering
       if (orderBy && orderBy.length > 0) {
@@ -345,15 +462,27 @@ export async function objectSetRoutes(
   );
 
   // Aggregate over an ObjectSet
-  app.post<{ Params: OntologyParams; Body: AggregateBody }>(
+  app.post<{
+    Params: OntologyParams;
+    Querystring: {
+      executeInMemoryOnly?: string;
+      branch?: string;
+      scenarioRid?: string;
+      transactionId?: string;
+    };
+    Body: AggregateBody;
+  }>(
     "/ontologies/:ontologyRid/objectSets/aggregate",
     {
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
+      // See loadObjects: aggregation runs over the in-memory object store.
+      parseBooleanParam("executeInMemoryOnly", request.query.executeInMemoryOnly);
       const { objectSet: objectSetDef, aggregation: aggregations, groupBy } = request.body;
 
-      const objects = resolveApiObjectSet(objectSetDef, store, linkStore);
+      const objects = await resolveApiObjectSet(objectSetDef, store, linkStore);
 
       if (groupBy && groupBy.length > 0) {
         // Grouped aggregation: use query engine, return new format
@@ -407,7 +536,7 @@ export async function objectSetRoutes(
         pageToken,
       } = request.body;
 
-      const objects = resolveApiObjectSet(objectSetDef, store, linkStore);
+      const objects = await resolveApiObjectSet(objectSetDef, store, linkStore);
 
       const result = queryEngine.search(
         objects as unknown as Record<string, unknown>[],

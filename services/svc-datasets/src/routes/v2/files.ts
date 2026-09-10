@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { FileStore } from "../../store/file-store.js";
 import type { DatasetStore } from "../../store/dataset-store.js";
 import { requirePermission } from "@openfoundry/permissions";
+import { customClient } from "@openfoundry/errors";
 import { paginateArray } from "./pagination-helpers.js";
 
 /** Serialize a file to the wire format (without content). */
@@ -29,16 +30,44 @@ export async function fileRoutes(
   });
 
   // List files (must be registered before the wildcard route)
+  //
+  // Only `pathPrefix` scopes this listing. Foundry also scopes it by
+  // `branchName` and a `startTransactionRid`/`endTransactionRid` range, but
+  // `FileStore` is keyed by `${datasetRid}::${path}`, so re-uploading a path
+  // overwrites the record and only the newest transaction survives. Serving
+  // those parameters needs per-transaction file versions - new storage, not
+  // parameter completion - and until the store has them the filters would
+  // answer an empty set for any path that was ever rewritten.
   app.get<{
     Params: { datasetRid: string };
-    Querystring: { pageSize?: string; pageToken?: string };
+    Querystring: {
+      pageSize?: string;
+      pageToken?: string;
+      pathPrefix?: string;
+    };
   }>("/datasets/:datasetRid/files", {
     preHandler: requirePermission("datasets:read"),
   }, async (request) => {
     const datasetRid = request.params.datasetRid;
+    const { pathPrefix } = request.query;
+
     datasetStore.getDataset(datasetRid);
-    const files = fileStore.listFiles(datasetRid).map(serializeFile);
-    return paginateArray(files, request.query);
+
+    if (pathPrefix !== undefined && pathPrefix.startsWith("/")) {
+      throw customClient(
+        400,
+        "InvalidFilePath",
+        "The provided file path is invalid. Check that the path does not start with a leading slash.",
+      );
+    }
+
+    const files = fileStore
+      .listFiles(datasetRid)
+      .filter(
+        (file) => pathPrefix === undefined || file.path.startsWith(pathPrefix),
+      );
+
+    return paginateArray(files.map(serializeFile), request.query);
   });
 
   // Upload file (raw body)

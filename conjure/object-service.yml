@@ -178,6 +178,24 @@ services:
           pageToken:
             type: optional<PageToken>
             param-type: query
+          select:
+            type: optional<list<string>>
+            param-type: query
+            docs: Property names to return; every property when omitted
+          excludeRid:
+            type: optional<boolean>
+            param-type: query
+            docs: Withhold the object's resource identifier from the response
+          orderBy:
+            type: optional<string>
+            param-type: query
+            docs: |
+              Comma-delimited sort command, each term prefixed `properties.` or
+              `p.` and optionally suffixed `:asc` or `:desc`.
+          snapshot:
+            type: optional<boolean>
+            param-type: query
+            docs: Freeze the collection at the size it had when paging began
         returns: ListObjectsResponse
 
       getObject:
@@ -193,6 +211,14 @@ services:
           primaryKey:
             type: string
             param-type: path
+          select:
+            type: optional<list<string>>
+            param-type: query
+            docs: Property names to return; every property when omitted
+          excludeRid:
+            type: optional<boolean>
+            param-type: query
+            docs: Withhold the object's resource identifier from the response
         returns: OntologyObject
 
       createObject:
@@ -252,6 +278,10 @@ services:
           ontologyRid:
             type: Rid
             param-type: path
+          executeInMemoryOnly:
+            type: optional<boolean>
+            param-type: query
+            docs: Require the request to be resolved without heavier computation
           body:
             type: LoadObjectsRequest
             param-type: body
@@ -266,6 +296,10 @@ services:
           ontologyRid:
             type: Rid
             param-type: path
+          executeInMemoryOnly:
+            type: optional<boolean>
+            param-type: query
+            docs: Require the request to be resolved without heavier computation
           body:
             type: AggregateRequest
             param-type: body
@@ -294,6 +328,24 @@ services:
           pageToken:
             type: optional<PageToken>
             param-type: query
+          select:
+            type: optional<list<string>>
+            param-type: query
+            docs: Property names to return; every property when omitted
+          excludeRid:
+            type: optional<boolean>
+            param-type: query
+            docs: Withhold the object's resource identifier from the response
+          orderBy:
+            type: optional<string>
+            param-type: query
+            docs: |
+              Comma-delimited sort command, each term prefixed `properties.` or
+              `p.` and optionally suffixed `:asc` or `:desc`.
+          snapshot:
+            type: optional<boolean>
+            param-type: query
+            docs: Freeze the link set at the size it had when paging began
         returns: ListLinksResponse
 
       createLink:

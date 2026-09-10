@@ -42,6 +42,9 @@ export function createPageResponse<T>(
       ...(cursor.sortValues !== undefined && {
         sortValues: cursor.sortValues,
       }),
+      ...(cursor.snapshotSize !== undefined && {
+        snapshotSize: cursor.snapshotSize,
+      }),
     };
     response.nextPageToken = encodePageToken(nextCursor);
   }

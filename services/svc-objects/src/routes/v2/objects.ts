@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import {
-  type ObjectStore,
+  type ObjectReadWriteStore,
+  type ObjectTypeSchemaSource,
   type StoredObject,
 } from "../../store/object-store.js";
 import {
@@ -12,10 +13,25 @@ import {
 import {
   encodePageToken,
   decodePageToken,
+  type PageCursor,
   type PageToken,
 } from "@openfoundry/pagination";
 import { requirePermission } from "@openfoundry/permissions";
+import { rejectUnsupportedOntologyScoping } from "@openfoundry/errors";
 import { writeAuditLog } from "@openfoundry/db";
+import {
+  applyExcludeRid,
+  applyOrderBy,
+  assertOrderByClauseBody,
+  assertPropertiesExist,
+  assertStringListBody,
+  applySelect as applySelectedProperties,
+  applySnapshot,
+  parseBooleanParam,
+  parseListParam,
+  parseOrderBy,
+  resolveSnapshotSize,
+} from "./query-params.js";
 
 // ---------------------------------------------------------------------------
 // Shared query engine
@@ -47,9 +63,20 @@ interface UpdateBody {
   properties: Record<string, unknown>;
 }
 
+/**
+ * Query parameters of `GET /v2/ontologies/{ontology}/objects/{objectType}`.
+ *
+ * Named so the route generic and the handler read the same declaration; a
+ * second inline copy in the registration would have to be kept in step by hand.
+ */
 interface ListQuery {
   pageSize?: number;
   pageToken?: string;
+  select?: string | string[];
+  orderBy?: string;
+  excludeRid?: string;
+  snapshot?: string;
+  branch?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,23 +208,6 @@ function searchFilterToWhere(f: SearchFilter): WhereClause | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: apply `select` to objects (project only requested properties)
-// ---------------------------------------------------------------------------
-
-function applySelect(objects: StoredObject[], select?: string[]): StoredObject[] {
-  if (!select || select.length === 0) return objects;
-  return objects.map((obj) => {
-    const filtered: Record<string, unknown> = {};
-    for (const prop of select) {
-      if (prop in obj.properties) {
-        filtered[prop] = obj.properties[prop];
-      }
-    }
-    return { ...obj, properties: filtered };
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Helper: paginate an array of objects
 // ---------------------------------------------------------------------------
 
@@ -233,9 +243,18 @@ function paginate(
 
 export async function objectRoutes(
   app: FastifyInstance,
-  opts: { store: ObjectStore; pool?: import("pg").Pool },
+  opts: {
+    store: ObjectReadWriteStore;
+    objectTypeSchema?: ObjectTypeSchemaSource;
+    pool?: import("pg").Pool;
+  },
 ): Promise<void> {
-  const { store, pool } = opts;
+  const { store, objectTypeSchema, pool } = opts;
+
+  const declaredProperties = (ontologyRid: string, objectType: string) =>
+    objectTypeSchema
+      ? objectTypeSchema.propertyNames(ontologyRid, objectType)
+      : store.propertyNames?.(ontologyRid, objectType);
 
   // List objects (paginated)
   app.get<{ Params: ListParams; Querystring: ListQuery }>(
@@ -244,24 +263,111 @@ export async function objectRoutes(
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
-      const { objectType } = request.params;
-      const { pageSize, pageToken } = request.query;
-      return store.listObjects(objectType, {
-        pageSize: pageSize ? Number(pageSize) : undefined,
-        pageToken,
-      });
+      rejectUnsupportedOntologyScoping(request.query);
+      const { ontologyRid, objectType } = request.params;
+      const query = request.query;
+
+      const select = parseListParam(query.select);
+      const orderBy = parseOrderBy(query.orderBy);
+      const excludeRid = parseBooleanParam("excludeRid", query.excludeRid);
+      const snapshot = parseBooleanParam("snapshot", query.snapshot);
+
+      const pageSize = query.pageSize ? Number(query.pageSize) : 100;
+      const cursor: PageCursor = query.pageToken
+        ? decodePageToken(query.pageToken as PageToken)
+        : { offset: 0 };
+
+      const declared = await declaredProperties(ontologyRid, objectType);
+      assertPropertiesExist(objectType, declared, select);
+      assertPropertiesExist(
+        objectType,
+        declared,
+        orderBy?.map((term) => term.property),
+      );
+
+      const project = (page: StoredObject[]) =>
+        applyExcludeRid(applySelectedProperties(page, select), excludeRid);
+
+      // Ordering spans the whole collection and a snapshot has to freeze its
+      // size, so only those two need every object read. A plain listing stays
+      // on the store's paged path, which is a LIMIT/OFFSET against Postgres
+      // rather than one full read of the type per page.
+      if (!orderBy && snapshot !== true && cursor.snapshotSize === undefined) {
+        const result = await store.listObjects(objectType, {
+          pageSize,
+          ...(query.pageToken ? { pageToken: query.pageToken } : {}),
+        });
+        return {
+          data: project(result.data),
+          totalCount: result.totalCount,
+          ...(result.nextPageToken
+            ? { nextPageToken: result.nextPageToken }
+            : {}),
+        };
+      }
+
+      const all = await store.allObjects(objectType);
+
+      // A snapshot listing freezes its view at the size the collection had
+      // when paging began and carries that boundary forward in every token.
+      const snapshotSize = resolveSnapshotSize(
+        snapshot,
+        cursor.snapshotSize,
+        all.length,
+      );
+
+      let objects = applySnapshot(all, snapshotSize);
+      if (orderBy) {
+        objects = applyOrderBy(objects, orderBy);
+      }
+      const totalCount = objects.length;
+
+      const slice = objects.slice(cursor.offset, cursor.offset + pageSize + 1);
+      const hasMore = slice.length > pageSize;
+      const page = hasMore ? slice.slice(0, pageSize) : slice;
+
+      return {
+        data: project(page),
+        totalCount,
+        ...(hasMore
+          ? {
+              nextPageToken: encodePageToken({
+                offset: cursor.offset + pageSize,
+                ...(snapshotSize !== undefined && { snapshotSize }),
+              }),
+            }
+          : {}),
+      };
     },
   );
 
   // Get single object
-  app.get<{ Params: ObjectParams }>(
+  app.get<{
+    Params: ObjectParams;
+    Querystring: { select?: string | string[]; excludeRid?: string; branch?: string };
+  }>(
     "/ontologies/:ontologyRid/objects/:objectType/:primaryKey",
     {
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
-      const { objectType, primaryKey } = request.params;
-      return store.getObject(objectType, primaryKey);
+      rejectUnsupportedOntologyScoping(request.query);
+      const { ontologyRid, objectType, primaryKey } = request.params;
+      const select = parseListParam(request.query.select);
+      const excludeRid = parseBooleanParam("excludeRid", request.query.excludeRid);
+
+      assertPropertiesExist(
+        objectType,
+        await declaredProperties(ontologyRid, objectType),
+        select,
+      );
+
+      const object = await store.getObject(objectType, primaryKey);
+      const [result] = applyExcludeRid(
+        applySelectedProperties([object], select),
+        excludeRid,
+      );
+      return result;
     },
   );
 
@@ -275,8 +381,8 @@ export async function objectRoutes(
       const { objectType } = request.params;
       const { primaryKey, properties } = request.body;
       const upsert = (request.body as unknown as Record<string, unknown>).upsert === true;
-      const obj = upsert && "upsertObject" in store
-        ? await (store as any).upsertObject(objectType, primaryKey, properties)
+      const obj = upsert && store.upsertObject
+        ? await store.upsertObject(objectType, primaryKey, properties)
         : await store.createObject(objectType, primaryKey, properties);
       if (pool) {
         const claims = (request as unknown as Record<string, unknown>).claims as Record<string, unknown> | undefined;
@@ -302,7 +408,7 @@ export async function objectRoutes(
     async (request) => {
       const { objectType, primaryKey } = request.params;
       const { properties } = request.body;
-      return store.updateObject(objectType, primaryKey, properties);
+      return await store.updateObject(objectType, primaryKey, properties);
     },
   );
 
@@ -314,7 +420,7 @@ export async function objectRoutes(
     },
     async (request, reply) => {
       const { objectType, primaryKey } = request.params;
-      store.deleteObject(objectType, primaryKey);
+      await store.deleteObject(objectType, primaryKey);
       if (pool) {
         const claims = (request as unknown as Record<string, unknown>).claims as Record<string, unknown> | undefined;
         writeAuditLog(pool, {
@@ -339,17 +445,40 @@ export async function objectRoutes(
   //   eq, gt, gte, lt, lte, isNull, contains, not, and, or,
   //   startsWith, containsAnyTerm, containsAllTerms
   // ---------------------------------------------------------------------------
-  app.post<{ Params: ListParams; Body: SearchJsonQueryV2 }>(
+  app.post<{
+    Params: ListParams;
+    Querystring: { executeInMemoryOnly?: string; branch?: string };
+    Body: SearchJsonQueryV2;
+  }>(
     "/ontologies/:ontologyRid/objects/:objectType/search",
     {
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
       const { objectType } = request.params;
-      const { where, orderBy, pageSize = 100, pageToken, select } = request.body;
+      // `executeInMemoryOnly` asks the service to fail rather than fall back to
+      // heavier computation. This handler resolves the whole search from the
+      // in-memory object store, so the guarantee always holds and the flag can
+      // only fail validation.
+      parseBooleanParam("executeInMemoryOnly", request.query.executeInMemoryOnly);
+      const { where, pageSize = 100, pageToken } = request.body;
+      const select = assertStringListBody("select", request.body.select);
+      const orderBy = assertOrderByClauseBody("orderBy", request.body.orderBy);
+
+      const declared = await declaredProperties(
+        request.params.ontologyRid,
+        objectType,
+      );
+      assertPropertiesExist(objectType, declared, select);
+      assertPropertiesExist(
+        objectType,
+        declared,
+        orderBy ? [orderBy.field] : undefined,
+      );
 
       // Start with all objects of this type
-      let objects = store.allObjects(objectType);
+      let objects = await store.allObjects(objectType);
 
       // Apply where filter
       if (where) {
@@ -382,7 +511,7 @@ export async function objectRoutes(
       const page = paginate(objects, pageSize, pageToken);
 
       // Apply select (property projection)
-      const data = applySelect(page.data, select);
+      const data = applySelectedProperties(page.data, select);
 
       return {
         data,
@@ -406,17 +535,22 @@ export async function objectRoutes(
   //
   // Returns: { data: [{ group: {...}, metrics: [{...}] }] }
   // ---------------------------------------------------------------------------
-  app.post<{ Params: ListParams; Body: AggregateBody }>(
+  app.post<{
+    Params: ListParams;
+    Querystring: { branch?: string };
+    Body: AggregateBody;
+  }>(
     "/ontologies/:ontologyRid/objects/:objectType/aggregate",
     {
       preHandler: requirePermission("objects:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
       const { objectType } = request.params;
       const { aggregation: aggregations, where, groupBy } = request.body;
 
       // Start with all objects of this type
-      let objects = store.allObjects(objectType);
+      let objects = await store.allObjects(objectType);
 
       // Apply optional where filter
       if (where) {

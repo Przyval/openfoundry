@@ -3,7 +3,17 @@ import type pg from "pg";
 import { generateRid } from "@openfoundry/rid";
 import { notFound, conflict } from "@openfoundry/errors";
 import type { Filter } from "@openfoundry/object-set";
-import type { StoredObject, OrderByClause } from "./object-store.js";
+import {
+  decodePageToken,
+  encodePageToken,
+  type PageToken,
+} from "@openfoundry/pagination";
+import type {
+  ListOptions,
+  ListResult,
+  StoredObject,
+  OrderByClause,
+} from "./object-store.js";
 
 // ---------------------------------------------------------------------------
 // Row shape from the database
@@ -243,12 +253,22 @@ export class PgObjectStore {
     return rowToStoredObject(rows[0], objectType);
   }
 
+  /**
+   * Returns one page of a type, matching `ObjectStore.listObjects`.
+   *
+   * Sharing the signature is what lets a listing that needs no whole-collection
+   * view stay on `LIMIT`/`OFFSET` against either backend instead of reading the
+   * entire object type on every page.
+   */
   async listObjects(
     objectType: string,
-    pageSize = 100,
-    offset = 0,
-  ): Promise<{ items: StoredObject[]; total: number }> {
+    options: ListOptions = {},
+  ): Promise<ListResult> {
     const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+    const pageSize = options.pageSize ?? 100;
+    const offset = options.pageToken
+      ? decodePageToken(options.pageToken as PageToken).offset
+      : 0;
 
     const countResult = await this.pool.query<{ total: number }>({
       text: `SELECT COUNT(*)::int AS total FROM objects WHERE object_type_rid = $1`,
@@ -258,15 +278,132 @@ export class PgObjectStore {
     const { rows } = await this.pool.query<ObjectRow>({
       text: `SELECT * FROM objects
              WHERE object_type_rid = $1
-             ORDER BY created_at ASC
+             ORDER BY created_at ASC, primary_key ASC
              LIMIT $2 OFFSET $3`,
       values: [objectTypeRid, pageSize, offset],
     });
 
-    return {
-      items: rows.map((r) => rowToStoredObject(r, objectType)),
-      total: countResult.rows[0].total,
+    const totalCount = countResult.rows[0].total;
+    const result: ListResult = {
+      data: rows.map((r) => rowToStoredObject(r, objectType)),
+      totalCount,
     };
+    if (offset + rows.length < totalCount) {
+      result.nextPageToken = encodePageToken({ offset: offset + pageSize });
+    }
+    return result;
+  }
+
+  /**
+   * Reads the property names declared on an object type.
+   *
+   * `object_types.properties` is the authoritative declaration; a property it
+   * lists is real whether or not any row has populated it. Returns `undefined`
+   * when the type is unknown or declares nothing, so callers make no claim
+   * about a property name they have no declaration for.
+   *
+   * Scoped by ontology because `object_types` is unique on
+   * `(ontology_rid, api_name)`: two ontologies may each declare `Employee`
+   * with different properties, and an unscoped lookup would answer with
+   * whichever row the database happened to yield first.
+   *
+   * Known divergence: this lookup keys on the requested ontology, but
+   * `resolveObjectTypeRid` - which every data read goes through - still
+   * resolves the object type with no ontology predicate. Where two ontologies
+   * declare a same-named object type, a `select` that one of them legitimately
+   * declares can therefore answer 404 PropertiesNotFound while the rows that
+   * would have been served belong to the other. It is not closed here because
+   * closing it means carrying an ontology through all nine data methods of the
+   * store interface, of this store and of the in-memory `ObjectStore`, across
+   * seventeen call sites - and the in-memory store is ontology-blind by
+   * design, `Map<objectType, Map<primaryKey, StoredObject>>` persisted to disk
+   * in that shape, so it would need re-keying and an on-disk migration. That
+   * is architecture work, filed separately.
+   */
+  async propertyNames(
+    ontologyRid: string,
+    objectType: string,
+  ): Promise<ReadonlySet<string> | undefined> {
+    return this.withTenant(async (client) => {
+      const { rows } = await client.query<{ properties: Record<string, unknown> | null }>({
+        text: `SELECT properties FROM object_types
+               WHERE ontology_rid = $1 AND api_name = $2
+               LIMIT 1`,
+        values: [ontologyRid, objectType],
+      });
+
+      const declared = rows[0]?.properties;
+      if (!declared || typeof declared !== "object") return undefined;
+      const names = Object.keys(declared);
+      return names.length > 0 ? new Set(names) : undefined;
+    });
+  }
+
+  /**
+   * Reads the object type a link type points at from the link type's own
+   * declaration, so the answer does not depend on which links happen to exist.
+   */
+  async linkTargetObjectType(
+    ontologyRid: string,
+    objectType: string,
+    linkType: string,
+  ): Promise<string | undefined> {
+    return this.withTenant(async (client) => {
+      const { rows } = await client.query<{ linked_object_type_api_name: string }>({
+        text: `SELECT linked_object_type_api_name FROM link_types
+               WHERE ontology_rid = $1 AND object_type_api_name = $2 AND api_name = $3
+               LIMIT 1`,
+        values: [ontologyRid, objectType, linkType],
+      });
+      return rows[0]?.linked_object_type_api_name;
+    });
+  }
+
+  /**
+   * Gets objects by explicit primary keys, matching
+   * `ObjectStore.getObjectsByKeys`. Keys with no row are simply absent from
+   * the result rather than an error.
+   */
+  async getObjectsByKeys(
+    objectType: string,
+    primaryKeys: string[],
+  ): Promise<StoredObject[]> {
+    if (primaryKeys.length === 0) return [];
+    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+
+    const { rows } = await this.pool.query<ObjectRow>({
+      text: `SELECT * FROM objects
+             WHERE object_type_rid = $1 AND primary_key = ANY($2::text[])`,
+      values: [objectTypeRid, primaryKeys],
+    });
+
+    const byKey = new Map(rows.map((r) => [r.primary_key, r]));
+    return primaryKeys
+      .map((key) => byKey.get(key))
+      .filter((row): row is ObjectRow => row !== undefined)
+      .map((row) => rowToStoredObject(row, objectType));
+  }
+
+  /**
+   * Returns every object of a type, matching `ObjectStore.allObjects`.
+   *
+   * The read endpoints resolve `orderBy`, `snapshot` and `totalCount` over the
+   * whole collection, so they need the same unpaginated view from either
+   * backend. Ordering is by insertion time with the primary key as a
+   * tiebreaker, because `created_at` alone collides for rows written in the
+   * same instant and would leave paging offsets unstable.
+   */
+  async allObjects(objectType: string): Promise<StoredObject[]> {
+    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+
+    const { rows } = await this.pool.query<ObjectRow>({
+      text: `SELECT * FROM objects
+             WHERE object_type_rid = $1
+             ORDER BY created_at ASC, primary_key ASC`,
+      values: [objectTypeRid],
+    });
+
+    return rows.map((r) => rowToStoredObject(r, objectType));
   }
 
   async updateObject(

@@ -34,6 +34,76 @@ export interface ListResult {
   totalCount: number;
 }
 
+/**
+ * Where the property names declared on an object type are read from.
+ *
+ * The declaration, not the data, is what says whether a property exists: a
+ * property an object type lists but no object has populated is still a real
+ * property and must be selectable. `undefined` means no declaration is
+ * available for that type, in which case nothing can be said about a property
+ * name and no existence check may be made.
+ */
+export interface ObjectTypeSchemaSource {
+  propertyNames(
+    ontologyRid: string,
+    objectType: string,
+  ): ReadonlySet<string> | undefined | Promise<ReadonlySet<string> | undefined>;
+
+  /**
+   * The object type a link type points at, per the link type's own
+   * declaration. `undefined` when the link type is not declared, which - like
+   * an undeclared object type - means nothing can be checked.
+   */
+  linkTargetObjectType(
+    ontologyRid: string,
+    objectType: string,
+    linkType: string,
+  ): string | undefined | Promise<string | undefined>;
+}
+
+/**
+ * The object-store surface the v2 object routes depend on.
+ *
+ * Both the in-memory `ObjectStore` and the Postgres-backed `PgObjectStore`
+ * satisfy it. Every method may answer synchronously or with a promise, so a
+ * handler that awaits its result is correct against either backend - which is
+ * what keeps a Postgres deployment from silently serving the unresolved
+ * promise instead of the object.
+ */
+export interface ObjectReadWriteStore {
+  allObjects(objectType: string): StoredObject[] | Promise<StoredObject[]>;
+  listObjects(
+    objectType: string,
+    options?: ListOptions,
+  ): ListResult | Promise<ListResult>;
+  getObjectsByKeys(
+    objectType: string,
+    primaryKeys: string[],
+  ): StoredObject[] | Promise<StoredObject[]>;
+  propertyNames?: ObjectTypeSchemaSource["propertyNames"];
+  linkTargetObjectType?: ObjectTypeSchemaSource["linkTargetObjectType"];
+  getObject(
+    objectType: string,
+    primaryKey: string,
+  ): StoredObject | Promise<StoredObject>;
+  createObject(
+    objectType: string,
+    primaryKey: string,
+    properties: Record<string, unknown>,
+  ): StoredObject | Promise<StoredObject>;
+  upsertObject?(
+    objectType: string,
+    primaryKey: string,
+    properties: Record<string, unknown>,
+  ): StoredObject | Promise<StoredObject>;
+  updateObject(
+    objectType: string,
+    primaryKey: string,
+    properties: Record<string, unknown>,
+  ): StoredObject | Promise<StoredObject>;
+  deleteObject(objectType: string, primaryKey: string): void | Promise<void>;
+}
+
 export interface AggregationResult {
   type: string;
   property?: string;

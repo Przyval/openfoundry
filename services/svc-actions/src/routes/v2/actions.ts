@@ -1,5 +1,9 @@
 import type { FastifyInstance } from "fastify";
-import { notFound, invalidArgument } from "@openfoundry/errors";
+import {
+  notFound,
+  invalidArgument,
+  rejectUnsupportedOntologyScoping,
+} from "@openfoundry/errors";
 import { requirePermission } from "@openfoundry/permissions";
 import type { ActionRegistry } from "../../store/action-registry.js";
 import type { ActionLog } from "../../store/action-log.js";
@@ -24,21 +28,9 @@ interface ExecutionParams {
   };
 }
 
-interface ApplyBody {
-  Body: {
-    parameters: Record<string, unknown>;
-  };
-}
-
 interface ValidateBody {
   Body: {
     parameters: Record<string, unknown>;
-  };
-}
-
-interface BatchBody {
-  Body: {
-    requests: Array<{ parameters: Record<string, unknown> }>;
   };
 }
 
@@ -67,12 +59,21 @@ export async function actionRoutes(
   // -----------------------------------------------------------------------
   // POST /api/v2/ontologies/:ontologyRid/actions/:actionApiName/apply
   // -----------------------------------------------------------------------
-  app.post<ActionParams & ApplyBody>(
+  app.post<{
+    Params: { ontologyRid: string; actionApiName: string };
+    Querystring: {
+      branch?: string;
+      scenarioRid?: string;
+      transactionId?: string;
+    };
+    Body: { parameters: Record<string, unknown> };
+  }>(
     "/ontologies/:ontologyRid/actions/:actionApiName/apply",
     {
       preHandler: requirePermission("actions:execute"),
     },
     async (request, reply) => {
+      rejectUnsupportedOntologyScoping(request.query);
       const { ontologyRid, actionApiName } = request.params;
       const { parameters = {} } = request.body ?? {};
 
@@ -160,12 +161,17 @@ export async function actionRoutes(
   // -----------------------------------------------------------------------
   // POST /api/v2/ontologies/:ontologyRid/actions/:actionApiName/applyBatch
   // -----------------------------------------------------------------------
-  app.post<ActionParams & BatchBody>(
+  app.post<{
+    Params: { ontologyRid: string; actionApiName: string };
+    Querystring: { branch?: string; scenarioRid?: string };
+    Body: { requests: Array<{ parameters: Record<string, unknown> }> };
+  }>(
     "/ontologies/:ontologyRid/actions/:actionApiName/applyBatch",
     {
       preHandler: requirePermission("actions:execute"),
     },
     async (request, reply) => {
+      rejectUnsupportedOntologyScoping(request.query);
       const { ontologyRid, actionApiName } = request.params;
       const { requests } = request.body ?? {};
 
