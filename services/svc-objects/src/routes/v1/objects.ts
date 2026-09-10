@@ -406,6 +406,9 @@ export async function objectRoutesV1(
       // `ranges`, `fixedWidth` and `duration` would silently become an exact
       // grouping, which answers a different question from the one asked.
       const groupBy = body.groupBy ?? [];
+      if (!Array.isArray(groupBy)) {
+        throw invalidArgument("groupBy", "must be a list of groupings");
+      }
       for (const grouping of groupBy) {
         if (grouping?.type !== "exact") {
           throw invalidArgument(
@@ -437,11 +440,17 @@ export async function objectRoutesV1(
         );
       }
 
-      const aggregationDefs: AggregationDef[] = aggregations.map((aggregation) => ({
-        type: SUPPORTED_AGGREGATIONS.get(aggregation.type)!,
-        field: aggregation.field,
-        name: aggregation.name ?? aggregation.type,
-      }));
+      // The engine keys its metrics by `name`, so two aggregations that omit
+      // `name` and differ only in `field` would collide and report the last
+      // one's value for both. The key is therefore the request position, which
+      // is unique by construction; the caller still reads back the v1 name.
+      const aggregationDefs: AggregationDef[] = aggregations.map(
+        (aggregation, index) => ({
+          type: SUPPORTED_AGGREGATIONS.get(aggregation.type)!,
+          field: aggregation.field,
+          name: String(index),
+        }),
+      );
 
       const results = queryEngine.aggregate(
         objects as unknown as Record<string, unknown>[],
@@ -453,10 +462,10 @@ export async function objectRoutesV1(
 
       const data: V1AggregateObjectsResponseItem[] = results.map((result) => ({
         group: result.group,
-        metrics: aggregations.map((aggregation) => {
-          const name = aggregation.name ?? aggregation.type;
-          return { name, value: result.metrics[name] };
-        }),
+        metrics: aggregations.map((aggregation, index) => ({
+          name: aggregation.name ?? aggregation.type,
+          value: result.metrics[String(index)],
+        })),
       }));
 
       return { data };

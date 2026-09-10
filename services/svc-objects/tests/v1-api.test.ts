@@ -395,3 +395,47 @@ describe("v1 search orderBy validation", () => {
     expect(res.json().parameters.param).toBe("orderBy.fields");
   });
 });
+
+describe("v1 aggregate metric names", () => {
+  it("keeps two same-type aggregations on different fields apart", async () => {
+    // `name` is optional in v1 `AggregationV1`, so both of these are named
+    // "sum" on the way out; they must still carry their own field's total.
+    const res = await app.inject({
+      method: "POST",
+      url: `${BASE}/objects/Employee/aggregate`,
+      payload: {
+        aggregation: [
+          { type: "sum", field: "salary" },
+          { type: "max", field: "salary" },
+          { type: "sum", field: "headcount" },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toEqual([
+      {
+        group: {},
+        metrics: [
+          { name: "sum", value: 390000 },
+          { name: "max", value: 140000 },
+          { name: "sum", value: 0 },
+        ],
+      },
+    ]);
+  });
+
+  it("reports a non-list groupBy as a 400, not a 500", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `${BASE}/objects/Employee/aggregate`,
+      payload: {
+        aggregation: [{ type: "count" }],
+        groupBy: { field: "department", type: "exact" },
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().parameters.param).toBe("groupBy");
+  });
+});

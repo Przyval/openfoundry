@@ -70,9 +70,13 @@ function singularValueType(def: PropertyDef): string {
  * The v1 `ValueType` of a property definition.
  *
  * A repeated property - `ARRAY` or `SET` multiplicity - is `Array<T>`; v1 has
- * no distinct set type.
+ * no distinct set type. Only those two spellings repeat: the v2 create route
+ * stores a property declaration verbatim, so `multiplicity` is often absent,
+ * and an absent one is a single value rather than an unknown one.
  */
 export function toV1ValueType(def: PropertyDef): string {
   const singular = singularValueType(def);
-  return def.multiplicity === "SINGLE" ? singular : `Array<${singular}>`;
+  return def.multiplicity === "ARRAY" || def.multiplicity === "SET"
+    ? `Array<${singular}>`
+    : singular;
 }

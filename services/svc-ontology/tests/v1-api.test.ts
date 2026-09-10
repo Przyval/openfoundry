@@ -274,3 +274,32 @@ describe("v1 query types", () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+describe("v1 value types without a declared multiplicity", () => {
+  it("labels a property stored without `multiplicity` as single-valued", async () => {
+    // The v2 create route stores a property declaration verbatim, so a client
+    // that omits `multiplicity` leaves the field absent in the store.
+    store.createObjectType(ontologyRid, {
+      apiName: "Invoice",
+      displayName: "Invoice",
+      primaryKeyApiName: "id",
+      primaryKeyType: "STRING",
+      titlePropertyApiName: "id",
+      properties: {
+        id: { type: "STRING", nullable: false },
+        lineItems: { type: "STRING", nullable: true, multiplicity: "ARRAY" },
+      },
+      implements: [],
+      status: "ACTIVE",
+    } as never);
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/ontologies/${ontologyRid}/objectTypes/Invoice`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().properties.id.baseType).toBe("String");
+    expect(res.json().properties.lineItems.baseType).toBe("Array<String>");
+  });
+});

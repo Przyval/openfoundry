@@ -314,3 +314,26 @@ describe("v1 create dataset validation", () => {
     expect(res.json().parameters.param).toBe("name");
   });
 });
+
+describe("v1 datasets with no parent folder", () => {
+  it("refuses to serve a dataset the v1 model cannot represent", async () => {
+    // The v2 create route treats `parentFolderRid` as optional, where v1
+    // `Dataset` requires it.
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v2/datasets",
+      payload: { name: "orphan" },
+    });
+    expect(created.statusCode).toBe(201);
+    const rid = created.json().rid;
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/datasets/${rid}`,
+    });
+
+    expect(res.statusCode).not.toBe(200);
+    expect(res.json().errorName).toBe("DatasetNotRepresentableInV1");
+    expect(res.json().parameters).toMatchObject({ datasetRid: rid });
+  });
+});
