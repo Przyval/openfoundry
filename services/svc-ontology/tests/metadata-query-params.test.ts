@@ -246,6 +246,7 @@ describe("Ontology metadata — branch", () => {
   const endpoints = () => [
     `/api/v2/ontologies/${ontologyRid}/objectTypes`,
     `/api/v2/ontologies/${ontologyRid}/objectTypes/Employee`,
+    `/api/v2/ontologies/${ontologyRid}/objectTypes/Employee/outgoingLinkTypes`,
     `/api/v2/ontologies/${ontologyRid}/actionTypes`,
     `/api/v2/ontologies/${ontologyRid}/interfaceTypes`,
     `/api/v2/ontologies/${ontologyRid}/queryTypes`,

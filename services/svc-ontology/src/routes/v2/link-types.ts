@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { LinkTypeDefinition } from "@openfoundry/ontology-schema";
 import type { OntologyStore } from "../../store/ontology-store.js";
 import { requirePermission } from "@openfoundry/permissions";
+import { rejectUnsupportedOntologyScoping } from "@openfoundry/errors";
 import { paginateArray } from "./pagination-helpers.js";
 
 /**
@@ -79,6 +80,7 @@ export async function linkTypeRoutes(
       preHandler: requirePermission("ontology:read"),
     },
     async (request) => {
+      rejectUnsupportedOntologyScoping(request.query);
       const { ontologyRid, objectTypeApiName } = request.params;
       const all = await store.listLinkTypesForObjectType(
         ontologyRid,
