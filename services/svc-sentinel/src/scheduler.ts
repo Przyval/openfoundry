@@ -101,11 +101,11 @@ export class Scheduler {
         const results = await this.effectExecutor.executeAll(monitor.effects, context);
 
         // Log execution
-        this.executionLog.logExecution({
-          monitorRid: monitor.rid,
+        const execution = this.executionLog.startExecution(monitor.rid, {
           triggerType: "SCHEDULE",
-          effectResults: results,
+          message: alertMessage,
         });
+        this.executionLog.completeExecution(execution.rid, results);
 
         console.log(`[Scheduler] Fired: ${monitor.name} → ${results.length} effects`);
       } catch (err) {

@@ -122,10 +122,13 @@ export function useAggregation(options: AggregationOptions): AggregationResult {
 
       if (!res.ok) throw new Error(`API error: ${res.status}`);
       const result = await res.json();
-      const items = (result.data ?? []).map((d: Record<string, unknown>) => ({
-        group: d.group as string | undefined,
-        value: (d.value ?? d.metrics?.count ?? 0) as number,
-      }));
+      const items = (result.data ?? []).map((d: Record<string, unknown>) => {
+        const metrics = d.metrics as Record<string, unknown> | undefined;
+        return {
+          group: d.group as string | undefined,
+          value: (d.value ?? metrics?.count ?? 0) as number,
+        };
+      });
       setData(items);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Aggregation failed");

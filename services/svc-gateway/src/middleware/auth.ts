@@ -119,7 +119,7 @@ export async function authPlugin(
       request.claims = claims;
 
       // Extract tenant org from JWT claims for RLS and per-tenant rate limiting
-      const orgClaim = (claims as Record<string, unknown>).org;
+      const orgClaim = claims.org;
       if (typeof orgClaim === "string" && orgClaim.length > 0) {
         request.orgRid = orgClaim;
       }

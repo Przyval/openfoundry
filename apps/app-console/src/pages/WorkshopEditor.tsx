@@ -368,7 +368,11 @@ function ConfigPanel({ widget, isOpen, onClose, onSave, onDelete }: ConfigPanelP
               <HTMLSelect
                 fill
                 value={draft.config.aggregationType ?? "count"}
-                onChange={(e) => updateConfig({ aggregationType: e.target.value })}
+                onChange={(e) =>
+                  updateConfig({
+                    aggregationType: e.target.value as WidgetConfig["aggregationType"],
+                  })
+                }
               >
                 <option value="count">Count</option>
                 <option value="sum">Sum</option>
