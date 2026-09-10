@@ -26,16 +26,29 @@ export async function auditRoutes(
       user?: string;
       dateFrom?: string;
       dateTo?: string;
-      pageSize?: string;
+      pageSize?: number;
       pageToken?: string;
     };
   }>("/admin/audit", {
     preHandler: requirePermission("admin:manage"),
+    schema: {
+      querystring: {
+        type: "object",
+        properties: {
+          action: { type: "string" },
+          user: { type: "string" },
+          dateFrom: { type: "string" },
+          dateTo: { type: "string" },
+          pageSize: { type: "integer", minimum: 1 },
+          pageToken: { type: "string" },
+        },
+      },
+    },
   }, async (request) => {
     const { action, user, dateFrom, dateTo, pageSize, pageToken } = request.query;
 
     const req = normalizePageRequest({
-      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
+      pageSize,
       pageToken: pageToken as PageToken | undefined,
     });
     const cursor: PageCursor = req.pageToken

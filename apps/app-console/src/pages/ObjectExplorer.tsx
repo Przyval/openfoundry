@@ -198,9 +198,8 @@ export default function ObjectExplorer() {
   const currentToken = pageTokens[pageTokens.length - 1] ?? "";
 
   // -- Fetch ontologies -----------------------------------------------------
-  const { data: ontologiesData } = useApi<OntologyListResponse>(
-    "/api/v2/ontologies",
-  );
+  const { data: ontologiesData, error: ontologiesError } =
+    useApi<OntologyListResponse>("/api/v2/ontologies");
   const ontologies = ontologiesData?.data ?? [];
 
   // -- Auto-select ontology when there's exactly one --------------------------
@@ -211,7 +210,11 @@ export default function ObjectExplorer() {
   }, [ontologies, ontologyRid]);
 
   // -- Fetch full metadata for object types ---------------------------------
-  const { data: fullMetadata, loading: metadataLoading } = useApi<FullMetadataResponse>(
+  const {
+    data: fullMetadata,
+    loading: metadataLoading,
+    error: metadataError,
+  } = useApi<FullMetadataResponse>(
     ontologyRid ? `/api/v2/ontologies/${ontologyRid}/fullMetadata` : "",
   );
 
@@ -716,7 +719,15 @@ export default function ObjectExplorer() {
         </FormGroup>
       </div>
 
-      {!ontologyRid ? (
+      {ontologiesError ? (
+        <Callout
+          intent={Intent.DANGER}
+          icon="error"
+          title="Could not load ontologies"
+        >
+          {ontologiesError.message}
+        </Callout>
+      ) : !ontologyRid ? (
         <NonIdealState
           icon="search"
           title="Select an ontology"
@@ -724,6 +735,14 @@ export default function ObjectExplorer() {
         />
       ) : metadataLoading ? (
         <Spinner size={40} />
+      ) : metadataError ? (
+        <Callout
+          intent={Intent.DANGER}
+          icon="error"
+          title="Could not load object types"
+        >
+          {metadataError.message}
+        </Callout>
       ) : objectTypes.length === 0 ? (
         <NonIdealState
           icon="inbox-search"

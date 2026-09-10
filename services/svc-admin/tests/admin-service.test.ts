@@ -899,6 +899,16 @@ describe("Group members", () => {
     expect(res.json().errorName).toBe("ValidationError");
   });
 
+  it("POST groupMembers/remove returns GroupNotFound for an unknown group", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v2/admin/groups/ri.multipass.main.group.nope/groupMembers/remove",
+      payload: { principalIds: [userRid] },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().errorName).toBe("GroupNotFound");
+  });
+
   it("POST groupMembers/remove returns 404 for a non-member", async () => {
     const res = await app.inject({
       method: "POST",
@@ -955,6 +965,27 @@ describe("Audit log", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ data: [] });
+  });
+
+  it("rejects a non-numeric pageSize with 400 rather than failing downstream", async () => {
+    const store = new RecordingAuditStore([auditEntry(1)]);
+    const auditApp = await createServer({
+      config: TEST_CONFIG,
+      userStore: new UserStore(false),
+      groupStore: new GroupStore(),
+      auditStore: store,
+    });
+
+    const res = await auditApp.inject({
+      method: "GET",
+      url: "/api/v2/admin/audit?pageSize=abc",
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().errorName).toBe("ValidationError");
+    // The store must never be asked for a NaN limit.
+    expect(store.calls).toHaveLength(0);
+
+    await auditApp.close();
   });
 
   it("returns audit entries as a page", async () => {

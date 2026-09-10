@@ -2,8 +2,10 @@ import { useCallback, useState } from "react";
 import {
   Button,
   ButtonGroup,
+  Callout,
   HTMLTable,
   InputGroup,
+  Intent,
   NonIdealState,
   Spinner,
   Tag,
@@ -54,7 +56,7 @@ export default function AuditLog() {
   params.set("pageSize", "25");
 
   const qs = params.toString();
-  const { data, loading } = useApi<AuditLogResponse>(
+  const { data, loading, error } = useApi<AuditLogResponse>(
     `/api/v2/admin/audit${qs ? `?${qs}` : ""}`,
   );
 
@@ -146,6 +148,14 @@ export default function AuditLog() {
       {/* Content */}
       {loading ? (
         <Spinner size={40} />
+      ) : error ? (
+        <Callout
+          intent={Intent.DANGER}
+          icon="error"
+          title="Could not load the audit log"
+        >
+          {error.message}
+        </Callout>
       ) : entries.length === 0 ? (
         <NonIdealState
           icon="document"

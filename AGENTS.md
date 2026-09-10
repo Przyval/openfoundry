@@ -81,8 +81,9 @@ Several pages still pair a bodyless `fetch` with that header.
 Services serialize identifiers as `rid` while the console reads Foundry's `id`.
 `svc-admin` emits both for groups, but the mismatch is unfixed elsewhere, and a page whose row key is `undefined` fails silently rather than erroring.
 
-Setting `DATABASE_URL` swaps svc-admin onto `PgUserStore` / `PgGroupStore`, whose methods are async while the user and group routes still call them synchronously, so every one of those routes 500s in that mode.
-The audit route is the exception; it awaits.
+Setting `DATABASE_URL` swaps svc-admin onto `PgUserStore` / `PgGroupStore`, whose methods are async.
+Every user route, plus the group routes that create, read, list, delete a group and add or remove a single member (`groups.ts` `/admin/groups*` and `/admin/groups/:groupRid/members*` except the member list), still calls them synchronously and so 500s in that mode.
+The audit route, `GET /admin/groups/:groupRid/members` and all three `groupMembers` routes await their store calls and work in both modes.
 
 `app.css` declares `@layer blueprint, app`, but `main.tsx` imports Blueprint's stylesheets unlayered, and unlayered rules beat every layer no matter how specific the selector.
 A rule that has to override Blueprint therefore has to sit outside `@layer app`; the navbar override at the end of `app.css` is the worked example.

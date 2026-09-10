@@ -192,8 +192,11 @@ export async function groupRoutes(
     preHandler: requirePermission("admin:manage"),
     schema: { body: principalIdsBody },
   }, async (request, reply) => {
+    const { groupRid } = request.params;
+
+    await groupStore.getMembers(groupRid);
     for (const principalId of request.body.principalIds) {
-      await groupStore.removeMember(request.params.groupRid, principalId);
+      await groupStore.removeMember(groupRid, principalId);
     }
     reply.status(204);
     return;
