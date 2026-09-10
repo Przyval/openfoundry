@@ -68,6 +68,18 @@ Scoping the store's type resolution is separate architecture work, not a patch.
 There are no ontology branches, scenarios or ontology transactions - every `branch` in this repo is a *dataset* branch, and the console's Scenarios page persists nothing.
 The v2 ontology endpoints therefore reject any `branch`, `scenarioRid` or `transactionId` value rather than serving the only state there is; `packages/errors/src/ontology-scoping.ts` is the single place that policy lives.
 
+## Serving both API versions
+
+`/api/v1` and `/api/v2` are different APIs, not one API behind two prefixes.
+The models diverge exactly where a blind alias would hurt: v1 `Branch` is keyed `branchId` where v2 uses `name`, v1 `OntologyObject` nests values under `properties` while v2 is a bare property map, v1 `ObjectType.primaryKey` is a list, and v1 `ApplyActionResponse` declares no fields at all.
+Each service keeps its v1 wire shapes in `services/*/src/routes/v1/serializers.ts`, projected from the store rather than from whatever the neighbouring v2 route happens to emit, and `services/svc-objects/src/routes/v1/search-query.ts` does the same for the v1 filter grammar - whose `contains` tests array membership where the shared query engine's tests a substring.
+Check `foundry_sdk/v1/*/models.py` and `foundry_sdk/v2/*/models.py` in the official Python SDK before adding to either version.
+Operations left unserved are recorded where they would have gone; `services/svc-datasets/src/routes/v1/files.ts` is the worked example.
+
+Fastify hands a plugin the options object it was registered with, `prefix` included.
+Passing that object straight on to a child `app.register` applies the prefix a second time, so the routes land under `/api/v1/api/v1/...` and every request 404s - build a fresh options object for each child.
+No static route scan can see this, so confirm a new route is really reachable with `app.printRoutes()` or an `app.inject` test rather than trusting an inventory of the source.
+
 ## Running the console end to end
 
 `bash start.sh` boots every service plus the console on :3000, but it first kills whatever holds ports 8080-8088, 8092 and 3000 - check those are yours before running it.

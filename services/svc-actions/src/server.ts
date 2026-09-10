@@ -9,6 +9,7 @@ import { PgActionRegistry } from "./store/pg-action-registry.js";
 import { PgActionLog } from "./store/pg-action-log.js";
 import { healthRoutes } from "./routes/health.js";
 import { actionRoutes } from "./routes/v2/actions.js";
+import { v1Routes } from "./routes/v1/index.js";
 import { registerPestControlActions } from "./handlers/index.js";
 
 // ---------------------------------------------------------------------------
@@ -131,6 +132,11 @@ export async function createServer(
     prefix: "/api/v2",
     registry: registry as ActionRegistry,
     log: actionLog as ActionLog,
+  });
+  await app.register(v1Routes, {
+    prefix: "/api/v1",
+    registry,
+    log: actionLog,
   });
 
   return app;

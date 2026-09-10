@@ -10,6 +10,7 @@ import { healthRoutes } from "./routes/health.js";
 import { objectRoutes } from "./routes/v2/objects.js";
 import { objectSetRoutes } from "./routes/v2/object-sets.js";
 import { linkRoutes } from "./routes/v2/links.js";
+import { v1Routes } from "./routes/v1/index.js";
 import { importRoutes } from "./routes/v2/import.js";
 import { semanticSearchRoutes } from "./routes/v2/semantic-search.js";
 
@@ -139,6 +140,12 @@ export async function createServer(
   await app.register(semanticSearchRoutes, {
     prefix: "/api/v2",
     aipServiceUrl: config.aipServiceUrl ?? "http://localhost:8092",
+  });
+  await app.register(v1Routes, {
+    prefix: "/api/v1",
+    store,
+    linkStore,
+    objectTypeSchema: options.objectTypeSchema,
   });
 
   return app;

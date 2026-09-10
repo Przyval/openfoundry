@@ -8,6 +8,7 @@ import { authPlugin } from "./middleware/auth.js";
 import { rateLimitPlugin } from "./rate-limiter.js";
 import { healthRoutes } from "./routes/health.js";
 import { v2Routes } from "./routes/v2/index.js";
+import { v1Routes } from "./routes/v1/index.js";
 import { multipassRoutes } from "./routes/multipass.js";
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,7 @@ export interface CreateServerOptions {
  * 6. Auth middleware (Bearer JWT)
  * 7. Health-check routes
  * 8. API v2 routes
+ * 9. API v1 routes
  */
 export async function createServer(
   options: CreateServerOptions = {},
@@ -156,6 +158,7 @@ export async function createServer(
   // -- Routes -------------------------------------------------------------
   await app.register(healthRoutes);
   await app.register(v2Routes, { prefix: "/api/v2", config });
+  await app.register(v1Routes, { prefix: "/api/v1", config });
   await app.register(multipassRoutes, { prefix: "/multipass" });
 
   return app;

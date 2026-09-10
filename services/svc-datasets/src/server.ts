@@ -11,6 +11,7 @@ import { PgFileStore } from "./store/pg-file-store.js";
 import { PgPipelineStore } from "./store/pg-pipeline-store.js";
 import { healthRoutes } from "./routes/health.js";
 import { v2Routes } from "./routes/v2/index.js";
+import { v1Routes } from "./routes/v1/index.js";
 
 // ---------------------------------------------------------------------------
 // Server factory
@@ -136,6 +137,11 @@ export async function createServer(
     datasetStore: datasetStore as DatasetStore,
     fileStore: fileStore as FileStore,
     pipelineStore: pipelineStore as PipelineStore,
+  });
+  await app.register(v1Routes, {
+    prefix: "/api/v1",
+    datasetStore,
+    fileStore,
   });
 
   return app;

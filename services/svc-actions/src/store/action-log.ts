@@ -124,3 +124,20 @@ export class ActionLog {
     return { data, nextPageToken };
   }
 }
+
+/**
+ * The execution-log surface a route handler may depend on.
+ *
+ * Both the in-memory `ActionLog` and the Postgres-backed `PgActionLog` satisfy
+ * it; every method may answer synchronously or with a promise, so a handler
+ * that awaits it records the execution in either backend rather than leaving
+ * the write floating.
+ */
+export interface ActionExecutionLog {
+  logStart(
+    actionApiName: string,
+    parameters: Record<string, unknown>,
+  ): ActionExecution | Promise<ActionExecution>;
+  logComplete(rid: string, result?: Record<string, unknown>): void | Promise<void>;
+  logFailure(rid: string, error: string): void | Promise<void>;
+}

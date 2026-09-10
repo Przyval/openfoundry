@@ -7,6 +7,7 @@ import { OntologyStore } from "./store/ontology-store.js";
 import { PgOntologyStore } from "./store/pg-ontology-store.js";
 import { healthRoutes } from "./routes/health.js";
 import { v2Routes } from "./routes/v2/index.js";
+import { v1Routes } from "./routes/v1/index.js";
 
 // ---------------------------------------------------------------------------
 // Server factory
@@ -112,6 +113,7 @@ export async function createServer(
   // -- Routes -------------------------------------------------------------
   await app.register(healthRoutes);
   await app.register(v2Routes, { prefix: "/api/v2", store: store as OntologyStore });
+  await app.register(v1Routes, { prefix: "/api/v1", store: store as OntologyStore });
 
   return app;
 }
