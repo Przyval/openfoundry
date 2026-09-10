@@ -30,6 +30,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Start services in background
+        env:
+          # Enables POST /api/v2/auth/signup for tests/integration/tenant-isolation.test.ts.
+          # CI-only: the switch stays off by default everywhere else.
+          OPENFOUNDRY_ALLOW_OPEN_SIGNUP: "1"
         run: |
           # Start all backend services (skip frontend for CI)
           SERVICES=(svc-ontology svc-objects svc-multipass svc-admin svc-actions svc-datasets svc-functions svc-aip svc-gateway)

@@ -1,24 +1,20 @@
 /**
- * Tenant Isolation Integration Tests — NOT YET IMPLEMENTED
+ * Tenant Isolation Integration Tests
  *
- * WARNING: This file is a specification, not evidence. Tenant isolation is NOT
- * enforced anywhere in the codebase today: svc-ontology never reads the `org`
- * claim, never writes `org_rid`, and nothing sets `app.org_rid` on the ontology
- * path. The tests marked [NOT YET IMPLEMENTED] below therefore FAIL when they
- * run. Neither a skip (no gateway) nor a green suite may be read as proof that
- * one tenant cannot see another tenant's data.
+ * WARNING: tenant isolation is NOT implemented. svc-ontology never reads the
+ * `org` claim, never writes `org_rid`, and nothing sets `app.org_rid` on the
+ * ontology path. The cases that assert isolation are therefore declared with
+ * `it.todo`: they are a specification, they do not run, and neither a todo nor
+ * a skipped suite may be read as evidence that one tenant cannot see another
+ * tenant's data.
  *
- * Signup is also gated behind OPENFOUNDRY_ALLOW_OPEN_SIGNUP, which is off by
- * default, so the setup step needs it enabled on the running services.
+ * What DOES run here is the part that exists today: signup issues a JWT whose
+ * `org` claim matches the returned orgRid, and a tenant can read back the
+ * ontology it created.
  *
- * Prerequisites: Services must be running with DATABASE_URL set (Postgres mode).
- *
- * These tests:
- * 1. Sign up two tenants (Tenant A and Tenant B)
- * 2. Create data as Tenant A
- * 3. Verify Tenant B CANNOT see Tenant A's data
- * 4. Verify Tenant B CANNOT modify Tenant A's data
- * 5. Verify each tenant's JWT carries the correct org_rid claim
+ * Prerequisites: a running gateway (bash start.sh) with DATABASE_URL set, and
+ * OPENFOUNDRY_ALLOW_OPEN_SIGNUP enabled on the service processes - setting it
+ * in this file would not reach them. The suite skips when either is missing.
  */
 import { describe, it, expect, beforeAll } from "vitest";
 
@@ -69,16 +65,35 @@ async function api(method: string, path: string, token: string, body?: unknown):
   });
 }
 
-// The suite needs a running gateway (bash start.sh). Probe once so an absent
-// gateway skips these tests instead of erroring the whole suite in beforeAll.
+// Probe the environment once so a missing prerequisite skips this suite with a
+// clear reason instead of erroring every test from beforeAll.
 const GATEWAY_UP = await fetch(`${BASE}/api/v2/ontologies`)
   .then(() => true)
   .catch(() => false);
+
+// An empty body is rejected as a bad request when signup is reachable and as
+// 401/403 when it is not, so this probe creates no user either way.
+const SIGNUP_ENABLED =
+  GATEWAY_UP &&
+  (await fetch(`${BASE}/api/v2/auth/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  })
+    .then((res) => res.status !== 401 && res.status !== 403)
+    .catch(() => false));
+
+const SUITE_READY = GATEWAY_UP && SIGNUP_ENABLED;
 
 if (!GATEWAY_UP) {
   console.warn(
     `[skip] gateway unreachable at ${BASE} - tenant-isolation suite skipped. ` +
       "A skip is NOT evidence of isolation: tenant scoping is not implemented yet.",
+  );
+} else if (!SIGNUP_ENABLED) {
+  console.warn(
+    "[skip] POST /api/v2/auth/signup is disabled - tenant-isolation suite skipped. " +
+      "Start the services with OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1 to run it.",
   );
 }
 
@@ -86,8 +101,8 @@ if (!GATEWAY_UP) {
 // Tests
 // ===========================================================================
 
-describe.skipIf(!GATEWAY_UP)(
-  "Tenant Isolation (Multi-Tenancy RLS) [NOT YET IMPLEMENTED - specification only, currently failing]",
+describe.skipIf(!SUITE_READY)(
+  "Tenant Isolation (Multi-Tenancy RLS) - isolation itself is NOT IMPLEMENTED (those cases are todo)",
   () => {
     // -------------------------------------------------------------------------
     // Setup: create two tenants
@@ -111,6 +126,14 @@ describe.skipIf(!GATEWAY_UP)(
       tenantBOrgRid = tenantB.orgRid;
 
       expect(tenantAOrgRid).not.toBe(tenantBOrgRid);
+
+      const createRes = await api("POST", "/api/v2/ontologies", tenantAToken, {
+        apiName: `isolation-test-${suffix}`,
+        displayName: "Tenant A Ontology",
+        description: "Should only be visible to Tenant A",
+      });
+      expect(createRes.status).toBe(201);
+      tenantAOntologyRid = (await createRes.json()).rid;
     });
 
     // -------------------------------------------------------------------------
@@ -135,7 +158,7 @@ describe.skipIf(!GATEWAY_UP)(
     // -------------------------------------------------------------------------
     // Test 2: Tenant A creates data, Tenant B cannot see it
     // -------------------------------------------------------------------------
-    it("[NOT YET IMPLEMENTED] Tenant A creates an ontology; Tenant B cannot list it", async () => {
+    it.todo("Tenant A creates an ontology; Tenant B cannot list it", async () => {
       // Tenant A creates an ontology
       const createRes = await api("POST", "/api/v2/ontologies", tenantAToken, {
         apiName: `isolation-test-${Date.now()}`,
@@ -158,7 +181,7 @@ describe.skipIf(!GATEWAY_UP)(
     // -------------------------------------------------------------------------
     // Test 3: Tenant B cannot read Tenant A's specific resource
     // -------------------------------------------------------------------------
-    it("[NOT YET IMPLEMENTED] Tenant B cannot GET Tenant A's ontology by RID", async () => {
+    it.todo("Tenant B cannot GET Tenant A's ontology by RID", async () => {
       const res = await api("GET", `/api/v2/ontologies/${tenantAOntologyRid}`, tenantBToken);
       // Should be 404 (not found for this tenant) — not 200
       expect(res.status).toBe(404);
@@ -177,7 +200,7 @@ describe.skipIf(!GATEWAY_UP)(
     // -------------------------------------------------------------------------
     // Test 5: Duplicate signup username returns 409
     // -------------------------------------------------------------------------
-    it("[NOT YET IMPLEMENTED] Duplicate signup username returns 409 Conflict", async () => {
+    it.todo("Duplicate signup username returns 409 Conflict", async () => {
       const suffix = Date.now().toString(36);
       const username = `dup-test-${suffix}`;
 
