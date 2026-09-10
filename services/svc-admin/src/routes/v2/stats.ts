@@ -41,8 +41,8 @@ export async function statsRoutes(
   app.get("/admin/stats", {
     preHandler: requirePermission("admin:manage"),
   }, async (_request) => {
-    const users = userStore.listUsers();
-    const groups = groupStore.listGroups();
+    const users = await userStore.listUsers();
+    const groups = await groupStore.listGroups();
 
     // 1. Get ontologies list to know RIDs
     let ontologiesCount = 0;

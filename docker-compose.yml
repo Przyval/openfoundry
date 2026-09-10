@@ -4,9 +4,11 @@ services:
     environment:
       POSTGRES_DB: openfoundry
       POSTGRES_USER: openfoundry
-      POSTGRES_PASSWORD: openfoundry
+      POSTGRES_PASSWORD: openfoundry_dev
     ports:
-      - "5432:5432"
+      - "5434:5432"   # Exposed for local dev (services run on host, not in Docker)
+    networks:
+      - internal
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/migrate.sql:/docker-entrypoint-initdb.d/01-schema.sql
@@ -20,8 +22,14 @@ services:
     ports:
       - "3000:3000"   # Frontend (Vite)
       - "8080:8080"   # Gateway API
+    # Internal service ports (8081-8092) are NOT exposed to the host.
+    # Only the gateway (8080) and frontend (3000) are accessible externally.
+    # This provides network-level tenant isolation — no direct access to
+    # backend services from outside the Docker network.
+    networks:
+      - internal
     volumes:
-      - openfoundry-data:/tmp/openfoundry-data  # Persist data across restarts
+      - openfoundry-data:/tmp/openfoundry-data
     environment:
       - NODE_ENV=production
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
@@ -31,6 +39,10 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+
+networks:
+  internal:
+    driver: bridge
 
 volumes:
   openfoundry-data:

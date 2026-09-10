@@ -16,7 +16,8 @@ export async function sharedPropertyTypeRoutes(
   }>("/ontologies/:ontologyRid/sharedPropertyTypes", {
     preHandler: requirePermission("ontology:read"),
   }, async (request) => {
-    const all = store.listSharedPropertyTypes(request.params.ontologyRid);
+    const raw = await store.listSharedPropertyTypes(request.params.ontologyRid);
+    const all = Array.isArray(raw) ? raw : (raw as { items: unknown[] }).items ?? [];
     return paginateArray(all, request.query);
   });
 
@@ -27,7 +28,7 @@ export async function sharedPropertyTypeRoutes(
   }>("/ontologies/:ontologyRid/sharedPropertyTypes", {
     preHandler: requirePermission("ontology:write"),
   }, async (request, reply) => {
-    const spt = store.createSharedPropertyType(
+    const spt = await store.createSharedPropertyType(
       request.params.ontologyRid,
       request.body,
     );
@@ -44,7 +45,7 @@ export async function sharedPropertyTypeRoutes(
       preHandler: requirePermission("ontology:read"),
     },
     async (request) => {
-      return store.getSharedPropertyType(
+      return await store.getSharedPropertyType(
         request.params.ontologyRid,
         request.params.apiName,
       );

@@ -23,15 +23,37 @@ export interface DatabaseConfig {
 
 /**
  * Create a `pg.Pool` from the given configuration.
+ * Logs pool utilization metrics every 60 seconds when pool is under pressure.
  */
 export function createPool(config: DatabaseConfig): pg.Pool {
-  return new pg.Pool({
+  const pool = new pg.Pool({
     connectionString: config.connectionString,
     max: config.maxConnections ?? 20,
     idleTimeoutMillis: config.idleTimeoutMs ?? 30_000,
     connectionTimeoutMillis: config.connectionTimeoutMs ?? 5_000,
     ssl: config.ssl ? { rejectUnauthorized: false } : undefined,
   });
+
+  // Pool utilization monitoring — log when pool is under pressure
+  const monitorInterval = setInterval(() => {
+    const waiting = pool.waitingCount;
+    const total = pool.totalCount;
+    const idle = pool.idleCount;
+    const max = config.maxConnections ?? 20;
+
+    if (waiting > 0 || total >= max * 0.8) {
+      console.warn(
+        `[db-pool] total=${total}/${max} idle=${idle} waiting=${waiting}` +
+        (waiting > 0 ? " — REQUESTS QUEUING, consider increasing max" : ""),
+      );
+    }
+  }, 60_000);
+
+  if (monitorInterval.unref) {
+    monitorInterval.unref();
+  }
+
+  return pool;
 }
 
 /**

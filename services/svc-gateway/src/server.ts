@@ -37,6 +37,15 @@ export async function createServer(
 ): Promise<FastifyInstance> {
   const config = options.config ?? loadConfig();
 
+  // -- Production safety: require Postgres -----------------------------------
+  if (config.nodeEnv === "production" && !process.env.DATABASE_URL) {
+    throw new Error(
+      "DATABASE_URL is required in production. " +
+      "In-memory storage has no tenant isolation and is unsuitable for multi-tenant use. " +
+      "Set DATABASE_URL to a PostgreSQL connection string.",
+    );
+  }
+
   const app = Fastify({
     logger: {
       level: config.logLevel,

@@ -1,0 +1,262 @@
+/**
+ * Kelava Sync Integration Tests
+ *
+ * Tests the core Kelava ERP sync flow: upsert behavior, error handling,
+ * dashboard data availability, and incremental sync state.
+ *
+ * Prerequisites: Services must be running (bash start.sh)
+ */
+import { describe, it, expect, beforeAll } from "vitest";
+
+const BASE = process.env.OPENFOUNDRY_HOST ?? "http://localhost:8080";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function getOrCreateOntology(): Promise<string> {
+  // Try to find existing sanocare-kelava ontology
+  const listRes = await fetch(`${BASE}/api/v2/ontologies`);
+  const listData = await listRes.json();
+  const existing = (listData.data ?? []).find(
+    (o: { apiName: string }) => o.apiName === "test-kelava-sync",
+  );
+  if (existing) return existing.rid;
+
+  // Create test ontology
+  const createRes = await fetch(`${BASE}/api/v2/ontologies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      apiName: "test-kelava-sync",
+      displayName: "Test Kelava Sync",
+      description: "Integration test ontology",
+    }),
+  });
+  const createData = await createRes.json();
+  return createData.rid;
+}
+
+async function ensureObjectType(ontRid: string, apiName: string): Promise<void> {
+  await fetch(`${BASE}/api/v2/ontologies/${ontRid}/objectTypes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      apiName,
+      displayName: apiName,
+      primaryKeyApiName: "id",
+      primaryKeyType: "STRING",
+      properties: {
+        id: { type: "STRING" },
+        name: { type: "STRING", nullable: true },
+        value: { type: "DOUBLE", nullable: true },
+      },
+      status: "ACTIVE",
+    }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+let ontRid: string;
+
+beforeAll(async () => {
+  ontRid = await getOrCreateOntology();
+  await ensureObjectType(ontRid, "TestUpsertObj");
+});
+
+// ---------------------------------------------------------------------------
+// Test 1: Upsert — create + update same object
+// ---------------------------------------------------------------------------
+
+describe("Upsert behavior", () => {
+  it("should create object on first upsert", async () => {
+    const res = await fetch(
+      `${BASE}/api/v2/ontologies/${ontRid}/objects/TestUpsertObj`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          primaryKey: "UPSERT-001",
+          upsert: true,
+          properties: { id: "UPSERT-001", name: "Original", value: 100 },
+        }),
+      },
+    );
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.properties.name).toBe("Original");
+    expect(data.properties.value).toBe(100);
+  });
+
+  it("should update properties on second upsert with same key", async () => {
+    const res = await fetch(
+      `${BASE}/api/v2/ontologies/${ontRid}/objects/TestUpsertObj`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          primaryKey: "UPSERT-001",
+          upsert: true,
+          properties: { id: "UPSERT-001", name: "Updated", value: 200 },
+        }),
+      },
+    );
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.properties.name).toBe("Updated");
+    expect(data.properties.value).toBe(200);
+  });
+
+  it("should not create duplicate when upserting existing key", async () => {
+    // Count objects with this type
+    const countRes = await fetch(
+      `${BASE}/api/v2/ontologies/${ontRid}/objectSets/aggregate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objectSet: {
+            type: "base",
+            objectType: "TestUpsertObj",
+          },
+          aggregation: [{ type: "count" }],
+        }),
+      },
+    );
+    const countData = await countRes.json();
+    const count =
+      countData.data?.[0]?.value ?? countData.data?.[0]?.metrics?.count ?? 0;
+    // Should be exactly 1 (created + updated, not 2)
+    expect(count).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 2: Sync with empty result — no crash
+// ---------------------------------------------------------------------------
+
+describe("Empty sync handling", () => {
+  it("should handle loadObjects for non-existent type gracefully", async () => {
+    const res = await fetch(
+      `${BASE}/api/v2/ontologies/${ontRid}/objectSets/loadObjects`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objectSet: { type: "base", objectType: "NonExistentType" },
+          pageSize: 100,
+        }),
+      },
+    );
+    // Should return 404 or empty data, not 500
+    expect(res.status).not.toBe(500);
+  });
+
+  it("should return empty array for type with no objects", async () => {
+    await ensureObjectType(ontRid, "EmptyType");
+    const res = await fetch(
+      `${BASE}/api/v2/ontologies/${ontRid}/objectSets/loadObjects`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objectSet: { type: "base", objectType: "EmptyType" },
+          pageSize: 100,
+        }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.data).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 3: Dashboard API — error returns valid JSON, not 500
+// ---------------------------------------------------------------------------
+
+describe("Dashboard data availability", () => {
+  it("should return ontology list without error", async () => {
+    const res = await fetch(`${BASE}/api/v2/ontologies`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(Array.isArray(data.data)).toBe(true);
+  });
+
+  it("should return aggregate count for known object type", async () => {
+    const res = await fetch(
+      `${BASE}/api/v2/ontologies/${ontRid}/objectSets/aggregate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objectSet: { type: "base", objectType: "TestUpsertObj" },
+          aggregation: [{ type: "count" }],
+        }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.data).toBeDefined();
+    expect(data.data.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 4: Create without upsert should still reject duplicates
+// ---------------------------------------------------------------------------
+
+describe("Non-upsert duplicate rejection", () => {
+  it("should reject duplicate primaryKey without upsert flag", async () => {
+    // First create
+    await fetch(`${BASE}/api/v2/ontologies/${ontRid}/objects/TestUpsertObj`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        primaryKey: "DUP-001",
+        properties: { id: "DUP-001", name: "First" },
+      }),
+    });
+
+    // Second create with same key (no upsert flag)
+    const res = await fetch(
+      `${BASE}/api/v2/ontologies/${ontRid}/objects/TestUpsertObj`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          primaryKey: "DUP-001",
+          properties: { id: "DUP-001", name: "Duplicate" },
+        }),
+      },
+    );
+    // Should return 409 Conflict, not 201
+    expect(res.status).toBe(409);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 5: Full metadata endpoint for LLM schema injection
+// ---------------------------------------------------------------------------
+
+describe("LLM schema fetching", () => {
+  it("should return fullMetadata with object types and properties", async () => {
+    const res = await fetch(
+      `${BASE}/api/v2/ontologies/${ontRid}/fullMetadata`,
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.objectTypes).toBeDefined();
+    expect(Array.isArray(data.objectTypes)).toBe(true);
+    // Should include our test object type
+    const testType = data.objectTypes.find(
+      (ot: { apiName: string }) => ot.apiName === "TestUpsertObj",
+    );
+    expect(testType).toBeDefined();
+    expect(testType.properties).toBeDefined();
+    expect(testType.properties.id).toBeDefined();
+  });
+});

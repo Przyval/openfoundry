@@ -1,44 +1,93 @@
 import pg from "pg";
 
 // ---------------------------------------------------------------------------
-// PgStore — generic JSONB-backed store that mirrors the in-memory Map stores
+// PgStore — generic JSONB-backed store with tenant isolation via RLS
 // ---------------------------------------------------------------------------
+
+/** Default maximum rows returned by getAll() to prevent unbounded queries. */
+const DEFAULT_LIMIT = 100;
 
 /**
  * A generic PostgreSQL store that can replace any in-memory `Map<string, T>`
  * store.  Each row has a TEXT primary key (`rid` by default) and a JSONB
  * `data` column that holds the full entity payload.
  *
- * This is intentionally simple: it stores domain objects as opaque JSONB and
- * queries by primary key or simple column filters.  For tables that already
- * have a rich relational schema (e.g. ontologies, objects), use the dedicated
- * `PgOntologyStore` / `PgObjectStore` instead.
+ * **Tenant isolation:** When `orgRid` is set (via `withOrg()`), every query
+ * runs inside a transaction that sets `SET LOCAL app.org_rid = '<orgRid>'`.
+ * This activates Postgres Row-Level Security (RLS) policies that filter rows
+ * by the `org_rid` column.  Using `SET LOCAL` ensures the setting is scoped
+ * to the transaction and never leaks across pooled connections.
  *
- * Designed for tables that follow the pattern:
- *
- * ```sql
- * CREATE TABLE <tableName> (
- *   <pkColumn> TEXT PRIMARY KEY,
- *   data JSONB NOT NULL,
- *   ...extra columns for indexing / filtering
- * );
- * ```
+ * For tables that already have a rich relational schema (e.g. ontologies,
+ * objects), use the dedicated `PgOntologyStore` / `PgObjectStore` instead.
  */
 export class PgStore<T = unknown> {
+  /** Current tenant context — undefined means unscoped (superuser / migration). */
+  private orgRid: string | undefined;
+
   constructor(
     private pool: pg.Pool,
     private tableName: string,
     private pkColumn: string = "rid",
   ) {}
 
+  /**
+   * Return a shallow copy of this store scoped to a specific tenant.
+   * All queries on the returned store will run inside a transaction with
+   * `SET LOCAL app.org_rid` so Postgres RLS policies take effect.
+   */
+  withOrg(orgRid: string): PgStore<T> {
+    const scoped = new PgStore<T>(this.pool, this.tableName, this.pkColumn);
+    scoped.orgRid = orgRid;
+    return scoped;
+  }
+
+  // -------------------------------------------------------------------------
+  // Internal: tenant-aware query execution
+  // -------------------------------------------------------------------------
+
+  /**
+   * Execute a query, optionally inside a tenant-scoped transaction.
+   * When orgRid is set, wraps in BEGIN + SET LOCAL + query + COMMIT to
+   * activate RLS policies without leaking tenant context across pooled
+   * connections.
+   */
+  private async exec<R extends pg.QueryResultRow>(
+    text: string,
+    values?: unknown[],
+  ): Promise<pg.QueryResult<R>> {
+    if (!this.orgRid) {
+      return this.pool.query<R>(text, values);
+    }
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL app.org_rid = $1", [this.orgRid]);
+      const result = await client.query<R>(text, values);
+      await client.query("COMMIT");
+      return result;
+    } catch (err) {
+      try { await client.query("ROLLBACK"); } catch { /* ignore rollback error */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Read
   // -------------------------------------------------------------------------
 
   /**
-   * Return all rows, optionally filtered by column equality conditions.
+   * Return rows, optionally filtered by column equality conditions.
+   * Results are capped at `limit` rows (default 100) to prevent unbounded
+   * queries.  Pass `limit: 0` to disable the cap.
    */
-  async getAll(filter?: Record<string, string>): Promise<T[]> {
+  async getAll(
+    filter?: Record<string, string>,
+    options?: { limit?: number; offset?: number },
+  ): Promise<T[]> {
     let text = `SELECT * FROM ${this.tableName}`;
     const values: unknown[] = [];
 
@@ -55,7 +104,17 @@ export class PgStore<T = unknown> {
 
     text += ` ORDER BY created_at ASC`;
 
-    const { rows } = await this.pool.query<{ data: T } & Record<string, unknown>>(text, values);
+    const limit = options?.limit ?? DEFAULT_LIMIT;
+    if (limit > 0) {
+      values.push(limit);
+      text += ` LIMIT $${values.length}`;
+    }
+    if (options?.offset && options.offset > 0) {
+      values.push(options.offset);
+      text += ` OFFSET $${values.length}`;
+    }
+
+    const { rows } = await this.exec<{ data: T } & Record<string, unknown>>(text, values);
     return rows.map((r) => (r.data !== undefined ? r.data : r) as T);
   }
 
@@ -63,7 +122,7 @@ export class PgStore<T = unknown> {
    * Return a single row by primary key, or `null` if it does not exist.
    */
   async getById(id: string): Promise<T | null> {
-    const { rows } = await this.pool.query<{ data: T } & Record<string, unknown>>(
+    const { rows } = await this.exec<{ data: T } & Record<string, unknown>>(
       `SELECT * FROM ${this.tableName} WHERE ${this.pkColumn} = $1`,
       [id],
     );
@@ -99,7 +158,7 @@ export class PgStore<T = unknown> {
 
     const placeholders = vals.map((_, i) => `$${i + 1}`).join(", ");
 
-    await this.pool.query(
+    await this.exec(
       `INSERT INTO ${this.tableName} (${cols.join(", ")}) VALUES (${placeholders})`,
       vals,
     );
@@ -129,7 +188,7 @@ export class PgStore<T = unknown> {
     idx++;
     vals.push(id);
 
-    const result = await this.pool.query(
+    const result = await this.exec(
       `UPDATE ${this.tableName} SET ${setClauses.join(", ")} WHERE ${this.pkColumn} = $${idx}`,
       vals,
     );
@@ -167,7 +226,7 @@ export class PgStore<T = unknown> {
       .map((c) => `${c} = EXCLUDED.${c}`)
       .join(", ");
 
-    await this.pool.query(
+    await this.exec(
       `INSERT INTO ${this.tableName} (${cols.join(", ")})
        VALUES (${placeholders})
        ON CONFLICT (${this.pkColumn}) DO UPDATE SET ${updateSet}`,
@@ -179,7 +238,7 @@ export class PgStore<T = unknown> {
    * Delete a row by primary key.
    */
   async delete(id: string): Promise<void> {
-    const result = await this.pool.query(
+    const result = await this.exec(
       `DELETE FROM ${this.tableName} WHERE ${this.pkColumn} = $1`,
       [id],
     );
@@ -210,7 +269,7 @@ export class PgStore<T = unknown> {
       text += ` WHERE ${conditions.join(" AND ")}`;
     }
 
-    const { rows } = await this.pool.query<{ total: number }>(text, values);
+    const { rows } = await this.exec<{ total: number }>(text, values);
     return rows[0].total;
   }
 
@@ -218,7 +277,7 @@ export class PgStore<T = unknown> {
    * Check if a row exists by primary key.
    */
   async exists(id: string): Promise<boolean> {
-    const { rows } = await this.pool.query<{ exists: boolean }>(
+    const { rows } = await this.exec<{ exists: boolean }>(
       `SELECT EXISTS(SELECT 1 FROM ${this.tableName} WHERE ${this.pkColumn} = $1) AS exists`,
       [id],
     );
@@ -229,7 +288,7 @@ export class PgStore<T = unknown> {
    * Raw query escape hatch.
    */
   async query<R = unknown>(text: string, values?: unknown[]): Promise<R[]> {
-    const { rows } = await this.pool.query<R & pg.QueryResultRow>(text, values);
+    const { rows } = await this.exec<R & pg.QueryResultRow>(text, values);
     return rows;
   }
 }

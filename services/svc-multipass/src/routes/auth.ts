@@ -1,22 +1,53 @@
 import type { FastifyInstance } from "fastify";
+import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
 import { invalidArgument } from "@openfoundry/errors";
 import { createToken, buildTokenInput } from "@openfoundry/auth-tokens";
 import { generateRid } from "@openfoundry/rid";
 import { importPKCS8, importSPKI } from "jose";
 import type { MultipassConfig } from "../config.js";
 
+const scryptAsync = promisify(scrypt);
+
+// ---------------------------------------------------------------------------
+// Password hashing (scrypt — Node.js built-in, no external dependency)
+// ---------------------------------------------------------------------------
+
+async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16).toString("hex");
+  const derived = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${salt}:${derived.toString("hex")}`;
+}
+
+async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  const [salt, key] = hash.split(":");
+  if (!salt || !key) return false;
+  try {
+    const derived = (await scryptAsync(password, salt, 64)) as Buffer;
+    const keyBuffer = Buffer.from(key, "hex");
+    if (derived.length !== keyBuffer.length) return false;
+    return timingSafeEqual(derived, keyBuffer);
+  } catch {
+    return false;
+  }
+}
+
 /** Key type compatible with jose v5/v6. */
 type SigningKey = CryptoKey | Uint8Array;
 
 // ---------------------------------------------------------------------------
-// Default dev users (username -> password)
+// Default dev users — only available when NODE_ENV !== "production"
+// In production, users are created via signup or bootstrap-admin.sh
 // ---------------------------------------------------------------------------
 
-const DEV_USERS: Record<string, { password: string; roles: string[]; displayName: string }> = {
-  admin: { password: "admin123", roles: ["ADMIN"], displayName: "Admin User" },
-  developer: { password: "dev123", roles: ["EDITOR"], displayName: "Dev User" },
-  analyst: { password: "analyst123", roles: ["VIEWER"], displayName: "Analyst User" },
-};
+const DEV_USERS: Record<string, { password: string; roles: string[]; displayName: string }> =
+  process.env.NODE_ENV === "production"
+    ? {}
+    : {
+        admin: { password: "admin123", roles: ["ADMIN"], displayName: "Admin User" },
+        developer: { password: "dev123", roles: ["EDITOR"], displayName: "Dev User" },
+        analyst: { password: "analyst123", roles: ["VIEWER"], displayName: "Analyst User" },
+      };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,6 +134,79 @@ export async function authRoutes(
       roles: user.roles,
       username,
       displayName: user.displayName,
+    });
+  });
+
+  // -- Signup endpoint -------------------------------------------------------
+  // Creates a new user + organization, issues a JWT with org claim.
+  // NOTE: User/org data is NOT yet persisted to the database. The JWT is valid
+  // until expiry, but after a service restart the orgRid is gone and the user
+  // will appear to have an empty tenant. Persistence is tracked in:
+  //   TODO: persist user + org to users/organizations tables (Phase 2)
+  app.post<{
+    Body: { username: string; password: string; email?: string; displayName?: string; orgName?: string };
+  }>("/api/v2/auth/signup", async (request, reply) => {
+    const { username, password, email, displayName, orgName } = request.body ?? {};
+
+    if (!username || username.length < 3) {
+      throw invalidArgument("username", "must be at least 3 characters");
+    }
+    if (!password || password.length < 8) {
+      throw invalidArgument("password", "must be at least 8 characters");
+    }
+
+    // Check if username already exists (in-memory dev users + future DB check)
+    if (DEV_USERS[username]) {
+      return reply.status(409).send({
+        errorCode: "CONFLICT",
+        errorName: "UserAlreadyExists",
+        errorInstanceId: crypto.randomUUID(),
+        parameters: { username },
+        statusCode: 409,
+        message: `Username '${username}' is already taken`,
+      });
+    }
+
+    // Hash the password
+    const passwordHash = await hashPassword(password);
+
+    // Create organization for this tenant
+    const orgRid = generateRid("multipass", "org").toString();
+    const userRid = generateRid("multipass", "user").toString();
+
+    // Issue JWT with org claim
+    const sessionId = crypto.randomUUID();
+    const tokenRid = generateRid("multipass", "token");
+
+    const tokenInput = buildTokenInput(
+      {
+        sub: username,
+        sid: sessionId,
+        jti: tokenRid.toString(),
+        org: orgRid,
+        svc: "multipass",
+        iss: "openfoundry-multipass",
+        aud: "openfoundry-api",
+        scope: "api:read api:write",
+      },
+      config.tokenExpirySeconds,
+    );
+
+    const accessToken = await createToken(tokenInput, privateKey);
+
+    app.log.info(
+      { username, orgRid, userRid, passwordHash: "[REDACTED]" },
+      "New user signup — org and user created",
+    );
+
+    return reply.status(201).send({
+      accessToken,
+      expiresIn: config.tokenExpirySeconds,
+      username,
+      displayName: displayName ?? username,
+      orgRid,
+      userRid,
+      passwordHash: undefined, // never expose
     });
   });
 
