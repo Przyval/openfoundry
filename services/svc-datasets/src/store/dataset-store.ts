@@ -50,6 +50,39 @@ export interface OpenTransactionInput {
   type: TransactionType;
 }
 
+/**
+ * The dataset-store surface a route handler may depend on.
+ *
+ * Both the in-memory `DatasetStore` and the Postgres-backed `PgDatasetStore`
+ * satisfy it. Every method may answer synchronously or with a promise, so a
+ * handler that awaits its result is correct against either backend — which is
+ * what keeps a Postgres deployment from serving an unresolved promise in place
+ * of the dataset.
+ */
+export interface DatasetReadWriteStore {
+  createDataset(input: CreateDatasetInput): StoredDataset | Promise<StoredDataset>;
+  getDataset(rid: string): StoredDataset | Promise<StoredDataset>;
+  createBranch(
+    datasetRid: string,
+    input: CreateBranchInput,
+  ): Branch | Promise<Branch>;
+  listBranches(datasetRid: string): Branch[] | Promise<Branch[]>;
+  getBranch(datasetRid: string, branchName: string): Branch | Promise<Branch>;
+  deleteBranch(datasetRid: string, branchName: string): void | Promise<void>;
+  openTransaction(
+    datasetRid: string,
+    input: OpenTransactionInput,
+  ): Transaction | Promise<Transaction>;
+  commitTransaction(
+    datasetRid: string,
+    transactionRid: string,
+  ): Transaction | Promise<Transaction>;
+  abortTransaction(
+    datasetRid: string,
+    transactionRid: string,
+  ): Transaction | Promise<Transaction>;
+}
+
 // ---------------------------------------------------------------------------
 // DatasetStore — in-memory storage for dataset entities
 // ---------------------------------------------------------------------------
