@@ -156,7 +156,7 @@ fi
 # --- Helper: seed a single industry ---
 seed_industry() {
   local ind="$1"
-  local script="$ROOT/scripts/seed-${ind}.sh"
+  local script="$ROOT/scripts/demo/seed-${ind}.sh"
   if [ ! -f "$script" ]; then
     echo "  ⚠ Seed script not found: $script (skipping)"
     return 1

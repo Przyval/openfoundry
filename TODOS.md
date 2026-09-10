@@ -10,7 +10,7 @@ Tracked items from eng review (2026-03-26). Each TODO has context so someone pic
 **What:** Wrap org creation + industry seed in a single DB transaction with rollback on failure.
 **Why:** If the seed script fails mid-way, an orphaned organization exists with no data — the user sees an empty dashboard with no recovery path. Partial state is worse than failure.
 **Depends on:** Phase 1 signup implementation. Seed scripts must be converted from bash/curl to TypeScript to participate in a Postgres transaction.
-**Files:** `services/svc-multipass/src/routes/auth.ts` (signup endpoint), `scripts/seed-*.sh` (convert to TS)
+**Files:** `services/svc-multipass/src/routes/auth.ts` (signup endpoint), `scripts/demo/seed-*.sh` (convert to TS)
 
 ### OSDK SDK 4 compatibility fixes
 **What:** Fix 4 known @osdk/foundry SDK compatibility gaps:
