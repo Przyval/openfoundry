@@ -82,7 +82,7 @@ if [ "$HTTP_CODE" = "201" ]; then
   echo "  Gateway:  ${GATEWAY_URL}"
   echo ""
   echo -e "${YELLOW}Next: seed industry data for this org:${NC}"
-  echo "  ORG_RID=${ORG_RID} bash scripts/seed-pest-control.sh"
+  echo "  ORG_RID=${ORG_RID} bash scripts/demo/seed-pest-control.sh"
   echo ""
   echo -e "${YELLOW}Then login at:${NC}"
   echo "  http://localhost:3000"

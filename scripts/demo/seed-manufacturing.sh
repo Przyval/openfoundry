@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Seed script: Smart Manufacturing demo data for OpenFoundry
-# Usage: bash scripts/seed-manufacturing.sh
+# Usage: bash scripts/demo/seed-manufacturing.sh
 # =============================================================================
 set -uo pipefail
 

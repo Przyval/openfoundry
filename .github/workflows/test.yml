@@ -61,10 +61,10 @@ jobs:
 
       - name: Seed test data
         run: |
-          # Attempt to seed pest-control data if script exists
-          if [ -f scripts/seed-pest-control.sh ]; then
-            bash scripts/seed-pest-control.sh || echo "Seed script had warnings (non-fatal)"
-          fi
+          # Fail loudly if the seed script has moved: a silently skipped seed step
+          # makes the integration tests pass against an empty database.
+          test -f scripts/demo/seed-pest-control.sh
+          bash scripts/demo/seed-pest-control.sh || echo "Seed script had warnings (non-fatal)"
 
       - name: Run integration tests
         run: npx vitest run tests/integration/ --reporter=verbose

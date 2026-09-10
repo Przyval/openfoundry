@@ -494,7 +494,7 @@ docker compose up --build -d
 bash scripts/bootstrap-admin.sh
 
 # 3. Seed data industri
-ORG_RID=<dari_step_2> bash scripts/seed-pest-control.sh
+ORG_RID=<dari_step_2> bash scripts/demo/seed-pest-control.sh
 
 # 4. Setup backup harian
 DATABASE_URL=postgresql://openfoundry:openfoundry@localhost:5432/openfoundry \
@@ -506,13 +506,13 @@ DATABASE_URL=postgresql://openfoundry:openfoundry@localhost:5432/openfoundry \
 ### Ganti Industri
 ```bash
 # Healthcare
-ORG_RID=<org> bash scripts/seed-healthcare.sh
+ORG_RID=<org> bash scripts/demo/seed-healthcare.sh
 
 # Logistics
-ORG_RID=<org> bash scripts/seed-logistics.sh
+ORG_RID=<org> bash scripts/demo/seed-logistics.sh
 
 # Manufacturing
-ORG_RID=<org> bash scripts/seed-manufacturing.sh
+ORG_RID=<org> bash scripts/demo/seed-manufacturing.sh
 ```
 
 ### Multi-Tenant (Banyak Client di 1 VPS)
@@ -520,11 +520,11 @@ Setiap client = 1 organization. Data terisolasi total via Postgres RLS.
 ```bash
 # Client 1
 bash scripts/bootstrap-admin.sh --username admin-jkt --password ... --org "PT Jakarta"
-ORG_RID=<org1> bash scripts/seed-pest-control.sh
+ORG_RID=<org1> bash scripts/demo/seed-pest-control.sh
 
 # Client 2
 bash scripts/bootstrap-admin.sh --username admin-sby --password ... --org "PT Surabaya"
-ORG_RID=<org2> bash scripts/seed-pest-control.sh
+ORG_RID=<org2> bash scripts/demo/seed-pest-control.sh
 
 # Client 1 TIDAK BISA lihat data Client 2. Guaranteed by database.
 ```
