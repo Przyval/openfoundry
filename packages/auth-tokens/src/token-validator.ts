@@ -1,4 +1,4 @@
-import { jwtVerify, type KeyLike, type JWTVerifyOptions } from "jose";
+import { importPKCS8, importSPKI, jwtVerify, type KeyLike, type JWTVerifyOptions } from "jose";
 import type { OpenFoundryClaims } from "./claims.js";
 import { isValidClaimsShape } from "./token-creator.js";
 
@@ -45,6 +45,104 @@ export interface ValidateTokenOptions {
 
   /** The JWS algorithms to accept (default: ["ES256"]). */
   readonly algorithms?: readonly string[];
+}
+
+// ---------------------------------------------------------------------------
+// Key import
+// ---------------------------------------------------------------------------
+
+/** What the two key importers below return, for callers that name the type. */
+export type ImportedKey = KeyLike;
+
+const SPKI_HEADER = "-----BEGIN PUBLIC KEY-----";
+const PKCS8_HEADER = "-----BEGIN PRIVATE KEY-----";
+
+/**
+ * A PEM carried in an environment variable arrives with literal `\n` escapes,
+ * because neither a `.env` file nor a Docker Compose value can hold a real
+ * newline. Both key imports below go through here so the two halves of one
+ * pair are never read by two different rules.
+ */
+function normalisePem(pem: string): string {
+  return pem.replace(/\\n/g, "\n").trim();
+}
+
+/**
+ * Turn a configured public key into something `validateToken` can verify with.
+ *
+ * Tokens are signed with ES256, whose verification key must be a real key
+ * object: handing jose the PEM's bytes as a `Uint8Array` makes it treat them
+ * as an HMAC secret and reject every ES256 token. Callers that read a key out
+ * of the environment must come through here.
+ *
+ * @param pem       - A PEM-encoded SubjectPublicKeyInfo block. Literal `\n`
+ *                    escapes are accepted, since a PEM carried in an
+ *                    environment variable usually arrives with them.
+ * @param algorithm - The algorithm the key will verify (default: "ES256").
+ * @throws {TokenValidationError} if the value is not a PEM public key.
+ */
+export async function importVerificationKey(
+  pem: string,
+  algorithm: string = "ES256",
+): Promise<KeyLike> {
+  const normalised = normalisePem(pem);
+
+  if (!normalised.startsWith(SPKI_HEADER)) {
+    throw new TokenValidationError(
+      TokenValidationErrorCode.INVALID_SIGNATURE,
+      `Verification key must be a PEM block beginning "${SPKI_HEADER}"; ` +
+        "got a value that is not one. An HMAC secret cannot verify an " +
+        "ES256 token.",
+    );
+  }
+
+  try {
+    return await importSPKI(normalised, algorithm);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new TokenValidationError(
+      TokenValidationErrorCode.INVALID_SIGNATURE,
+      `Verification key could not be imported as ${algorithm}: ${message}`,
+    );
+  }
+}
+
+/**
+ * Turn a configured private key into something `createToken` can sign with.
+ *
+ * The counterpart of `importVerificationKey`, and subject to the same rule:
+ * the two halves of a key pair come from the same environment, so they must be
+ * read the same way or a deployment that verifies fine fails to sign.
+ *
+ * @param pem       - A PEM-encoded PKCS#8 block. Literal `\n` escapes are
+ *                    accepted, since a PEM carried in an environment variable
+ *                    usually arrives with them.
+ * @param algorithm - The algorithm the key will sign with (default: "ES256").
+ * @throws {TokenValidationError} if the value is not a PEM private key.
+ */
+export async function importSigningKey(
+  pem: string,
+  algorithm: string = "ES256",
+): Promise<KeyLike> {
+  const normalised = normalisePem(pem);
+
+  if (!normalised.startsWith(PKCS8_HEADER)) {
+    throw new TokenValidationError(
+      TokenValidationErrorCode.INVALID_SIGNATURE,
+      `Signing key must be a PEM block beginning "${PKCS8_HEADER}"; ` +
+        "got a value that is not one.",
+    );
+  }
+
+  try {
+    return await importPKCS8(normalised, algorithm);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new TokenValidationError(
+      TokenValidationErrorCode.INVALID_SIGNATURE,
+      `Signing key could not be imported as ${algorithm}: ${message}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

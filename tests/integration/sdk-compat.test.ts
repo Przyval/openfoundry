@@ -8,10 +8,9 @@
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { Ontologies, Datasets, Admin } from "@osdk/foundry";
+import { resolveAccessToken } from "../../scripts/lib/auth";
 
-const HOST = process.env.OPENFOUNDRY_HOST ?? "http://localhost:8080";
-const CLIENT_ID = process.env.OPENFOUNDRY_CLIENT_ID ?? "admin";
-const CLIENT_SECRET = process.env.OPENFOUNDRY_CLIENT_SECRET ?? "admin123";
+const HOST = process.env.OPENFOUNDRY_HOST || "http://localhost:8080";
 
 // ---------------------------------------------------------------------------
 // SDK client setup
@@ -27,7 +26,7 @@ function createClientContext(baseUrl: string, token: string) {
     ): Promise<Response> => {
       const t = await ctx.tokenProvider();
       const headers = new Headers(init?.headers);
-      if (!headers.has("Authorization")) {
+      if (t && !headers.has("Authorization")) {
         headers.set("Authorization", `Bearer ${t}`);
       }
       return globalThis.fetch(url, { ...init, headers });
@@ -70,16 +69,10 @@ describe("@osdk/foundry SDK Compatibility Tests", () => {
   // Auth
   // -----------------------------------------------------------------------
   beforeAll(async () => {
-    const tokenRes = await fetch(`${HOST}/multipass/api/oauth2/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: `grant_type=client_credentials&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}`,
-    });
-
-    expect(tokenRes.ok).toBe(true);
-    const data = await tokenRes.json();
-    expect(data.access_token).toBeDefined();
-    token = data.access_token;
+    // Credentials come from the environment through scripts/lib/auth.ts, the
+    // one place every caller resolves them. With none configured the SDK calls
+    // go out unauthenticated, which a gateway without AUTH_PUBLIC_KEY accepts.
+    token = (await resolveAccessToken(HOST)) ?? "";
     client = createClientContext(HOST, token);
   });
 

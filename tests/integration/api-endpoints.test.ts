@@ -7,12 +7,17 @@
  * These tests call real HTTP endpoints through the gateway at localhost:8080.
  */
 import { describe, it, expect, beforeAll } from "vitest";
+import { resolveAccessToken } from "../../scripts/lib/auth";
 
-const BASE = process.env.OPENFOUNDRY_HOST ?? "http://localhost:8080";
-const CLIENT_ID = process.env.OPENFOUNDRY_CLIENT_ID ?? "admin";
-const CLIENT_SECRET = process.env.OPENFOUNDRY_CLIENT_SECRET ?? "admin123";
+const BASE = process.env.OPENFOUNDRY_HOST || "http://localhost:8080";
 
-let token: string;
+/**
+ * The credential this suite sends. It comes from the environment through
+ * scripts/lib/auth.ts, the one place every caller resolves credentials, and is
+ * null when none is configured - which is how this suite still runs against a
+ * gateway with no AUTH_PUBLIC_KEY.
+ */
+let token: string | null = null;
 let ontologyRid: string;
 let ontologyApiName: string;
 let objectTypeApiName: string;
@@ -52,15 +57,21 @@ async function api(
 // ===========================================================================
 
 describe("OpenFoundry API Integration Tests", () => {
+  beforeAll(async () => {
+    token = await resolveAccessToken(BASE);
+  });
+
   // -------------------------------------------------------------------------
   // Authentication
   // -------------------------------------------------------------------------
   describe("Authentication", () => {
     it("POST /multipass/api/oauth2/token (client_credentials)", async () => {
+      const clientId = process.env.OPENFOUNDRY_CLIENT_ID || "admin";
+      const clientSecret = process.env.OPENFOUNDRY_CLIENT_SECRET || "admin123";
       const res = await fetch(`${BASE}/multipass/api/oauth2/token`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: `grant_type=client_credentials&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}`,
+        body: `grant_type=client_credentials&client_id=${clientId}&client_secret=${clientSecret}`,
       });
 
       expect(res.status).toBe(200);
@@ -71,8 +82,9 @@ describe("OpenFoundry API Integration Tests", () => {
       expect(typeof data.access_token).toBe("string");
       expect(data.access_token.length).toBeGreaterThan(10);
 
-      // Store for subsequent tests
-      token = data.access_token;
+      // Fall back to this token for the rest of the suite when the
+      // environment configured no credential of its own.
+      token ??= data.access_token;
     });
 
     it("GET /api/v2/admin/users/getCurrent", async () => {

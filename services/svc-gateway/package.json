@@ -31,6 +31,7 @@
   },
   "devDependencies": {
     "tsx": "^4.19.0",
+    "jose": "^5.9.0",
     "@types/node": "^20.14.0",
     "@types/pg": "^8.11.0"
   },

@@ -22,6 +22,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 [ -f "$ROOT_DIR/.env" ] && set -a && source "$ROOT_DIR/.env" && set +a
 
+# Bearer credentials for every request below. Reads OPENFOUNDRY_TOKEN or
+# OPENFOUNDRY_CLIENT_ID/_CLIENT_SECRET from the environment or .env, and sends
+# nothing when neither is set. See scripts/lib/auth.sh.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/auth.sh"
+
 KELAVA_HOST="${KELAVA_HOST:-localhost}"
 KELAVA_PORT="${KELAVA_PORT:-5433}"
 KELAVA_DB="${KELAVA_DB:-sanocare}"
@@ -77,7 +82,7 @@ esc() { echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/ /g' | tr -d '\n\r'; }
 upsert_object() {
   local obj_type="$1" json="$2"
   local status_code
-  status_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+  status_code=$(of_curl -s -o /dev/null -w "%{http_code}" -X POST \
     "${OBJECTS_SVC}/api/v2/ontologies/${ONT_RID}/objects/${obj_type}" \
     -H "Content-Type: application/json" \
     -d "${json}" 2>/dev/null)
@@ -100,14 +105,14 @@ echo ""
 echo -e "${GREEN}[1/9] Ontology...${NC}"
 
 # Try to find existing ontology first
-ONT_RID=$(curl -s "${ONTOLOGY_SVC}/api/v2/ontologies" 2>/dev/null \
+ONT_RID=$(of_curl -s "${ONTOLOGY_SVC}/api/v2/ontologies" 2>/dev/null \
   | python3 -c "import sys,json
 for o in json.load(sys.stdin).get('data',[]):
   if o.get('apiName')=='sanocare-kelava': print(o['rid']); break" 2>/dev/null)
 
 # Create if not found
 if [ -z "$ONT_RID" ]; then
-  ONT_RID=$(curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies" \
+  ONT_RID=$(of_curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies" \
     -H "Content-Type: application/json" \
     -d '{"apiName":"sanocare-kelava","displayName":"Sanocare Kelava — Live ERP","description":"Live operational data synced from Kelava ERP (Sanocare pest control)."}' 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('rid',''))" 2>/dev/null)
@@ -120,7 +125,7 @@ echo "  RID: ${ONT_RID}"
 echo -e "${GREEN}[2/9] Object types...${NC}"
 
 ct() {
-  curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies/${ONT_RID}/objectTypes" \
+  of_curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies/${ONT_RID}/objectTypes" \
     -H "Content-Type: application/json" -d "$1" > /dev/null 2>&1
   echo -e "  ${YELLOW}✓ $2${NC}"
 }
@@ -147,7 +152,7 @@ ct '{"apiName":"KelavaServiceArea","displayName":"Service Area","primaryKeyApiNa
 echo -e "${GREEN}[3/9] Link types...${NC}"
 
 cl() {
-  curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies/${ONT_RID}/linkTypes" \
+  of_curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies/${ONT_RID}/linkTypes" \
     -H "Content-Type: application/json" -d "$1" > /dev/null 2>&1
   echo -e "  ${YELLOW}✓ $2${NC}"
 }

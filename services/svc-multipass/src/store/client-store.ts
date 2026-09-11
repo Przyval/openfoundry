@@ -14,9 +14,20 @@ export interface OAuthClient {
   readonly grantTypes: readonly string[];
   readonly scopes: readonly string[];
   readonly isPublic: boolean;
+  /**
+   * Platform roles this client's tokens may assert. Minted into the token's
+   * `roles` claim, but with no consumer yet: the gateway asserts no identity
+   * downstream, and the permission-model work is what will read it. A client
+   * with no roles gets a token that conveys none - never one that conveys all.
+   */
+  readonly roles?: readonly string[];
 }
 
-/** Default development client, pre-seeded for local development. */
+/**
+ * Default development client, pre-seeded for local development only.
+ * Like DEV_USERS in ../routes/auth.ts, it is not seeded when
+ * NODE_ENV === "production".
+ */
 const DEFAULT_DEV_CLIENT: OAuthClient = {
   clientId: "openfoundry-dev",
   clientName: "OpenFoundry Dev Client",
@@ -27,8 +38,9 @@ const DEFAULT_DEV_CLIENT: OAuthClient = {
 };
 
 /**
- * Confidential client for client_credentials grant, compatible with
- * @osdk/client service-to-service authentication.
+ * Confidential clients for the client_credentials grant, compatible with
+ * @osdk/client service-to-service authentication. Seeded outside production
+ * only.
  * Uses admin/admin123 and developer/dev123 as client_id/client_secret pairs.
  */
 const CONFIDENTIAL_DEV_CLIENTS: OAuthClient[] = [
@@ -40,6 +52,7 @@ const CONFIDENTIAL_DEV_CLIENTS: OAuthClient[] = [
     redirectUris: [],
     grantTypes: ["client_credentials"],
     scopes: ["api:read", "api:write"],
+    roles: ["ADMIN"],
   },
   {
     clientId: "developer",
@@ -49,6 +62,7 @@ const CONFIDENTIAL_DEV_CLIENTS: OAuthClient[] = [
     redirectUris: [],
     grantTypes: ["client_credentials"],
     scopes: ["api:read", "api:write"],
+    roles: ["EDITOR"],
   },
 ];
 
@@ -56,6 +70,12 @@ export class ClientStore {
   private readonly clients = new Map<string, OAuthClient>();
 
   constructor() {
+    // Development conveniences only, exactly as DEV_USERS is empty in
+    // production. Production therefore seeds no client at all: there is no
+    // client-registration endpoint, and the only runtime registration is the
+    // implicit one /authorize performs for a public client.
+    if (process.env.NODE_ENV === "production") return;
+
     // Seed the default dev client
     this.clients.set(DEFAULT_DEV_CLIENT.clientId, DEFAULT_DEV_CLIENT);
 

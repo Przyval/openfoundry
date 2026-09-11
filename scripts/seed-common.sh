@@ -17,6 +17,11 @@ OBJECTS_SVC="${OBJECTS_SVC:-http://localhost:8082}"
 ACTIONS_SVC="${ACTIONS_SVC:-http://localhost:8083}"
 ORG_RID="${ORG_RID:-org:default}"
 
+# Bearer credentials for every request below. Reads OPENFOUNDRY_TOKEN or
+# OPENFOUNDRY_CLIENT_ID/_CLIENT_SECRET from the environment or .env, and sends
+# nothing when neither is set. See scripts/lib/auth.sh.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/auth.sh"
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -33,7 +38,7 @@ create_ontology() {
   local description="$3"
 
   echo -e "${GREEN}Creating ontology: ${display_name}${NC}"
-  curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies" \
+  of_curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies" \
     -H "Content-Type: application/json" \
     -d "{
       \"apiName\": \"${api_name}\",
@@ -51,7 +56,7 @@ create_object_type() {
   local properties_json="$5"
 
   echo -e "  ${YELLOW}Creating object type: ${display_name}${NC}"
-  curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies/${ontology_rid}/objectTypes" \
+  of_curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies/${ontology_rid}/objectTypes" \
     -H "Content-Type: application/json" \
     -d "{
       \"apiName\": \"${api_name}\",
@@ -73,7 +78,7 @@ create_link_type() {
   local cardinality="${5:-MANY}"
 
   echo -e "  ${YELLOW}Creating link type: ${api_name}${NC}"
-  curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies/${ontology_rid}/linkTypes" \
+  of_curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies/${ontology_rid}/linkTypes" \
     -H "Content-Type: application/json" \
     -d "{
       \"apiName\": \"${api_name}\",
@@ -91,7 +96,7 @@ create_action_type() {
   local modified_json="${5:-{}}"
 
   echo -e "  ${YELLOW}Creating action type: ${api_name}${NC}"
-  curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies/${ontology_rid}/actionTypes" \
+  of_curl -s -X POST "${ONTOLOGY_SVC}/api/v2/ontologies/${ontology_rid}/actionTypes" \
     -H "Content-Type: application/json" \
     -d "{
       \"apiName\": \"${api_name}\",
@@ -112,7 +117,7 @@ insert_object() {
   local primary_key="$3"
   local properties_json="$4"
 
-  curl -s -X POST "${OBJECTS_SVC}/api/v2/ontologies/${ontology_rid}/objects/${object_type}" \
+  of_curl -s -X POST "${OBJECTS_SVC}/api/v2/ontologies/${ontology_rid}/objects/${object_type}" \
     -H "Content-Type: application/json" \
     -d "{
       \"primaryKey\": \"${primary_key}\",

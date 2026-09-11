@@ -1,15 +1,22 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { importPKCS8, importSPKI, type CryptoKey } from "jose";
-import { createToken, buildTokenInput, validateToken } from "@openfoundry/auth-tokens";
+import { type CryptoKey } from "jose";
+import {
+  createToken,
+  buildTokenInput,
+  validateToken,
+  importSigningKey,
+  type ImportedKey,
+  importVerificationKey,
+} from "@openfoundry/auth-tokens";
 import { invalidArgument } from "@openfoundry/errors";
 import { generateRid } from "@openfoundry/rid";
-import type { MultipassConfig } from "../config.js";
+import { warnIfHalfConfigured, type MultipassConfig } from "../config.js";
 import { verifyCodeChallenge } from "../pkce.js";
 import { TokenStore } from "../store/token-store.js";
 import { ClientStore } from "../store/client-store.js";
 
 /** Key type compatible with jose v5 (KeyLike) and v6 (CryptoKey). */
-type SigningKey = CryptoKey | Uint8Array;
+type SigningKey = ImportedKey | CryptoKey | Uint8Array;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -77,9 +84,10 @@ export async function oauthRoutes(
     privateKey = options.privateKey;
     publicKey = options.publicKey;
   } else if (config.jwtPrivateKey && config.jwtPublicKey) {
-    privateKey = await importPKCS8(config.jwtPrivateKey, "ES256");
-    publicKey = await importSPKI(config.jwtPublicKey, "ES256");
+    privateKey = await importSigningKey(config.jwtPrivateKey);
+    publicKey = await importVerificationKey(config.jwtPublicKey);
   } else {
+    warnIfHalfConfigured(app, config);
     // Auto-generate ephemeral dev keys when none are provided
     const { generateKeyPair } = await import("jose");
     const keyPair = await generateKeyPair("ES256");
@@ -181,6 +189,11 @@ export async function oauthRoutes(
       userId,
       redirectUri,
       scope,
+      // No roles claim. Roles belong to the authenticated user, and this flow
+      // authenticates nobody: the user above is hardcoded, any client_id is
+      // auto-registered and any redirect_uri accepted. Reading a fake user's
+      // roles would hand an anonymous caller whatever that name implies, so
+      // this issues none until there is a real user to read.
       codeChallenge: query.code_challenge,
       codeChallengeMethod: query.code_challenge_method,
     });
@@ -327,7 +340,13 @@ export async function oauthRoutes(
 
     const scope = body.scope ?? client.scopes.join(" ");
 
-    return issueTokens(`service:${clientId}`, scope, clientId, reply);
+    return issueTokens(
+      `service:${clientId}`,
+      scope,
+      clientId,
+      reply,
+      client.roles?.join(" "),
+    );
   }
 
   async function handleRefreshTokenGrant(
@@ -346,6 +365,9 @@ export async function oauthRoutes(
     // Revoke the old refresh token (rotation)
     tokenStore.revokeRefreshToken(body.refresh_token);
 
+    // No roles: this grant authenticates no client, it checks only the refresh
+    // token value, so replaying roles would hand whoever holds that value a
+    // roled token on every rotation.
     return issueTokens(stored.userId, stored.scope, stored.clientId, reply);
   }
 
@@ -354,6 +376,7 @@ export async function oauthRoutes(
     scope: string,
     clientId: string,
     reply: FastifyReply,
+    roles?: string,
   ): Promise<TokenResponse> {
     const rid = generateRid("multipass", "token");
     const sessionId = crypto.randomUUID();
@@ -368,6 +391,10 @@ export async function oauthRoutes(
         iss: "openfoundry-multipass",
         aud: "openfoundry-api",
         scope,
+        // Minted, but with no consumer yet: the gateway asserts no identity
+        // downstream. The permission-model work that unifies the guarded
+        // routes is what will read this claim.
+        ...(roles ? { roles } : {}),
       },
       config.tokenExpirySeconds,
     );

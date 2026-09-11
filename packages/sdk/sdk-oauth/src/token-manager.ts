@@ -9,10 +9,12 @@ import { refreshAccessToken } from "./oauth-client.js";
  */
 export interface TokenManagerOptions extends OAuthClientOptions {
   /**
-   * Called whenever the token is set or refreshed.
-   * Useful for persisting tokens to storage.
+   * Called whenever the token is set or refreshed, with the absolute expiry
+   * in epoch milliseconds. Persist that deadline rather than recomputing one
+   * from `expiresIn`: a session written back on restore would otherwise get a
+   * fresh full lifetime every reload and never be seen as stale.
    */
-  onTokenChange?: (token: TokenResponse) => void;
+  onTokenChange?: (token: TokenResponse, expiresAt: number) => void;
 }
 
 /**
@@ -97,11 +99,15 @@ export class TokenManager {
    * Sets the current token, typically after the initial authorization code exchange.
    *
    * @param token - The token response to store.
+   * @param expiresAt - Absolute expiry in epoch milliseconds. Pass it when
+   * restoring a persisted session: `expiresIn` is relative to when the token
+   * was issued, so a token stored hours ago would otherwise look fresh for
+   * another full `expiresIn` and never be refreshed.
    */
-  setToken(token: TokenResponse): void {
+  setToken(token: TokenResponse, expiresAt?: number): void {
     this.#currentToken = token;
-    this.#expiresAt = Date.now() + token.expiresIn * 1000;
-    this.#options.onTokenChange?.(token);
+    this.#expiresAt = expiresAt ?? Date.now() + token.expiresIn * 1000;
+    this.#options.onTokenChange?.(token, this.#expiresAt);
   }
 
   /**

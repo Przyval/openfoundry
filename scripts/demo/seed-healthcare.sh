@@ -9,17 +9,22 @@ ONTOLOGY_SVC="${ONTOLOGY_SERVICE_URL:-http://localhost:8081}"
 OBJECTS_SVC="${OBJECTS_SERVICE_URL:-http://localhost:8082}"
 ACTIONS_SVC="${ACTIONS_SERVICE_URL:-http://localhost:8083}"
 
+# Bearer credentials for every request below. Reads OPENFOUNDRY_TOKEN or
+# OPENFOUNDRY_CLIENT_ID/_CLIENT_SECRET from the environment or .env, and sends
+# nothing when neither is set. See scripts/lib/auth.sh.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/auth.sh"
+
 echo "Seeding Healthcare Management ontology..."
 
 # --- Create or Reuse Ontology ---
-EXISTING_ONT=$(curl -sf "$ONTOLOGY_SVC/api/v2/ontologies" \
+EXISTING_ONT=$(of_curl -sf "$ONTOLOGY_SVC/api/v2/ontologies" \
   | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; print(d[0]['rid'] if d else '')" 2>/dev/null || echo "")
 
 if [ -n "$EXISTING_ONT" ]; then
   HC_ONT="$EXISTING_ONT"
   echo "  Reusing existing ontology: $HC_ONT"
 else
-  HC_ONT=$(curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies" \
+  HC_ONT=$(of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies" \
     -H "Content-Type: application/json" \
     -d '{"apiName":"healthcare","displayName":"Healthcare Management","description":"Complete hospital management - patients, doctors, appointments, medications, medical records, wards, and billing"}' \
     | python3 -c "import json,sys; print(json.load(sys.stdin)['rid'])")
@@ -35,7 +40,7 @@ for OT in \
   '{"apiName":"MedicalRecord","displayName":"Medical Record","description":"Patient visit medical record","primaryKey":"recordId","properties":{"recordId":{"type":"string","description":"Unique record ID"},"patientId":{"type":"string","description":"Patient ID (FK)"},"doctorId":{"type":"string","description":"Doctor ID (FK)"},"diagnosis":{"type":"string","description":"Diagnosis description"},"treatment":{"type":"string","description":"Treatment plan"},"prescriptions":{"type":"string","description":"Prescribed medications"},"visitDate":{"type":"string","description":"Visit date"},"followUpDate":{"type":"string","description":"Follow-up date"},"severity":{"type":"string","description":"mild/moderate/severe/critical"}}}' \
   '{"apiName":"Ward","displayName":"Ward","description":"Hospital ward or unit","primaryKey":"wardId","properties":{"wardId":{"type":"string","description":"Unique ward ID"},"name":{"type":"string","description":"Ward name"},"type":{"type":"string","description":"ICU/General/Pediatric/Maternity/Surgery"},"capacity":{"type":"integer","description":"Total bed capacity"},"currentOccupancy":{"type":"integer","description":"Current number of patients"},"floor":{"type":"integer","description":"Floor number"},"status":{"type":"string","description":"open/full/maintenance"}}}' \
   '{"apiName":"Billing","displayName":"Billing","description":"Patient billing record","primaryKey":"billingId","properties":{"billingId":{"type":"string","description":"Unique billing ID"},"patientId":{"type":"string","description":"Patient ID (FK)"},"appointmentId":{"type":"string","description":"Appointment ID (FK)"},"totalAmount":{"type":"integer","description":"Total amount (IDR)"},"insuranceCovered":{"type":"integer","description":"Insurance covered amount (IDR)"},"patientPays":{"type":"integer","description":"Patient responsibility (IDR)"},"status":{"type":"string","description":"pending/paid/overdue/insurance-processing"},"issueDate":{"type":"string","description":"Invoice issue date"},"dueDate":{"type":"string","description":"Payment due date"}}}'; do
-  curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$HC_ONT/objectTypes" \
+  of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$HC_ONT/objectTypes" \
     -H "Content-Type: application/json" -d "$OT" > /dev/null
 done
 echo "  7 object types created"
@@ -51,7 +56,7 @@ for LT in \
   '{"apiName":"AppointmentHasBilling","objectTypeApiName":"Appointment","linkedObjectTypeApiName":"Billing","cardinality":"ONE","foreignKeyPropertyApiName":"appointmentId"}' \
   '{"apiName":"WardHasPatients","objectTypeApiName":"Ward","linkedObjectTypeApiName":"Patient","cardinality":"MANY","foreignKeyPropertyApiName":"wardId"}' \
   '{"apiName":"MedicalRecordHasMedications","objectTypeApiName":"MedicalRecord","linkedObjectTypeApiName":"Medication","cardinality":"MANY","foreignKeyPropertyApiName":"recordId"}'; do
-  curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$HC_ONT/linkTypes" \
+  of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$HC_ONT/linkTypes" \
     -H "Content-Type: application/json" -d "$LT" > /dev/null
 done
 echo "  8 link types created"
@@ -63,7 +68,7 @@ for AT in \
   '{"apiName":"complete-medical-record","description":"Complete a medical record after a patient visit: record diagnosis, treatment, prescriptions, set severity, and schedule follow-up if needed","parameters":{"appointmentId":{"type":"string","required":true,"description":"The appointment ID this record is for"},"patientId":{"type":"string","required":true,"description":"Patient ID"},"doctorId":{"type":"string","required":true,"description":"Attending doctor ID"},"diagnosis":{"type":"string","required":true,"description":"Diagnosis description"},"treatment":{"type":"string","required":true,"description":"Treatment plan"},"prescriptions":{"type":"string","required":false,"description":"Prescribed medications (comma-separated)"},"severity":{"type":"string","required":true,"description":"Severity level (mild/moderate/severe/critical)"},"followUpDate":{"type":"string","required":false,"description":"Follow-up date (YYYY-MM-DD)"}},"modifiedEntities":{"MedicalRecord":{"created":true,"modified":false},"Appointment":{"created":false,"modified":true},"Medication":{"created":false,"modified":true}},"status":"ACTIVE"}' \
   '{"apiName":"discharge-patient","description":"Discharge a patient from the hospital: update patient status to discharged, update ward occupancy, finalize any pending billing records","parameters":{"patientId":{"type":"string","required":true,"description":"Patient ID to discharge"},"wardId":{"type":"string","required":true,"description":"Ward the patient is leaving"},"dischargeNotes":{"type":"string","required":false,"description":"Discharge summary notes"},"followUpDate":{"type":"string","required":false,"description":"Follow-up appointment date"}},"modifiedEntities":{"Patient":{"created":false,"modified":true},"Ward":{"created":false,"modified":true},"Billing":{"created":false,"modified":true}},"status":"ACTIVE"}' \
   '{"apiName":"reorder-medication","description":"Reorder a medication when stock is low: increase stock quantity and record the manufacturer supplier","parameters":{"medicationId":{"type":"string","required":true,"description":"Medication ID to reorder"},"quantity":{"type":"integer","required":true,"description":"Quantity to add to stock"},"manufacturer":{"type":"string","required":false,"description":"Override manufacturer name"}},"modifiedEntities":{"Medication":{"created":false,"modified":true}},"status":"ACTIVE"}'; do
-  curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$HC_ONT/actionTypes" \
+  of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$HC_ONT/actionTypes" \
     -H "Content-Type: application/json" -d "$AT" > /dev/null
 done
 echo "  4 action types created"
@@ -81,7 +86,7 @@ for DATA in \
   '{"primaryKey":"PAT-006","properties":{"patientId":"PAT-006","fullName":"Hendra Wijaya","dateOfBirth":"1988-12-01","gender":"male","bloodType":"A-","phone":"0856-3344-5566","email":"hendra.w@hotmail.com","address":"Cluster Kelapa Gading Blok AA-12","insuranceProvider":"Allianz Indonesia","insuranceNumber":"ALZ-2024-67890","status":"discharged"}}' \
   '{"primaryKey":"PAT-007","properties":{"patientId":"PAT-007","fullName":"Fitriani Rahayu","dateOfBirth":"2015-03-22","gender":"female","bloodType":"B-","phone":"0813-7788-9900","email":"ibu.fitri@gmail.com","address":"Jl. Kebon Jeruk Raya No.45","insuranceProvider":"BPJS Kesehatan","insuranceNumber":"BPJS-001-2024-44321","status":"active"}}' \
   '{"primaryKey":"PAT-008","properties":{"patientId":"PAT-008","fullName":"Wawan Hermawan","dateOfBirth":"1955-09-14","gender":"male","bloodType":"AB+","phone":"0858-1234-0000","email":"wawan.h@gmail.com","address":"Jl. Raden Saleh No.3, Cikini","insuranceProvider":"Prudential Indonesia","insuranceNumber":"PRU-2021-99001","status":"active"}}'; do
-  curl -sf -X POST "$BASE/Patient" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Patient" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Doctors ---
@@ -93,7 +98,7 @@ for DATA in \
   '{"primaryKey":"DOC-004","properties":{"doctorId":"DOC-004","fullName":"dr. Lina Susanti, Sp.A","specialty":"Pediatrics","licenseNumber":"STR-3201-2020-01123","phone":"0811-2233-004","email":"lina.susanti@rsindonesia.co.id","status":"available","yearsExperience":8,"rating":49}}' \
   '{"primaryKey":"DOC-005","properties":{"doctorId":"DOC-005","fullName":"dr. Rudi Hartono","specialty":"General","licenseNumber":"STR-3201-2021-01567","phone":"0811-2233-005","email":"rudi.hartono@rsindonesia.co.id","status":"available","yearsExperience":5,"rating":43}}' \
   '{"primaryKey":"DOC-006","properties":{"doctorId":"DOC-006","fullName":"dr. Nurul Hidayati, Sp.JP","specialty":"Cardiology","licenseNumber":"STR-3201-2017-00678","phone":"0811-2233-006","email":"nurul.hidayati@rsindonesia.co.id","status":"on-leave","yearsExperience":14,"rating":45}}'; do
-  curl -sf -X POST "$BASE/Doctor" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Doctor" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Appointments ---
@@ -109,7 +114,7 @@ for DATA in \
   '{"primaryKey":"APT-008","properties":{"appointmentId":"APT-008","patientId":"PAT-002","doctorId":"DOC-001","scheduledDate":"2026-03-24 09:00","type":"follow-up","status":"scheduled","notes":"Follow-up hasil ekokardiografi","duration":30}}' \
   '{"primaryKey":"APT-009","properties":{"appointmentId":"APT-009","patientId":"PAT-006","doctorId":"DOC-003","scheduledDate":"2026-03-15 08:00","type":"follow-up","status":"completed","notes":"Evaluasi pasca operasi patah tulang lengan","duration":30}}' \
   '{"primaryKey":"APT-010","properties":{"appointmentId":"APT-010","patientId":"PAT-003","doctorId":"DOC-002","scheduledDate":"2026-03-25 10:00","type":"follow-up","status":"scheduled","notes":"Review hasil MRI otak","duration":45}}'; do
-  curl -sf -X POST "$BASE/Appointment" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Appointment" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Medications ---
@@ -125,7 +130,7 @@ for DATA in \
   '{"primaryKey":"MED-008","properties":{"medicationId":"MED-008","name":"Azithromycin 250mg","category":"Antibiotic","dosage":"250","unit":"mg","stockQty":85,"minStockLevel":40,"unitPrice":8500,"manufacturer":"Pfizer Indonesia"}}' \
   '{"primaryKey":"MED-009","properties":{"medicationId":"MED-009","name":"Omeprazole 20mg","category":"Cardiovascular","dosage":"20","unit":"mg","stockQty":350,"minStockLevel":60,"unitPrice":4000,"manufacturer":"Kalbe Farma"}}' \
   '{"primaryKey":"MED-010","properties":{"medicationId":"MED-010","name":"Cetirizine 10mg","category":"Antibiotic","dosage":"10","unit":"mg","stockQty":15,"minStockLevel":50,"unitPrice":3000,"manufacturer":"Dexa Medica"}}'; do
-  curl -sf -X POST "$BASE/Medication" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Medication" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Medical Records ---
@@ -139,7 +144,7 @@ for DATA in \
   '{"primaryKey":"REC-006","properties":{"recordId":"REC-006","patientId":"PAT-006","doctorId":"DOC-003","diagnosis":"Fraktur Humerus Sinistra - Post ORIF","treatment":"Evaluasi pasca operasi, fisioterapi 3x seminggu","prescriptions":"Ibuprofen 400mg 3x1, Vitamin D3 1000IU 1x1, Kalsium 500mg 1x1","visitDate":"2026-03-15","followUpDate":"2026-04-15","severity":"moderate"}}' \
   '{"primaryKey":"REC-007","properties":{"recordId":"REC-007","patientId":"PAT-008","doctorId":"DOC-003","diagnosis":"Osteoarthritis Genu Bilateral - Severe","treatment":"Rencana Total Knee Replacement kanan, pre-op assessment","prescriptions":"Ibuprofen 400mg 3x1, Paracetamol 500mg 3x1","visitDate":"2026-03-16","followUpDate":"2026-03-18","severity":"severe"}}' \
   '{"primaryKey":"REC-008","properties":{"recordId":"REC-008","patientId":"PAT-004","doctorId":"DOC-005","diagnosis":"Suspected Appendicitis","treatment":"USG abdomen, observasi, rujuk ke bedah jika perlu","prescriptions":"Paracetamol 500mg 3x1","visitDate":"2026-03-17","followUpDate":"2026-03-20","severity":"moderate"}}'; do
-  curl -sf -X POST "$BASE/MedicalRecord" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/MedicalRecord" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Wards ---
@@ -151,7 +156,7 @@ for DATA in \
   '{"primaryKey":"WRD-004","properties":{"wardId":"WRD-004","name":"Bangsal Bersalin Anggrek","type":"Maternity","capacity":15,"currentOccupancy":15,"floor":5,"status":"full"}}' \
   '{"primaryKey":"WRD-005","properties":{"wardId":"WRD-005","name":"Ruang Bedah Dahlia","type":"Surgery","capacity":8,"currentOccupancy":3,"floor":3,"status":"open"}}' \
   '{"primaryKey":"WRD-006","properties":{"wardId":"WRD-006","name":"Bangsal Umum Kenanga","type":"General","capacity":25,"currentOccupancy":0,"floor":1,"status":"maintenance"}}'; do
-  curl -sf -X POST "$BASE/Ward" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Ward" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Billings ---
@@ -165,7 +170,7 @@ for DATA in \
   '{"primaryKey":"BIL-006","properties":{"billingId":"BIL-006","patientId":"PAT-008","appointmentId":"APT-006","totalAmount":120000000,"insuranceCovered":96000000,"patientPays":24000000,"status":"pending","issueDate":"2026-03-16","dueDate":"2026-04-16"}}' \
   '{"primaryKey":"BIL-007","properties":{"billingId":"BIL-007","patientId":"PAT-006","appointmentId":"APT-009","totalAmount":1500000,"insuranceCovered":1200000,"patientPays":300000,"status":"paid","issueDate":"2026-03-15","dueDate":"2026-03-29"}}' \
   '{"primaryKey":"BIL-008","properties":{"billingId":"BIL-008","patientId":"PAT-004","appointmentId":"APT-007","totalAmount":850000,"insuranceCovered":680000,"patientPays":170000,"status":"pending","issueDate":"2026-03-17","dueDate":"2026-03-31"}}'; do
-  curl -sf -X POST "$BASE/Billing" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Billing" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 LINKS="$OBJECTS_SVC/api/v2/ontologies/$HC_ONT/objects"
@@ -185,7 +190,7 @@ for PAIR in \
   "PAT-008 APT-006"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Patient/$SRC/links/PatientHasAppointments" \
+  of_curl -sf -X POST "$LINKS/Patient/$SRC/links/PatientHasAppointments" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"Appointment\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -203,7 +208,7 @@ for PAIR in \
   "PAT-008 REC-007"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Patient/$SRC/links/PatientHasMedicalRecords" \
+  of_curl -sf -X POST "$LINKS/Patient/$SRC/links/PatientHasMedicalRecords" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"MedicalRecord\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -221,7 +226,7 @@ for PAIR in \
   "PAT-008 BIL-006"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Patient/$SRC/links/PatientHasBillings" \
+  of_curl -sf -X POST "$LINKS/Patient/$SRC/links/PatientHasBillings" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"Billing\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -241,7 +246,7 @@ for PAIR in \
   "DOC-005 APT-007"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Doctor/$SRC/links/DoctorHasAppointments" \
+  of_curl -sf -X POST "$LINKS/Doctor/$SRC/links/DoctorHasAppointments" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"Appointment\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -259,7 +264,7 @@ for PAIR in \
   "DOC-005 REC-008"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Doctor/$SRC/links/DoctorHasMedicalRecords" \
+  of_curl -sf -X POST "$LINKS/Doctor/$SRC/links/DoctorHasMedicalRecords" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"MedicalRecord\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -277,7 +282,7 @@ for PAIR in \
   "APT-009 BIL-007"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Appointment/$SRC/links/AppointmentHasBilling" \
+  of_curl -sf -X POST "$LINKS/Appointment/$SRC/links/AppointmentHasBilling" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"Billing\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -293,7 +298,7 @@ for PAIR in \
   "WRD-005 PAT-008"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Ward/$SRC/links/WardHasPatients" \
+  of_curl -sf -X POST "$LINKS/Ward/$SRC/links/WardHasPatients" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"Patient\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -317,7 +322,7 @@ for PAIR in \
   "REC-008 MED-002"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/MedicalRecord/$SRC/links/MedicalRecordHasMedications" \
+  of_curl -sf -X POST "$LINKS/MedicalRecord/$SRC/links/MedicalRecordHasMedications" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"Medication\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -329,7 +334,7 @@ PIPE_URL="$DATASETS_SVC/api/v2/pipelines"
 echo "  Creating pipelines..."
 
 # Pipeline 1: Patient Demographics
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Patient Demographics Analysis",
@@ -347,7 +352,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 2: Daily Appointment Summary
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Daily Appointment Summary",
@@ -364,7 +369,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 3: Medication Inventory Alert
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Medication Low Stock Alert",
@@ -381,7 +386,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 4: Revenue Analysis
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Hospital Revenue Analysis",
@@ -398,7 +403,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 5: Ward Occupancy Monitor
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Ward Occupancy Monitor",
@@ -426,7 +431,7 @@ for DS in \
   '{"name":"healthcare-medication-inventory","parentFolderRid":"ri.compass.main.folder.root"}' \
   '{"name":"healthcare-revenue-daily","parentFolderRid":"ri.compass.main.folder.root"}' \
   '{"name":"healthcare-ward-occupancy","parentFolderRid":"ri.compass.main.folder.root"}'; do
-  curl -sf -X POST "$DS_URL" \
+  of_curl -sf -X POST "$DS_URL" \
     -H "Content-Type: application/json" -d "$DS" > /dev/null
 done
 echo "  5 datasets created"
@@ -436,7 +441,7 @@ echo "  Creating functions..."
 FUNCTIONS_SVC="${FUNCTIONS_SERVICE_URL:-http://localhost:8088}"
 FUNC_URL="$FUNCTIONS_SVC/api/v2/functions"
 
-curl -sf -X POST "$FUNC_URL" \
+of_curl -sf -X POST "$FUNC_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "apiName":"getAvailableDoctors",
@@ -446,7 +451,7 @@ curl -sf -X POST "$FUNC_URL" \
     "code":"return objects.filter(o => o.properties.status === \"available\").map(o => ({ doctorId: o.properties.doctorId, fullName: o.properties.fullName, specialty: o.properties.specialty, rating: o.properties.rating }));"
   }' > /dev/null
 
-curl -sf -X POST "$FUNC_URL" \
+of_curl -sf -X POST "$FUNC_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "apiName":"getLowStockMedications",
@@ -456,7 +461,7 @@ curl -sf -X POST "$FUNC_URL" \
     "code":"return objects.filter(o => o.properties.stockQty < o.properties.minStockLevel).map(o => ({ name: o.properties.name, stock: o.properties.stockQty, min: o.properties.minStockLevel, manufacturer: o.properties.manufacturer }));"
   }' > /dev/null
 
-curl -sf -X POST "$FUNC_URL" \
+of_curl -sf -X POST "$FUNC_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "apiName":"calculateWardOccupancy",

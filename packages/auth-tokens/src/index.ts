@@ -16,6 +16,9 @@ export {
 // Token validation
 export {
   validateToken,
+  importVerificationKey,
+  importSigningKey,
+  type ImportedKey,
   TokenValidationError,
   TokenValidationErrorCode,
   type ValidateTokenOptions,

@@ -8,13 +8,18 @@
 set -euo pipefail
 
 BASE="${GATEWAY_URL:-http://localhost:8080}"
+
+# Bearer credentials for every request below. Reads OPENFOUNDRY_TOKEN or
+# OPENFOUNDRY_CLIENT_ID/_CLIENT_SECRET from the environment or .env, and sends
+# nothing when neither is set. See scripts/lib/auth.sh.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/auth.sh"
 GREEN='\033[0;32m'
 NC='\033[0m'
 
 echo "Creating Kelava alert monitors..."
 
 # 1. Technician Low Performance — completion rate < 50%
-curl -s -X POST "${BASE}/api/v2/monitors" \
+of_curl -s -X POST "${BASE}/api/v2/monitors" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Technician Low Performance",
@@ -37,7 +42,7 @@ curl -s -X POST "${BASE}/api/v2/monitors" \
 echo -e "${GREEN}  1/5 Technician Low Performance${NC}"
 
 # 2. Critical Unresolved GPS Drift — drift > 5000m
-curl -s -X POST "${BASE}/api/v2/monitors" \
+of_curl -s -X POST "${BASE}/api/v2/monitors" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "GPS Drift Alert",
@@ -60,7 +65,7 @@ curl -s -X POST "${BASE}/api/v2/monitors" \
 echo -e "${GREEN}  2/5 GPS Drift Alert${NC}"
 
 # 3. Technician Over-Quota — completed > planned
-curl -s -X POST "${BASE}/api/v2/monitors" \
+of_curl -s -X POST "${BASE}/api/v2/monitors" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Technician Over-Quota",
@@ -83,7 +88,7 @@ curl -s -X POST "${BASE}/api/v2/monitors" \
 echo -e "${GREEN}  3/5 Technician Over-Quota${NC}"
 
 # 4. Low Active Days — technician with < 10 active days
-curl -s -X POST "${BASE}/api/v2/monitors" \
+of_curl -s -X POST "${BASE}/api/v2/monitors" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Low Active Days",
@@ -106,7 +111,7 @@ curl -s -X POST "${BASE}/api/v2/monitors" \
 echo -e "${GREEN}  4/5 Low Active Days${NC}"
 
 # 5. High Flag Count — any technician with > 20 flags
-curl -s -X POST "${BASE}/api/v2/monitors" \
+of_curl -s -X POST "${BASE}/api/v2/monitors" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "High Verification Flag Count",

@@ -18,7 +18,7 @@
  */
 import { describe, it, expect, beforeAll } from "vitest";
 
-const BASE = process.env.OPENFOUNDRY_HOST ?? "http://localhost:8080";
+const BASE = process.env.OPENFOUNDRY_HOST || "http://localhost:8080";
 
 // ---------------------------------------------------------------------------
 // State

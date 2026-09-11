@@ -16,6 +16,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    env:
+      # The dev confidential OAuth client svc-multipass seeds outside
+      # NODE_ENV=production (services/svc-multipass/src/store/client-store.ts).
+      # Every CI caller - the readiness probe, the seed script and the vitest
+      # suites - resolves its bearer token from these through scripts/lib/auth.*,
+      # so identity-bearing endpoints such as /api/v2/admin/users/getCurrent have
+      # a caller to report. Not a secret: these are this public repository's
+      # published demo credentials, and they exist only in the dev seed.
+      OPENFOUNDRY_CLIENT_ID: admin
+      OPENFOUNDRY_CLIENT_SECRET: admin123
+
     steps:
       - uses: actions/checkout@v4
 
@@ -52,9 +63,16 @@ jobs:
         run: |
           echo "Waiting for gateway to be ready..."
           GATEWAY_URL="http://localhost:8080"
+          # The probe hits a real API route, so it uses the same credentials
+          # every other caller uses. Its token is best-effort: multipass may
+          # not be listening yet when this resolves, and the CI gateway runs
+          # without AUTH_PUBLIC_KEY, so an unauthenticated probe still passes.
+          # Every later step sources auth.sh in its own shell, once multipass
+          # is up, and does get a token.
+          source scripts/lib/auth.sh
           MAX_ATTEMPTS=60
           ATTEMPT=0
-          until curl -sf "${GATEWAY_URL}/api/v2/ontologies" > /dev/null 2>&1; do
+          until of_curl -sf "${GATEWAY_URL}/api/v2/ontologies" > /dev/null 2>&1; do
             ATTEMPT=$((ATTEMPT + 1))
             if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
               echo "Gateway did not become ready after ${MAX_ATTEMPTS} attempts"

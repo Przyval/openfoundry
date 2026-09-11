@@ -26,6 +26,8 @@ export async function createToken(
     org: input.org,
     svc: input.svc,
     scope: input.scope,
+    // Omitted rather than sent empty, so a roleless token is unambiguous.
+    ...(input.roles ? { roles: input.roles } : {}),
   })
     .setProtectedHeader({ alg: algorithm, typ: "JWT" })
     .setIssuedAt(now)
@@ -71,6 +73,9 @@ export function isValidClaimsShape(
     (typeof payload.aud === "string" || Array.isArray(payload.aud)) &&
     typeof payload.exp === "number" &&
     typeof payload.iat === "number" &&
-    typeof payload.scope === "string"
+    typeof payload.scope === "string" &&
+    // Optional, but must be a string when present: a roles claim of the wrong
+    // shape is a malformed token, not an absent role set.
+    (payload.roles === undefined || typeof payload.roles === "string")
   );
 }

@@ -28,21 +28,17 @@ const HOP_BY_HOP_HEADERS = new Set([
  * from a verified token, and never safe to forward from the public edge.
  *
  * The gateway is that edge, so it drops every `x-user-*` header arriving from
- * a client. Nothing legitimate sends them today: the console authenticates
- * with `Authorization: Bearer`, and the seed and sync scripts talk to the
- * service ports directly rather than through this proxy.
+ * a client, whether or not it has a validated claim to put in its place.
+ * Nothing legitimate sends them: the console authenticates with
+ * `Authorization: Bearer`, and the seed and sync scripts talk to the service
+ * ports directly rather than through this proxy.
  *
- * This only removes an inbound trust. It does not grant anyone access, and it
- * does not populate the headers either; `request.claims` is never set either,
- * because `authPlugin` is registered unencapsulated in `server.ts`.
- *
- * Known consequence: role-based enforcement does NOT work after this change.
- * What was removed is fake enforcement - a client could assert its own roles -
- * and real enforcement waits on the gateway task that validates JWTs and sets
- * these headers from validated claims. Until that trusted hop exists, running
- * with `ENFORCE_PERMISSIONS=true` makes every gateway-proxied route answer 403,
- * because the permission hook sees neither `x-user-id` nor `request.claims`.
- * That is known and accepted, not an oversight.
+ * The gateway does not set them itself either, so downstream permission checks
+ * see no identity at all. That is deliberate: asserting roles here would make
+ * permission enforcement effective regardless of `ENFORCE_PERMISSIONS`, and
+ * enforcement is to be switched on deliberately. Minting the identity belongs
+ * with the work that unifies the 119 guarded routes onto one permission model,
+ * which is where the role vocabulary is actually decided.
  */
 const CLIENT_ASSERTED_IDENTITY_PREFIX = "x-user-";
 
@@ -57,7 +53,10 @@ const CLIENT_ASSERTED_IDENTITY_PREFIX = "x-user-";
  * Behaviour:
  * - Preserves method, path, query string, headers, and body.
  * - Strips hop-by-hop headers from both the outgoing and incoming directions.
- * - Strips client-asserted `x-user-*` identity headers from the outgoing direction.
+ * - Strips client-asserted `x-user-*` identity headers from the outgoing
+ *   direction, and asserts none of its own.
+ * - Drops the incoming `Content-Length`, which no longer describes the
+ *   re-serialised body.
  * - Injects `X-Forwarded-For` and `X-Request-Id` headers.
  * - Returns 502 Bad Gateway when the target is unreachable.
  */
@@ -76,8 +75,10 @@ export async function proxyRequest(
     if (HOP_BY_HOP_HEADERS.has(lowerKey)) continue;
     if (lowerKey === "host") continue; // let fetch set the correct Host
     // The body below is re-serialized from the parsed object, so the client's
-    // Content-Length no longer describes it. Forwarding it makes undici reject
-    // every request whose JSON was not already compact. Let fetch set it.
+    // Content-Length no longer describes it - a pretty-printed JSON payload
+    // shrinks. Forwarding the original length made undici reject the request
+    // with "Request body length does not match content-length header", which
+    // the gateway then reported as a 502. `fetch` sets the correct one itself.
     if (lowerKey === "content-length") continue;
     // Never forward a caller's own claim about its identity or roles.
     if (lowerKey.startsWith(CLIENT_ASSERTED_IDENTITY_PREFIX)) continue;

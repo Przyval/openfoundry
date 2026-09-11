@@ -30,9 +30,9 @@ x-service-env: &service-env
   LOG_LEVEL: ${LOG_LEVEL:-warn}
   LOG_FORMAT: json
   NODE_ENV: production
-  # Guarded gateway-proxied routes answer 403 while this is "true": see the
-  # identity-header note in services/svc-gateway/src/proxy.ts.
-  ENFORCE_PERMISSIONS: "true"
+  # Off deliberately: the gateway asserts no identity downstream yet, so
+  # enforcement would deny every request. See deploy/.env.production.
+  ENFORCE_PERMISSIONS: "false"
   S3_ENDPOINT: http://minio:9000
   S3_ACCESS_KEY: ${MINIO_ROOT_USER}
   S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
@@ -188,7 +188,9 @@ services:
       PORT: "8080"
       HOST: "0.0.0.0"
       AUTH_PUBLIC_KEY: ${AUTH_PUBLIC_KEY:-}
-      AUTH_ISSUER: ${AUTH_ISSUER:-openfoundry}
+      # AUTH_ISSUER is deliberately unset: the gateway's own default is the
+      # `iss` svc-multipass signs, and a stale override here rejected every
+      # real token. Set it only alongside a change to what multipass signs.
       AUTH_AUDIENCE: ${AUTH_AUDIENCE:-openfoundry-api}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://console.openfoundry.local}
       RATE_LIMIT_ENABLED: "true"
@@ -235,6 +237,11 @@ services:
     environment:
       <<: *service-env
       PORT: "8084"
+      # The pair multipass signs with. JWT_PUBLIC_KEY must be the same PEM the
+      # gateway verifies with (AUTH_PUBLIC_KEY); empty means an ephemeral pair
+      # nothing else can verify. See deploy/.env.production.
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       TOKEN_EXPIRY_SECONDS: ${TOKEN_EXPIRY_SECONDS:-3600}
       OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-openfoundry-console}
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}

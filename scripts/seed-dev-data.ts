@@ -1,7 +1,8 @@
 #!/usr/bin/env npx tsx
 // Seeds the dev environment with sample data
+import { authHeaders } from "./lib/auth";
 
-const GATEWAY_URL = process.env.GATEWAY_URL ?? "http://localhost:8080";
+const GATEWAY_URL = process.env.GATEWAY_URL || "http://localhost:8080";
 
 async function seed() {
   console.log("🌱 Seeding OpenFoundry dev environment...\n");
@@ -389,7 +390,10 @@ async function seed() {
 async function post(path: string, body: unknown) {
   const res = await fetch(`${GATEWAY_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders(GATEWAY_URL)),
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok && res.status !== 201) {

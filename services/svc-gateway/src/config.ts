@@ -26,7 +26,11 @@ export interface GatewayConfig {
    */
   readonly authPublicKey: string;
 
-  /** Expected JWT issuer claim. */
+  /**
+   * Expected JWT issuer claim. Must match what svc-multipass signs into
+   * `iss` (see services/svc-multipass/src/routes/oauth.ts), or every token
+   * the platform mints is rejected.
+   */
   readonly authIssuer: string;
 
   /** Expected JWT audience claim. */
@@ -65,13 +69,21 @@ export interface GatewayConfig {
   readonly nodeEnv: string;
 }
 
+/**
+ * An environment variable that is set but empty is treated as absent, so it
+ * falls back to the value below rather than through it. An exported empty
+ * string is what a blanked line in a `.env` file produces, and for a variable
+ * like AUTH_ISSUER it would otherwise mean "verify no issuer at all" - a check
+ * silently switched off by a line an operator thought was harmless.
+ */
 function env(key: string, fallback: string): string {
-  return process.env[key] ?? fallback;
+  const raw = process.env[key];
+  return raw === undefined || raw === "" ? fallback : raw;
 }
 
 function envInt(key: string, fallback: number): number {
   const raw = process.env[key];
-  if (raw === undefined) return fallback;
+  if (raw === undefined || raw === "") return fallback;
   const parsed = parseInt(raw, 10);
   if (Number.isNaN(parsed)) {
     throw new Error(`Environment variable ${key} must be a valid integer, got: "${raw}"`);
@@ -84,7 +96,10 @@ export function loadConfig(): GatewayConfig {
     port: envInt("PORT", 8080),
     host: env("HOST", "0.0.0.0"),
     authPublicKey: env("AUTH_PUBLIC_KEY", ""),
-    authIssuer: env("AUTH_ISSUER", "openfoundry"),
+    // "openfoundry-multipass" is the only issuer this platform mints - the
+    // previous default of "openfoundry" matched nothing, which went unnoticed
+    // while the auth hook was never running.
+    authIssuer: env("AUTH_ISSUER", "openfoundry-multipass"),
     authAudience: env("AUTH_AUDIENCE", "openfoundry-api"),
     services: {
       multipass: env("MULTIPASS_SERVICE_URL", "http://localhost:8084"),

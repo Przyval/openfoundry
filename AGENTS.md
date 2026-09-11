@@ -9,11 +9,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 `pnpm run build` is green (49/49), as is `typecheck` (45/45). Keep it that way.
 Run `npx turbo run build --continue` to see every failure at once; plain `build` stops at the first.
 
-`pnpm run lint` is a real check now: it runs `eslint .` directly over all 598 `.ts`/`.tsx`/`.mts`
+`pnpm run lint` is a real check now: it runs `eslint .` directly over all 606 `.ts`/`.tsx`/`.mts`
 files in the repo, not `turbo run lint`. There is no per-package `lint` script and no per-package
 eslint config on purpose - one root `eslint.config.mjs` means no package can silently opt out,
 which is exactly how this task's predecessor reported 21/21 green while checking zero files.
-It is green at 0 errors with 227 warnings outstanding (181 `no-explicit-any`, 35 `no-unused-vars`,
+It is green at 0 errors with 226 warnings outstanding (181 `no-explicit-any`, 34 `no-unused-vars`,
 11 `react-hooks/exhaustive-deps`); only errors fail the run, so a growing warning count is
 visible but unguarded.
 `no-console` is off for `scripts/`, `services/` and `tests/`, plus three library modules whose
@@ -95,6 +95,37 @@ Fastify hands a plugin the options object it was registered with, `prefix` inclu
 Passing that object straight on to a child `app.register` applies the prefix a second time, so the routes land under `/api/v1/api/v1/...` and every request 404s - build a fresh options object for each child.
 No static route scan can see this, so confirm a new route is really reachable with `app.printRoutes()` or an `app.inject` test rather than trusting an inventory of the source.
 
+## Authentication and caller identity
+
+Fastify encapsulates anything passed to `app.register`, so a plugin that adds an `onRequest` hook there guards only routes registered inside that child context.
+`authPlugin` and `rateLimitPlugin` are therefore called directly on the root instance in `services/svc-gateway/src/server.ts`; registering either one silently guards nothing.
+
+The gateway enforces only when `AUTH_PUBLIC_KEY` is set; empty means every request passes, which is the demo default.
+The key must be the PEM that matches svc-multipass's `JWT_PRIVATE_KEY`, and `AUTH_ISSUER` must match the `iss` multipass signs (`openfoundry-multipass`) or every real token is rejected - which is why `deploy/` sets no value for it and lets the gateway's default stand.
+
+Every non-browser caller gets its bearer token from the environment through `scripts/lib/auth.sh` (`of_curl`) or `scripts/lib/auth.ts` (`authHeaders`): `OPENFOUNDRY_TOKEN`, or `OPENFOUNDRY_CLIENT_ID`/`OPENFOUNDRY_CLIENT_SECRET` exchanged for one.
+Both send no header when neither is set, so the demo still works unauthenticated. Never write a credential into a script - this repository is public.
+The console covers its ~80 `fetch` call sites with one interceptor, `apps/app-console/src/lib/authFetch.ts`, installed from `main.tsx`.
+
+Downstream services read identity from `X-User-Id` / `X-User-Roles` (`packages/permissions/src/middleware.ts`).
+`services/svc-gateway/src/proxy.ts` always drops those headers on the way in, and sets none of its own, so downstream permission checks see no caller at all.
+That is deliberate: asserting roles there would make enforcement effective whatever `ENFORCE_PERMISSIONS` says, and enforcement is to be switched on deliberately - which is why it is off in `deploy/`.
+Minting the identity belongs to the work that unifies the guarded routes onto one permission model, where the role vocabulary is decided.
+svc-multipass does mint an optional `roles` claim - on the dev password login and on `client_credentials` against a seeded client, both only outside `NODE_ENV=production` - but nothing consumes it yet.
+The authorization_code and refresh grants mint no roles at all: `/multipass/api/oauth2/authorize` authenticates nobody (it hardcodes the approved user, auto-registers any `client_id` and accepts any `redirect_uri`), and the refresh grant checks only the refresh token value, with no client authentication.
+
+Two limits are known and accepted, not oversights.
+`/authorize` is exempt from gateway auth and authenticates nobody, so anyone who can reach the gateway can mint a token that passes validation - a roleless one, so it grants authentication and not authorization; closing it needs a real login flow, which is separate work.
+And `NODE_ENV=production` seeds no OAuth client (`ClientStore`) and there is no registration endpoint, so `client_credentials` cannot work there at all: only a pre-minted `OPENFOUNDRY_TOKEN` authenticates a script against a production deployment.
+That is the deliberate price of not shipping this public repository's published credentials into production.
+
+`SKIP_AUTH_PREFIXES` does not exempt `/metrics`, so with `AUTH_PUBLIC_KEY` set a Prometheus scrape gets 401 - a deliberate posture; nothing in `deploy/` scrapes it and the container healthcheck uses `/status/health`.
+
+The rate limiter's per-tenant bucket is dead code: `extractKey` keys on `request.orgRid`, but `rateLimitPlugin` is called before `authPlugin` and Fastify runs same-context `onRequest` hooks in registration order, so `orgRid` is still undefined and every authenticated request falls through to a hash of its Authorization header - a new bucket on every token refresh, not per-tenant isolation.
+Fixing it means deciding whether JWT verification should run before throttling, which is a real edge-behaviour tradeoff, so the order is left alone deliberately.
+
+The proxy must not forward the incoming `Content-Length`: the body is re-serialised from Fastify's parsed form, and a stale length makes undici reject the request, which surfaces as a 502.
+
 ## Running the console end to end
 
 `bash start.sh` boots ten services plus the console on :3000, but it first kills whatever holds ports 8080-8088, 8092 and 3000 - check those are yours before running it.
@@ -107,7 +138,7 @@ Running a second one therefore merges another industry's object types into the f
 Without `DATABASE_URL` every service uses its in-memory or `/tmp/openfoundry-data` store; that is the mode the demo is built for, and the only mode in which svc-admin's user and group routes work.
 `/tmp/openfoundry-data` is a fixed path with no env override, so two checkouts running at once share and overwrite it.
 
-Dev login is `admin` / `admin123` (see `DEV_USERS` in `services/svc-multipass/src/routes/auth.ts`).
+Dev login is `admin` / `admin123` (see `DEV_USERS` in `services/svc-multipass/src/routes/auth.ts`); the `admin` / `admin123` and `developer` / `dev123` pairs also work as OAuth client credentials.
 
 ## Identity and permissions
 
@@ -115,11 +146,8 @@ Two different `requirePermission` exports coexist and only one is reachable.
 `services/svc-gateway/src/middleware/rbac.ts` has zero importers repo-wide; the one that actually guards 118 routes is `@openfoundry/permissions`, whose header-based variant reads `x-user-id` / `x-user-roles`.
 Those headers are a trusted-hop input, never a client input: the gateway proxy drops every `x-user-*` header so a caller cannot assert its own roles. Do not re-add them to the forwarded set, and do not introduce a second identity header without a hop that sets it from a verified token.
 Seed and sync scripts talk to the service ports directly, not through the gateway, so that strip does not reach them - which is also why a service port must never be publicly reachable.
-Role enforcement is still absent after that strip: what it removed was a role claim any caller could forge, not working enforcement, and nothing yet sets those headers from a verified token.
-Until a trusted hop does, `ENFORCE_PERMISSIONS=true` makes every gateway-proxied route answer 403, because the permission hook sees neither `x-user-id` nor `request.claims`.
-
-`request.claims` is never populated: `authPlugin` is registered unencapsulated at `services/svc-gateway/src/server.ts:153` without `fastify-plugin`, so its `onRequest` hook applies to nothing.
-Until that is fixed, no token-based permission check enforces anything. `claims.sub` is also a username, not a RID (`svc-multipass/src/routes/auth.ts:122`), and issued tokens carry no `roles` claim at all (`packages/auth-tokens/src/token-creator.ts`).
+No hop sets those headers today - the gateway deliberately does not - so role enforcement reaches no route; see "Authentication and caller identity" above.
+`claims.sub` is a username, not a RID (`svc-multipass/src/routes/auth.ts`), so the id downstream sees is a username too.
 
 Neither model is Foundry's, so do not converge on either as-is.
 Foundry grants *roles on a resource* - `POST /v2/filesystem/resources/{resourceRid}/roles/add`, inherited by the container's contents, with principals that may be groups - while roles themselves are platform-defined and read-only over the API (`GET /v2/admin/roles/{roleId}` and `getBatch` only, no create or delete).

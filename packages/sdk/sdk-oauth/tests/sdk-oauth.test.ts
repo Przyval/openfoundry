@@ -228,7 +228,46 @@ describe("TokenManager", () => {
 
     manager.setToken(tokenResponse);
 
-    expect(onChange).toHaveBeenCalledWith(tokenResponse);
+    expect(onChange).toHaveBeenCalledWith(tokenResponse, expect.any(Number));
+  });
+
+  it("should keep a persisted session expired across a second restore", async () => {
+    // The round trip a console reload makes: persist on every token change,
+    // restore into a fresh manager. Re-deriving the deadline from `expiresIn`
+    // on the way out handed the session a new full lifetime each reload, so a
+    // long-dead token looked fresh forever.
+    let persisted: { token: TokenResponse; expiresAt: number } | null = null;
+    const options = {
+      ...DEFAULT_OPTIONS,
+      onTokenChange: (token: TokenResponse, expiresAt: number) => {
+        persisted = { token, expiresAt };
+      },
+    };
+
+    const issued = new TokenManager(options);
+    issued.setToken(createMockTokenResponse({ expiresIn: 3600 }));
+    const deadline = persisted!.expiresAt;
+
+    const restored = new TokenManager(options);
+    restored.setToken(persisted!.token, persisted!.expiresAt);
+    expect(persisted!.expiresAt).toBe(deadline);
+
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: "refreshed-after-second-restore",
+          refresh_token: "refreshed-refresh-token",
+          token_type: "Bearer",
+          expires_in: 3600,
+          scope: "api:ontologies-read",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const expired = new TokenManager(options);
+    expired.setToken(persisted!.token, Date.now() - 60_000);
+    expect(await expired.getToken()).toBe("refreshed-after-second-restore");
   });
 
   it("should clear the token", async () => {
@@ -265,6 +304,34 @@ describe("TokenManager", () => {
     const token = await manager.getToken();
     expect(token).toBe("refreshed-access-token");
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("should refresh a restored token whose absolute expiry has passed", async () => {
+    // A session restored from storage replays the `expiresIn` it was issued
+    // with, so without the absolute deadline an hour-old token looks fresh for
+    // another full hour and is sent to the gateway dead.
+    const refreshedResponse = {
+      access_token: "refreshed-after-restore",
+      refresh_token: "refreshed-refresh-token",
+      token_type: "Bearer",
+      expires_in: 3600,
+      scope: "api:ontologies-read",
+    };
+
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(refreshedResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const manager = new TokenManager(DEFAULT_OPTIONS);
+    manager.setToken(
+      createMockTokenResponse({ expiresIn: 3600 }),
+      Date.now() - 60_000,
+    );
+
+    expect(await manager.getToken()).toBe("refreshed-after-restore");
   });
 
   it("should report hasToken as false initially", () => {

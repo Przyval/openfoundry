@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
   validateToken,
+  importVerificationKey,
   TokenValidationError,
   type OpenFoundryClaims,
   type ValidateTokenOptions,
@@ -8,13 +9,6 @@ import {
 } from "@openfoundry/auth-tokens";
 import { OpenFoundryApiError, ErrorCode } from "@openfoundry/errors";
 import type { GatewayConfig } from "../config.js";
-
-// ---------------------------------------------------------------------------
-// Module-level state (set once at registration)
-// ---------------------------------------------------------------------------
-
-let publicKey: Uint8Array | null = null;
-let validateOptions: ValidateTokenOptions = {};
 
 // ---------------------------------------------------------------------------
 // Augment FastifyRequest so downstream handlers can access `.claims`
@@ -67,11 +61,22 @@ export interface AuthPluginOptions {
 }
 
 /**
- * Fastify plugin that verifies Bearer JWT tokens on incoming requests.
+ * Verify Bearer JWT tokens on incoming requests.
  *
- * - Requests to `/status/*` and `/multipass/api/oauth2/*` are exempt.
- * - All other requests must include a valid `Authorization: Bearer <jwt>` header.
- * - On success the decoded claims are attached to `request.claims`.
+ * Call this DIRECTLY on the root instance - `await authPlugin(app, ...)` -
+ * never through `app.register`. Registering it gives it its own encapsulated
+ * context, and an `onRequest` hook added inside that context runs only for
+ * routes registered inside it too. The route plugins are siblings registered
+ * on the parent, so a registered auth plugin guards nothing at all and every
+ * request is served unauthenticated. `rateLimitPlugin` is called directly for
+ * the same reason.
+ *
+ * - Requests to `/status/*` and `/multipass/api/oauth2/*` are exempt, along
+ *   with the login endpoint and - only while open signup is enabled - signup.
+ *   Those are where a caller gets a token; everything else needs one.
+ * - All other requests must carry `Authorization: Bearer <jwt>`.
+ * - On success the decoded claims are attached to `request.claims`, and the
+ *   `org` claim to `request.orgRid`.
  */
 export async function authPlugin(
   app: FastifyInstance,
@@ -79,20 +84,22 @@ export async function authPlugin(
 ): Promise<void> {
   const { config } = options;
 
-  // Build the public key from config.
-  // In production, AUTH_PUBLIC_KEY should be a PEM-encoded EC public key.
-  // For development/testing, if no key is set we use a passthrough (log a warning).
-  if (config.authPublicKey) {
-    const keyData = new TextEncoder().encode(config.authPublicKey);
-    publicKey = keyData;
-  } else {
+  // Build the verification key from config. A PEM has to be imported as a key
+  // object: passing its raw bytes makes jose read them as an HMAC secret and
+  // reject every ES256 token. A bad key fails here, at startup, rather than as
+  // an unexplained 401 on every request.
+  const publicKey = config.authPublicKey
+    ? await importVerificationKey(config.authPublicKey)
+    : null;
+
+  if (!publicKey) {
     app.log.warn(
       "AUTH_PUBLIC_KEY is not set — JWT verification is disabled. " +
       "Do NOT run this configuration in production.",
     );
   }
 
-  validateOptions = {
+  const validateOptions: ValidateTokenOptions = {
     issuer: config.authIssuer || undefined,
     audience: config.authAudience || undefined,
   };

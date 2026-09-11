@@ -9,6 +9,11 @@ import "@blueprintjs/table/lib/css/table.css";
 
 import "./styles/app.css";
 import App from "./App";
+import { installAuthFetch } from "./lib/authFetch";
+
+// Attach the stored bearer token to every OpenFoundry API request. Installed
+// before the first render so no page can fire an unauthenticated request.
+installAuthFetch();
 
 const root = document.getElementById("root");
 if (!root) {

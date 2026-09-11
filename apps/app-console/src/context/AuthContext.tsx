@@ -14,16 +14,23 @@ import {
 } from "@openfoundry/sdk-oauth";
 import type { TokenResponse } from "@openfoundry/sdk-oauth";
 import { API_BASE_URL } from "../config";
+import {
+  LOCAL_STORAGE_TOKEN_KEY,
+  LOCAL_STORAGE_USER_KEY,
+  setAuthTokenSource,
+} from "../lib/authFetch";
+import {
+  clearStoredSession,
+  restoreSession,
+  type AuthUser,
+  type StoredToken,
+} from "../lib/session";
+
+export type { AuthUser };
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface AuthUser {
-  username: string;
-  token: string;
-  roles: string[];
-}
 
 export interface AuthContextValue {
   /** The currently logged-in user, or null. */
@@ -46,12 +53,18 @@ export interface AuthContextValue {
 // Constants
 // ---------------------------------------------------------------------------
 
-const LOCAL_STORAGE_TOKEN_KEY = "openfoundry_token";
-const LOCAL_STORAGE_USER_KEY = "openfoundry_user";
+// LOCAL_STORAGE_TOKEN_KEY / LOCAL_STORAGE_USER_KEY live in lib/authFetch, which
+// is where they are read back from to authenticate outgoing requests.
 const PKCE_VERIFIER_KEY = "openfoundry_pkce_verifier";
 
+
+
 const oauthOptions = {
-  clientId: (import.meta.env.VITE_OAUTH_CLIENT_ID as string) ?? "openfoundry-console",
+  // `||`, not `??`: a build that defines the variable empty has no client id,
+  // not an intentionally blank one.
+  clientId:
+    (import.meta.env.VITE_OAUTH_CLIENT_ID as string | undefined) ||
+    "openfoundry-console",
   baseUrl: API_BASE_URL,
   redirectUri: `${window.location.origin}/login`,
   scopes: ["api:read", "api:write"],
@@ -86,31 +99,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () =>
       new TokenManager({
         ...oauthOptions,
-        onTokenChange: (token: TokenResponse) => {
-          localStorage.setItem(LOCAL_STORAGE_TOKEN_KEY, JSON.stringify(token));
+        onTokenChange: (token: TokenResponse, expiresAt: number) => {
+          const stored: StoredToken = { ...token, expiresAt };
+          localStorage.setItem(LOCAL_STORAGE_TOKEN_KEY, JSON.stringify(stored));
         },
       }),
     [],
   );
 
+  // ---- Let the fetch interceptor use the managed (refreshing) token ----
+  useEffect(() => {
+    setAuthTokenSource(tokenManager);
+    return () => setAuthTokenSource(null);
+  }, [tokenManager]);
+
   // ---- Restore session from localStorage on mount ----
   useEffect(() => {
-    try {
-      const storedToken = localStorage.getItem(LOCAL_STORAGE_TOKEN_KEY);
-      const storedUser = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
-      if (storedToken && storedUser) {
-        const token: TokenResponse = JSON.parse(storedToken);
-        const user: AuthUser = JSON.parse(storedUser);
-        tokenManager.setToken(token);
-        setCurrentUser(user);
-      }
-    } catch {
-      // Corrupted storage – ignore and require fresh login.
-      localStorage.removeItem(LOCAL_STORAGE_TOKEN_KEY);
-      localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
-    } finally {
-      setLoading(false);
+    const restored = restoreSession();
+    if (restored) {
+      tokenManager.setToken(restored.token, restored.expiresAt);
+      setCurrentUser(restored.user);
     }
+    setLoading(false);
   }, [tokenManager]);
 
   // ---- Login with username/password (local dev mode) ----
@@ -202,8 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     tokenManager.clear();
     setCurrentUser(null);
-    localStorage.removeItem(LOCAL_STORAGE_TOKEN_KEY);
-    localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+    clearStoredSession();
   }, [tokenManager]);
 
   const value = useMemo<AuthContextValue>(

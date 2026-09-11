@@ -20,6 +20,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 [ -f "$ROOT_DIR/.env" ] && set -a && source "$ROOT_DIR/.env" && set +a
 
+# Bearer credentials for every request below. Reads OPENFOUNDRY_TOKEN or
+# OPENFOUNDRY_CLIENT_ID/_CLIENT_SECRET from the environment or .env, and sends
+# nothing when neither is set. See scripts/lib/auth.sh.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/auth.sh"
+
 KELAVA_HOST="${KELAVA_HOST:-localhost}"
 KELAVA_PORT="${KELAVA_PORT:-5433}"
 KELAVA_DB="${KELAVA_DB:-sanocare}"
@@ -77,7 +82,7 @@ run_sql() {
 }
 
 # Find ontology RID
-ONT_RID=$(curl -s "${ONTOLOGY_SVC}/api/v2/ontologies" 2>/dev/null | python3 -c "
+ONT_RID=$(of_curl -s "${ONTOLOGY_SVC}/api/v2/ontologies" 2>/dev/null | python3 -c "
 import sys,json
 for o in json.load(sys.stdin).get('data',[]):
   if o.get('apiName')=='sanocare-kelava': print(o['rid']); break
@@ -99,7 +104,7 @@ while IFS='|' read -r id vd status title type cid uid cancel remarks nora; do
   [ -z "$id" ] && continue
   title=$(echo "$title" | tr -d '"')
   remarks=$(echo "$remarks" | tr -d '"' | head -c 200)
-  local sc=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${OBJECTS_SVC}/api/v2/ontologies/${ONT_RID}/objects/KelavaRoadPlan" \
+  sc=$(of_curl -s -o /dev/null -w "%{http_code}" -X POST "${OBJECTS_SVC}/api/v2/ontologies/${ONT_RID}/objects/KelavaRoadPlan" \
     -H "Content-Type: application/json" \
     -d "{\"primaryKey\":\"RP-${id}\",\"upsert\":true,\"properties\":{\"roadPlanId\":\"RP-${id}\",\"visitDate\":\"${vd}\",\"status\":\"${status}\",\"title\":\"${title}\",\"type\":\"${type}\",\"customerId\":\"CUST-${cid}\",\"userId\":\"TECH-${uid}\",\"isCancelled\":\"${cancel}\",\"remarks\":\"${remarks}\",\"noRa\":\"${nora}\"}}")
   [ "$sc" -lt 200 ] || [ "$sc" -ge 300 ] && FAIL=$((FAIL + 1))
@@ -113,7 +118,7 @@ V_COUNT=0
 while IFS='|' read -r id uid rpid cid ci co lat lng rd remarks; do
   [ -z "$id" ] && continue
   remarks=$(echo "$remarks" | tr -d '"' | head -c 200)
-  local sc=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${OBJECTS_SVC}/api/v2/ontologies/${ONT_RID}/objects/KelavaVisit" \
+  sc=$(of_curl -s -o /dev/null -w "%{http_code}" -X POST "${OBJECTS_SVC}/api/v2/ontologies/${ONT_RID}/objects/KelavaVisit" \
     -H "Content-Type: application/json" \
     -d "{\"primaryKey\":\"VIS-${id}\",\"upsert\":true,\"properties\":{\"visitId\":\"VIS-${id}\",\"userId\":\"TECH-${uid}\",\"roadPlanId\":\"RP-${rpid}\",\"customerId\":\"CUST-${cid}\",\"checkIn\":\"${ci}\",\"checkOut\":\"${co}\",\"latitude\":\"${lat}\",\"longitude\":\"${lng}\",\"realizationDate\":\"${rd}\",\"remarks\":\"${remarks}\"}}")
   [ "$sc" -lt 200 ] || [ "$sc" -ge 300 ] && FAIL=$((FAIL + 1))
@@ -128,4 +133,4 @@ echo "$NOW" > "$STATE_FILE"
 echo "[$(date)] Done: ${RP_COUNT} new road plans, ${V_COUNT} new visits (since ${LAST_SYNC})${FAIL:+ — ${FAIL} failed}"
 
 # Heartbeat to alert health endpoint
-curl -s -X POST "http://localhost:8080/status/alerts/heartbeat" > /dev/null 2>&1 || true
+of_curl -s -X POST "http://localhost:8080/status/alerts/heartbeat" > /dev/null 2>&1 || true

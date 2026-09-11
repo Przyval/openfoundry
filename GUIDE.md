@@ -137,21 +137,23 @@ bash scripts/bootstrap-admin.sh \
 Skrip mencetak `Org RID` yang dibuat.
 Selama switch itu menyala, siapa pun yang bisa menjangkau gateway dapat menerbitkan token API yang sah, jadi matikan lagi dan start ulang kedua layanan begitu admin pertama jadi.
 
+### Menyalakan penegakan token di gateway
+
+Gateway hanya memvalidasi Bearer token kalau `AUTH_PUBLIC_KEY` diisi; selama kosong semua request lewat tanpa otentikasi, dan itulah default demo.
+Kuncinya harus PEM yang sepasang dengan `JWT_PRIVATE_KEY` milik svc-multipass - daftar lengkap variabelnya beserta cara membuat pasangan kunci ada di `.env.example` (dan `deploy/.env.production` untuk deployment Docker).
+
+Begitu penegakan menyala, semua pemanggil non-browser (skrip penyemai, `scripts/sync-kelava.sh`, integration test) ikut butuh kredensial: isi `OPENFOUNDRY_TOKEN`, atau `OPENFOUNDRY_CLIENT_ID`/`OPENFOUNDRY_CLIENT_SECRET` yang akan ditukar jadi token otomatis.
+Di `NODE_ENV=production` tidak ada OAuth client yang di-seed, jadi di sana hanya `OPENFOUNDRY_TOKEN` yang bisa dipakai.
+Jangan pernah menulis nilai kredensial ke dalam skrip atau dokumen: repositori ini publik.
+
 ### Apa yang belum ditegakkan
 
-Gateway **belum** menolak permintaan tanpa token.
-Ini diverifikasi langsung: dengan `AUTH_PUBLIC_KEY` terisi sekalipun, `GET /api/v2/ontologies` tanpa header `Authorization` tetap dijawab 200, begitu juga dengan token karangan.
-Penyebabnya ada di `services/svc-gateway/src/server.ts`: `authPlugin` didaftarkan lewat `app.register` tanpa `fastify-plugin`, sehingga hook `onRequest`-nya terkurung di dalam plugin itu dan tidak berlaku untuk satu rute pun.
-
-Konsekuensinya:
-
-- `request.claims` tidak pernah terisi, jadi tidak ada pemeriksaan izin berbasis token yang benar-benar berjalan.
-- Pembatasan laju (rate limit) yang seharusnya per-tenant jatuh kembali ke kunci per-token atau per-IP, karena kunci per-org diambil dari klaim yang tidak pernah ada.
-- `ENFORCE_PERMISSIONS=true` membuat setiap rute yang lewat gateway menjawab 403, karena hook izin tidak menemukan `x-user-id` maupun `request.claims`.
+Token yang sah membuktikan *siapa* pemanggilnya, belum *apa* yang boleh dilakukannya.
+Gateway tidak mengisi header `x-user-id` / `x-user-roles` yang dibaca pemeriksaan izin di hilir, jadi `ENFORCE_PERMISSIONS` belum punya identitas untuk dinilai; itu menunggu penyatuan model izin.
+Pembatasan laju juga masih jatuh ke kunci per-token, bukan per-tenant.
 
 Gateway **memang** membuang setiap header `x-user-*` yang dikirim klien sebelum meneruskan permintaan ke layanan hilir.
 Itu menutup jalan bagi pemanggil untuk mengarang perannya sendiri.
-Yang dihapus adalah penegakan palsu, bukan penegakan yang bekerja; penegakan sungguhan menunggu hop tepercaya yang mengisi header itu dari token tervalidasi.
 
 Perlakukan port layanan (8081-8092) sebagai jaringan internal.
 Skrip penyemai dan sinkronisasi bicara langsung ke port-port itu, jadi pembuangan header di gateway tidak menjangkau mereka.

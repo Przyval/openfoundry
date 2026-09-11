@@ -9,17 +9,22 @@ ONTOLOGY_SVC="${ONTOLOGY_SERVICE_URL:-http://localhost:8081}"
 OBJECTS_SVC="${OBJECTS_SERVICE_URL:-http://localhost:8082}"
 ACTIONS_SVC="${ACTIONS_SERVICE_URL:-http://localhost:8083}"
 
+# Bearer credentials for every request below. Reads OPENFOUNDRY_TOKEN or
+# OPENFOUNDRY_CLIENT_ID/_CLIENT_SECRET from the environment or .env, and sends
+# nothing when neither is set. See scripts/lib/auth.sh.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/auth.sh"
+
 echo "Seeding Logistics Operations ontology..."
 
 # --- Create or Reuse Ontology ---
-EXISTING_ONT=$(curl -sf "$ONTOLOGY_SVC/api/v2/ontologies" \
+EXISTING_ONT=$(of_curl -sf "$ONTOLOGY_SVC/api/v2/ontologies" \
   | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; print(d[0]['rid'] if d else '')" 2>/dev/null || echo "")
 
 if [ -n "$EXISTING_ONT" ]; then
   LOG_ONT="$EXISTING_ONT"
   echo "  Reusing existing ontology: $LOG_ONT"
 else
-  LOG_ONT=$(curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies" \
+  LOG_ONT=$(of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies" \
     -H "Content-Type: application/json" \
     -d '{"apiName":"logistics","displayName":"Logistics Operations","description":"Complete logistics operations management - shipments, warehouses, drivers, vehicles, routes, packages, and delivery attempts across Indonesian cities"}' \
     | python3 -c "import json,sys; print(json.load(sys.stdin)['rid'])")
@@ -35,7 +40,7 @@ for OT in \
   '{"apiName":"Route","displayName":"Route","description":"Delivery route between two points","primaryKey":"routeId","properties":{"routeId":{"type":"string","description":"Unique route ID"},"origin":{"type":"string","description":"Origin city"},"destination":{"type":"string","description":"Destination city"},"distance_km":{"type":"integer","description":"Distance in km"},"estimatedTime_hours":{"type":"integer","description":"Estimated time in hours (x10)"},"status":{"type":"string","description":"active/congested/closed"},"tollCost":{"type":"integer","description":"Toll cost (IDR)"},"fuelEstimate":{"type":"integer","description":"Fuel cost estimate (IDR)"}}}' \
   '{"apiName":"Package","displayName":"Package","description":"Individual package within a shipment","primaryKey":"packageId","properties":{"packageId":{"type":"string","description":"Unique package ID"},"shipmentId":{"type":"string","description":"Parent shipment ID"},"description":{"type":"string","description":"Package description"},"weight_kg":{"type":"integer","description":"Weight in kg (x10)"},"dimensions":{"type":"string","description":"LxWxH in cm"},"fragile":{"type":"string","description":"true/false"},"insured":{"type":"string","description":"true/false"},"insuranceValue":{"type":"integer","description":"Insurance value (IDR)"},"status":{"type":"string","description":"warehouse/loaded/in-transit/delivered"}}}' \
   '{"apiName":"DeliveryAttempt","displayName":"Delivery Attempt","description":"Record of a delivery attempt for a shipment","primaryKey":"attemptId","properties":{"attemptId":{"type":"string","description":"Unique attempt ID"},"shipmentId":{"type":"string","description":"Shipment ID"},"driverId":{"type":"string","description":"Driver ID"},"attemptDate":{"type":"string","description":"Attempt date"},"status":{"type":"string","description":"successful/failed/rescheduled"},"failureReason":{"type":"string","description":"Reason for failure if applicable"},"recipientName":{"type":"string","description":"Recipient name"},"signature":{"type":"string","description":"true/false"}}}'; do
-  curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$LOG_ONT/objectTypes" \
+  of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$LOG_ONT/objectTypes" \
     -H "Content-Type: application/json" -d "$OT" > /dev/null
 done
 echo "  7 object types created"
@@ -51,7 +56,7 @@ for LT in \
   '{"apiName":"RouteUsedByShipment","objectTypeApiName":"Route","linkedObjectTypeApiName":"Shipment","cardinality":"MANY","foreignKeyPropertyApiName":"routeId"}' \
   '{"apiName":"DriverHandlesShipment","objectTypeApiName":"Driver","linkedObjectTypeApiName":"Shipment","cardinality":"MANY","foreignKeyPropertyApiName":"driverId"}' \
   '{"apiName":"VehicleOnRoute","objectTypeApiName":"Vehicle","linkedObjectTypeApiName":"Route","cardinality":"MANY","foreignKeyPropertyApiName":"vehicleId"}'; do
-  curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$LOG_ONT/linkTypes" \
+  of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$LOG_ONT/linkTypes" \
     -H "Content-Type: application/json" -d "$LT" > /dev/null
 done
 echo "  8 link types created"
@@ -63,7 +68,7 @@ for AT in \
   '{"apiName":"complete-delivery","description":"Complete a delivery: mark shipment as delivered, update all packages to delivered status, record actual delivery date, increment driver total deliveries, and set driver status back to available","parameters":{"shipmentId":{"type":"string","required":true,"description":"The shipment ID to complete"},"recipientName":{"type":"string","required":true,"description":"Name of person who received the delivery"},"signature":{"type":"string","required":true,"description":"Whether signature was obtained (true/false)"},"driverId":{"type":"string","required":true,"description":"Driver who completed delivery"}},"modifiedEntities":{"Shipment":{"created":false,"modified":true},"Package":{"created":false,"modified":true},"Driver":{"created":false,"modified":true},"DeliveryAttempt":{"created":false,"modified":true}},"status":"ACTIVE"}' \
   '{"apiName":"report-delay","description":"Report a shipment delay: update shipment status to delayed, update estimated delivery, and optionally reschedule the delivery attempt","parameters":{"shipmentId":{"type":"string","required":true,"description":"The shipment ID that is delayed"},"reason":{"type":"string","required":true,"description":"Reason for the delay"},"newEstimatedDelivery":{"type":"string","required":true,"description":"New estimated delivery date (YYYY-MM-DD)"},"attemptId":{"type":"string","required":false,"description":"Delivery attempt to reschedule"}},"modifiedEntities":{"Shipment":{"created":false,"modified":true},"DeliveryAttempt":{"created":false,"modified":true}},"status":"ACTIVE"}' \
   '{"apiName":"transfer-package","description":"Transfer a package between warehouses: update package status and warehouse used capacity for both source and destination warehouses","parameters":{"packageId":{"type":"string","required":true,"description":"Package ID to transfer"},"sourceWarehouseId":{"type":"string","required":true,"description":"Source warehouse ID"},"destinationWarehouseId":{"type":"string","required":true,"description":"Destination warehouse ID"}},"modifiedEntities":{"Package":{"created":false,"modified":true},"Warehouse":{"created":false,"modified":true}},"status":"ACTIVE"}'; do
-  curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$LOG_ONT/actionTypes" \
+  of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$LOG_ONT/actionTypes" \
     -H "Content-Type: application/json" -d "$AT" > /dev/null
 done
 echo "  4 action types created"
@@ -81,7 +86,7 @@ for DATA in \
   '{"primaryKey":"SHP-006","properties":{"shipmentId":"SHP-006","origin":"Jakarta Utara","destination":"Surabaya","weight_kg":3200,"volume_m3":200,"status":"in-transit","priority":"express","estimatedDelivery":"2026-03-25","actualDelivery":"","cost":5800000}}' \
   '{"primaryKey":"SHP-007","properties":{"shipmentId":"SHP-007","origin":"Surabaya","destination":"Bandung","weight_kg":750,"volume_m3":45,"status":"delivered","priority":"standard","estimatedDelivery":"2026-03-16","actualDelivery":"2026-03-17","cost":1200000}}' \
   '{"primaryKey":"SHP-008","properties":{"shipmentId":"SHP-008","origin":"Bandung","destination":"Jakarta Barat","weight_kg":300,"volume_m3":20,"status":"returned","priority":"express","estimatedDelivery":"2026-03-19","actualDelivery":"","cost":650000}}'; do
-  curl -sf -X POST "$BASE/Shipment" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Shipment" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Warehouses ---
@@ -93,7 +98,7 @@ for DATA in \
   '{"primaryKey":"WH-004","properties":{"warehouseId":"WH-004","name":"Cross-Dock Surabaya Perak","city":"Surabaya","capacity_m3":12000,"usedCapacity_m3":5500,"type":"cross-dock","status":"active","manager":"Dewi Kartika"}}' \
   '{"primaryKey":"WH-005","properties":{"warehouseId":"WH-005","name":"Gudang Gedebage Bandung","city":"Bandung","capacity_m3":10000,"usedCapacity_m3":6200,"type":"distribution-center","status":"active","manager":"Asep Suryaman"}}' \
   '{"primaryKey":"WH-006","properties":{"warehouseId":"WH-006","name":"Distribution Center Medan Belawan","city":"Medan","capacity_m3":18000,"usedCapacity_m3":9000,"type":"distribution-center","status":"active","manager":"Taufik Hidayat"}}'; do
-  curl -sf -X POST "$BASE/Warehouse" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Warehouse" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Drivers ---
@@ -106,7 +111,7 @@ for DATA in \
   '{"primaryKey":"DRV-005","properties":{"driverId":"DRV-005","fullName":"Yanto Surya","phone":"0821-3344-5566","licenseType":"SIM-B","vehicleId":"VCL-005","status":"available","rating":44,"totalDeliveries":750,"joinDate":"2023-03-12"}}' \
   '{"primaryKey":"DRV-006","properties":{"driverId":"DRV-006","fullName":"Dimas Pradipta","phone":"0878-7788-9900","licenseType":"SIM-A","vehicleId":"VCL-006","status":"off-duty","rating":39,"totalDeliveries":180,"joinDate":"2025-09-01"}}' \
   '{"primaryKey":"DRV-007","properties":{"driverId":"DRV-007","fullName":"Budi Santoso","phone":"0856-2233-4455","licenseType":"SIM-B","vehicleId":"VCL-007","status":"on-route","rating":46,"totalDeliveries":1100,"joinDate":"2021-11-05"}}'; do
-  curl -sf -X POST "$BASE/Driver" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Driver" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Vehicles ---
@@ -120,7 +125,7 @@ for DATA in \
   '{"primaryKey":"VCL-006","properties":{"vehicleId":"VCL-006","plateNumber":"B 5578 LOG","type":"motorcycle","capacity_kg":150,"fuelType":"gasoline","mileage_km":22000,"status":"active","lastService":"2026-02-28"}}' \
   '{"primaryKey":"VCL-007","properties":{"vehicleId":"VCL-007","plateNumber":"BK 6689 LOG","type":"container","capacity_kg":25000,"fuelType":"diesel","mileage_km":185000,"status":"active","lastService":"2026-01-25"}}' \
   '{"primaryKey":"VCL-008","properties":{"vehicleId":"VCL-008","plateNumber":"B 9901 LOG","type":"truck","capacity_kg":12000,"fuelType":"diesel","mileage_km":155000,"status":"maintenance","lastService":"2026-03-20"}}'; do
-  curl -sf -X POST "$BASE/Vehicle" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Vehicle" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Routes ---
@@ -132,7 +137,7 @@ for DATA in \
   '{"primaryKey":"RTE-004","properties":{"routeId":"RTE-004","origin":"Surabaya","destination":"Bandung","distance_km":690,"estimatedTime_hours":110,"status":"active","tollCost":380000,"fuelEstimate":1050000}}' \
   '{"primaryKey":"RTE-005","properties":{"routeId":"RTE-005","origin":"Surabaya","destination":"Jakarta","distance_km":780,"estimatedTime_hours":120,"status":"congested","tollCost":450000,"fuelEstimate":1200000}}' \
   '{"primaryKey":"RTE-006","properties":{"routeId":"RTE-006","origin":"Bandung","destination":"Medan","distance_km":2100,"estimatedTime_hours":460,"status":"active","tollCost":800000,"fuelEstimate":3300000}}'; do
-  curl -sf -X POST "$BASE/Route" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Route" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Packages ---
@@ -150,7 +155,7 @@ for DATA in \
   '{"primaryKey":"PKG-010","properties":{"packageId":"PKG-010","shipmentId":"SHP-006","description":"Alat kesehatan - bed pasien","weight_kg":12000,"dimensions":"200x100x60","fragile":"true","insured":"true","insuranceValue":35000000,"status":"loaded"}}' \
   '{"primaryKey":"PKG-011","properties":{"packageId":"PKG-011","shipmentId":"SHP-006","description":"Alat kesehatan - kursi roda","weight_kg":4000,"dimensions":"90x65x90","fragile":"false","insured":"true","insuranceValue":18000000,"status":"loaded"}}' \
   '{"primaryKey":"PKG-012","properties":{"packageId":"PKG-012","shipmentId":"SHP-007","description":"Furnitur - meja kantor","weight_kg":3500,"dimensions":"150x75x75","fragile":"false","insured":"false","insuranceValue":0,"status":"delivered"}}'; do
-  curl -sf -X POST "$BASE/Package" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Package" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Delivery Attempts ---
@@ -164,7 +169,7 @@ for DATA in \
   '{"primaryKey":"ATT-006","properties":{"attemptId":"ATT-006","shipmentId":"SHP-008","driverId":"DRV-003","attemptDate":"2026-03-20","status":"failed","failureReason":"Penerima menolak paket - barang tidak sesuai pesanan","recipientName":"","signature":"false"}}' \
   '{"primaryKey":"ATT-007","properties":{"attemptId":"ATT-007","shipmentId":"SHP-005","driverId":"DRV-007","attemptDate":"2026-03-20","status":"rescheduled","failureReason":"Cuaca buruk - banjir di jalur Pantura","recipientName":"","signature":"false"}}' \
   '{"primaryKey":"ATT-008","properties":{"attemptId":"ATT-008","shipmentId":"SHP-006","driverId":"DRV-001","attemptDate":"2026-03-24","status":"rescheduled","failureReason":"","recipientName":"","signature":"false"}}'; do
-  curl -sf -X POST "$BASE/DeliveryAttempt" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/DeliveryAttempt" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 LINKS="$OBJECTS_SVC/api/v2/ontologies/$LOG_ONT/objects"
@@ -186,7 +191,7 @@ for PAIR in \
   "SHP-007 PKG-012"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Shipment/$SRC/links/ShipmentHasPackages" \
+  of_curl -sf -X POST "$LINKS/Shipment/$SRC/links/ShipmentHasPackages" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"Package\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -204,7 +209,7 @@ for PAIR in \
   "SHP-006 ATT-008"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Shipment/$SRC/links/ShipmentHasAttempts" \
+  of_curl -sf -X POST "$LINKS/Shipment/$SRC/links/ShipmentHasAttempts" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"DeliveryAttempt\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -221,7 +226,7 @@ for PAIR in \
   "DRV-007 VCL-007"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Driver/$SRC/links/DriverAssignedVehicle" \
+  of_curl -sf -X POST "$LINKS/Driver/$SRC/links/DriverAssignedVehicle" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"Vehicle\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -239,7 +244,7 @@ for PAIR in \
   "DRV-007 ATT-007"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Driver/$SRC/links/DriverHasAttempts" \
+  of_curl -sf -X POST "$LINKS/Driver/$SRC/links/DriverHasAttempts" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"DeliveryAttempt\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -251,7 +256,7 @@ PIPE_URL="$DATASETS_SVC/api/v2/pipelines"
 echo "  Creating pipelines..."
 
 # Pipeline 1: Shipment Cost Analysis
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Shipment Cost by Route",
@@ -269,7 +274,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 2: Driver Performance Scorecard
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Driver Performance Scorecard",
@@ -287,7 +292,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 3: Warehouse Capacity Alert
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Warehouse Capacity Alert",
@@ -304,7 +309,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 4: Delivery Failure Analysis
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Delivery Failure Analysis",
@@ -322,7 +327,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 5: Route Efficiency Optimizer
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Route Efficiency Optimizer",
@@ -351,7 +356,7 @@ for DS in \
   '{"name":"logistics-driver-performance","parentFolderRid":"ri.compass.main.folder.root"}' \
   '{"name":"logistics-route-analytics","parentFolderRid":"ri.compass.main.folder.root"}' \
   '{"name":"logistics-delivery-tracking","parentFolderRid":"ri.compass.main.folder.root"}'; do
-  curl -sf -X POST "$DS_URL" \
+  of_curl -sf -X POST "$DS_URL" \
     -H "Content-Type: application/json" -d "$DS" > /dev/null
 done
 echo "  5 datasets created"
@@ -361,7 +366,7 @@ echo "  Creating functions..."
 FUNCTIONS_SVC="${FUNCTIONS_SERVICE_URL:-http://localhost:8088}"
 FUNC_URL="$FUNCTIONS_SVC/api/v2/functions"
 
-curl -sf -X POST "$FUNC_URL" \
+of_curl -sf -X POST "$FUNC_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "apiName":"getActiveShipmentCount",
@@ -371,7 +376,7 @@ curl -sf -X POST "$FUNC_URL" \
     "code":"return objects.filter(o => o.properties.status === \"in-transit\" || o.properties.status === \"pending\").length;"
   }' > /dev/null
 
-curl -sf -X POST "$FUNC_URL" \
+of_curl -sf -X POST "$FUNC_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "apiName":"getWarehouseUtilization",
@@ -381,7 +386,7 @@ curl -sf -X POST "$FUNC_URL" \
     "code":"return objects.map(o => ({ name: o.properties.name, city: o.properties.city, utilization: Math.round((o.properties.usedCapacity_m3 / o.properties.capacity_m3) * 100), critical: (o.properties.usedCapacity_m3 / o.properties.capacity_m3) > 0.85 }));"
   }' > /dev/null
 
-curl -sf -X POST "$FUNC_URL" \
+of_curl -sf -X POST "$FUNC_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "apiName":"calculateDeliverySuccessRate",
