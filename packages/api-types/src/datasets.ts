@@ -85,9 +85,9 @@ export interface OpenTransactionRequest {
 /** Metadata about a file in a dataset (content not included) */
 export interface DatasetFile {
   path: string;
-  size: number;
-  contentType: string;
   transactionRid: string;
+  sizeBytes: number;
+  updatedTime: string;
 }
 
 export interface ListFilesResponse {

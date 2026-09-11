@@ -135,7 +135,7 @@ export async function createServer(
   await app.register(v2Routes, {
     prefix: "/api/v2",
     datasetStore: datasetStore as DatasetStore,
-    fileStore: fileStore as FileStore,
+    fileStore,
     pipelineStore: pipelineStore as PipelineStore,
   });
   await app.register(v1Routes, {

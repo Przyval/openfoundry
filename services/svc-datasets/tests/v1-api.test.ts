@@ -285,18 +285,126 @@ describe("v1 files", () => {
     expect(fileStore.listFiles(rid)).toEqual([]);
   });
 
-  it("does not serve the two v1 file reads, whose model needs a write time", async () => {
-    // `File.updatedTime` is required in v1 and neither file store records one,
-    // so these operations are left unserved rather than answered without it.
+  it("GET .../files/{filePath} serves the exact v1 File model", async () => {
     const rid = await createDataset();
-    fileStore.putFile(rid, "report.csv", new Uint8Array([1]), "text/csv", "");
+    const stored = fileStore.putFile(
+      rid,
+      "nested/report.csv",
+      new Uint8Array([1, 2, 3]),
+      "text/csv",
+      "ri.foundry.main.transaction.t1",
+    );
 
-    for (const url of [
-      `/api/v1/datasets/${rid}/files`,
-      `/api/v1/datasets/${rid}/files/report.csv`,
-    ]) {
-      expect((await app.inject({ method: "GET", url })).statusCode).toBe(404);
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/datasets/${rid}/files/nested/report.csv`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    // `contentType` is not in the v1 model and must not leak into the response.
+    expectExactKeys(res.json(), [
+      "path",
+      "transactionRid",
+      "sizeBytes",
+      "updatedTime",
+    ]);
+    expect(res.json()).toEqual({
+      path: "nested/report.csv",
+      transactionRid: "ri.foundry.main.transaction.t1",
+      sizeBytes: 3,
+      updatedTime: stored.updatedTime,
+    });
+  });
+
+  it("serves a write time that is an ISO instant, not a fabricated one", async () => {
+    const rid = await createDataset();
+    const before = Date.now();
+    fileStore.putFile(rid, "a.csv", new Uint8Array([1]), "text/csv", "");
+    const after = Date.now();
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/datasets/${rid}/files/a.csv`,
+    });
+
+    const updatedTime = res.json().updatedTime as string;
+    expect(updatedTime).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
+    const parsed = Date.parse(updatedTime);
+    expect(parsed).toBeGreaterThanOrEqual(before - 1000);
+    expect(parsed).toBeLessThanOrEqual(after + 1000);
+  });
+
+  it("moves the write time when an existing path is overwritten", async () => {
+    const rid = await createDataset();
+    const first = fileStore.putFile(rid, "a.csv", new Uint8Array([1]), "text/csv", "");
+    // `Date.now()` has millisecond resolution, so a same-millisecond rewrite
+    // would compare equal without proving anything.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    fileStore.putFile(rid, "a.csv", new Uint8Array([1, 2]), "text/csv", "");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/datasets/${rid}/files/a.csv`,
+    });
+
+    expect(Date.parse(res.json().updatedTime)).toBeGreaterThan(
+      Date.parse(first.updatedTime),
+    );
+  });
+
+  it("GET .../files pages over the v1 File model", async () => {
+    const rid = await createDataset();
+    fileStore.putFile(rid, "a.csv", new Uint8Array([1]), "text/csv", "");
+    fileStore.putFile(rid, "b.csv", new Uint8Array([1, 2]), "text/csv", "");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/datasets/${rid}/files`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toHaveLength(2);
+    for (const file of res.json().data) {
+      expectExactKeys(file, ["path", "transactionRid", "sizeBytes", "updatedTime"]);
+      expect(typeof file.updatedTime).toBe("string");
     }
+  });
+
+  it("refuses a branch- or transaction-scoped file request", async () => {
+    // One record per path means a scoped read would answer out of the single
+    // copy while reporting that it had honoured the scope.
+    const rid = await createDataset();
+    fileStore.putFile(rid, "a.csv", new Uint8Array([1]), "text/csv", "");
+
+    for (const [url, param] of [
+      [`/api/v1/datasets/${rid}/files?branchId=experiment`, "branchId"],
+      [`/api/v1/datasets/${rid}/files?startTransactionRid=ri.t1`, "startTransactionRid"],
+      [`/api/v1/datasets/${rid}/files/a.csv?endTransactionRid=ri.t2`, "endTransactionRid"],
+    ] as const) {
+      const res = await app.inject({ method: "GET", url });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().parameters.param).toBe(param);
+    }
+
+    const del = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/datasets/${rid}/files/a.csv?transactionRid=ri.t3`,
+    });
+    expect(del.statusCode).toBe(400);
+    // The refusal must not have deleted the only copy on its way out.
+    expect(fileStore.listFiles(rid)).toHaveLength(1);
+  });
+
+  it("does not serve the transactional v1 upload", async () => {
+    // `POST .../files:upload` places a file in a named transaction, which a
+    // store keeping one record per path cannot represent.
+    const rid = await createDataset();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/datasets/${rid}/files:upload?filePath=a.csv`,
+      payload: "a",
+    });
+    expect(res.statusCode).toBe(404);
   });
 });
 

@@ -15,6 +15,7 @@ import type {
   StoredDataset,
   Transaction,
 } from "../../store/dataset-store.js";
+import type { StoredFile } from "../../store/file-store.js";
 
 /** `datasets_models.Branch` — the branch identifier is its name. */
 export interface V1Branch {
@@ -93,5 +94,33 @@ export function toV1Transaction(transaction: Transaction): V1Transaction {
     ...(transaction.committedAt !== undefined
       ? { closedTime: transaction.committedAt }
       : {}),
+  };
+}
+
+/**
+ * `datasets_models.File` (`foundry_sdk/v1/datasets/models.py:74`).
+ *
+ * v1 and v2 happen to declare the identical four fields here, which is why this
+ * projection reads the same as the v2 one. It is still written out separately:
+ * the two versions agree today by coincidence, not by contract - `Branch` and
+ * `OntologyObject` already disagree - and a v1 client must not start reading a
+ * field because a v2 route was edited.
+ *
+ * `sizeBytes` is optional in the model but always known here: the store records
+ * the byte length of the content it was handed.
+ */
+export interface V1File {
+  path: string;
+  transactionRid: string;
+  sizeBytes: number;
+  updatedTime: string;
+}
+
+export function toV1File(file: StoredFile): V1File {
+  return {
+    path: file.path,
+    transactionRid: file.transactionRid,
+    sizeBytes: file.size,
+    updatedTime: file.updatedTime,
   };
 }

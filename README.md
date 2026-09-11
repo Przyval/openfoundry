@@ -260,11 +260,14 @@ DELETE /api/v1/datasets/:rid/branches/:branchId                 Delete branch
 POST   /api/v1/datasets/:rid/transactions                       Create transaction
 POST   /api/v1/datasets/:rid/transactions/:txRid/commit         Commit transaction
 POST   /api/v1/datasets/:rid/transactions/:txRid/abort          Abort transaction
+GET    /api/v1/datasets/:rid/files                              List files
+GET    /api/v1/datasets/:rid/files/*                            Get file metadata
 DELETE /api/v1/datasets/:rid/files/*                            Delete file
 ```
 
-Operations v1 declares that OpenFoundry does not serve -- the file reads and the whole `attachments`
-namespace -- answer 404 rather than a wrong shape; the source records why where each would have gone.
+Operations v1 declares that OpenFoundry does not serve -- the file upload and the whole
+`attachments` namespace -- answer 404 rather than a wrong shape; the source records why where each
+would have gone.
 
 ### Authentication
 

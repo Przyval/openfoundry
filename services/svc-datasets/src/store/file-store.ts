@@ -10,6 +10,16 @@ export interface StoredFile {
   contentType: string;
   content: Uint8Array;
   transactionRid: string;
+  /**
+   * When this record was last written, as an ISO 8601 instant.
+   *
+   * Foundry's `File` model requires `updatedTime` in both API versions, so a
+   * file record that does not carry one has no serializable representation.
+   * It moves on every `putFile`, including the overwrite of an existing path -
+   * a re-upload replaces the record, so the previous write time is gone along
+   * with the previous content.
+   */
+  updatedTime: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -37,6 +47,7 @@ export class FileStore {
       contentType,
       content,
       transactionRid,
+      updatedTime: new Date().toISOString(),
     };
     this.files.set(this.key(datasetRid, path), file);
     return file;

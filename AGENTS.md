@@ -85,6 +85,8 @@ The v2 ontology endpoints therefore reject any `branch`, `scenarioRid` or `trans
 
 `/api/v1` and `/api/v2` are different APIs, not one API behind two prefixes.
 The models diverge exactly where a blind alias would hurt: v1 `Branch` is keyed `branchId` where v2 uses `name`, v1 `OntologyObject` nests values under `properties` while v2 is a bare property map, v1 `ObjectType.primaryKey` is a list, and v1 `ApplyActionResponse` declares no fields at all.
+`File` is the counter-example that proves the rule: v1 and v2 declare the identical four fields (`path`, `transactionRid`, `sizeBytes`, `updatedTime`), and each version still projects it separately, because agreeing today is not a contract.
+A field the store has but Foundry does not - `contentType` on a file - is as much a divergence as a missing one, so it is not emitted.
 Each service keeps its v1 wire shapes in `services/*/src/routes/v1/serializers.ts`, projected from the store rather than from whatever the neighbouring v2 route happens to emit, and `services/svc-objects/src/routes/v1/search-query.ts` does the same for the v1 filter grammar - whose `contains` tests array membership where the shared query engine's tests a substring.
 Check `foundry_sdk/v1/*/models.py` and `foundry_sdk/v2/*/models.py` in the official Python SDK before adding to either version.
 Operations left unserved are recorded where they would have gone; `services/svc-datasets/src/routes/v1/files.ts` is the worked example.
@@ -142,6 +144,8 @@ A rule that has to override Blueprint therefore has to sit outside `@layer app`;
 
 `scripts/migrate.sql` (what Docker Compose loads at init) and `db/migrations/*.sql` (what `pnpm db:migrate` applies) have drifted: only the latter adds `org_rid` and row-level security.
 Code written against one schema fails against the other - `PgObjectStore` inserts `org_rid`, which the Compose database has no column for.
+A Pg store can also name a column no schema has at all and nothing catches it: `PgFileStore.putFile` set `updated_at` for months against a `dataset_files` table without that column, so every overwrite failed with `42703` while the in-memory suite stayed green.
+`services/svc-datasets/tests/pg-file-write-time.test.ts` is the pattern for guarding that - assert the SQL, then assert both schema sources carry what it names.
 
 ## Secrets
 

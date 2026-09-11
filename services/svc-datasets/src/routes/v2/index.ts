@@ -1,16 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import type { DatasetStore } from "../../store/dataset-store.js";
-import type { FileStore } from "../../store/file-store.js";
 import type { PipelineStore } from "../../store/pipeline-store.js";
 import { datasetRoutes } from "./datasets.js";
-import { fileRoutes } from "./files.js";
+import { fileRoutes, type FileReadWriteStore } from "./files.js";
 import { pipelineRoutes } from "./pipelines.js";
 
 export async function v2Routes(
   app: FastifyInstance,
   opts: {
     datasetStore: DatasetStore;
-    fileStore: FileStore;
+    fileStore: FileReadWriteStore;
     pipelineStore: PipelineStore;
   },
 ): Promise<void> {

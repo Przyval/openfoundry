@@ -13,6 +13,18 @@ interface FileRow {
   content_type: string;
   transaction_rid: string;
   created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Project a row's write time onto the wire format both API versions require.
+ *
+ * `updated_at` comes back from `pg` as a `Date`; Foundry's `updatedTime` is an
+ * ISO 8601 instant, which is also what the in-memory `FileStore` records, so
+ * the two stores serve the identical shape.
+ */
+function toIsoInstant(value: string | Date): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
 // ---------------------------------------------------------------------------
@@ -46,20 +58,30 @@ export class PgFileStore {
   ): Promise<StoredFile> {
     const size = content.byteLength;
 
-    await this.pool.query({
-      text: `INSERT INTO dataset_files (dataset_rid, path, size, content_type, transaction_rid)
-             VALUES ($1, $2, $3, $4, $5)
+    // `updated_at` is returned rather than timed here, so the recorded write
+    // time and the one served to the caller are the same value.
+    const { rows } = await this.pool.query<{ updated_at: string | Date }>({
+      text: `INSERT INTO dataset_files (dataset_rid, path, size, content_type, transaction_rid, updated_at)
+             VALUES ($1, $2, $3, $4, $5, NOW())
              ON CONFLICT (dataset_rid, path) DO UPDATE SET
                size = EXCLUDED.size,
                content_type = EXCLUDED.content_type,
                transaction_rid = EXCLUDED.transaction_rid,
-               updated_at = NOW()`,
+               updated_at = NOW()
+             RETURNING updated_at`,
       values: [datasetRid, path, size, contentType, transactionRid],
     });
 
     this.contentCache.set(this.cacheKey(datasetRid, path), content);
 
-    return { path, size, contentType, content, transactionRid };
+    return {
+      path,
+      size,
+      contentType,
+      content,
+      transactionRid,
+      updatedTime: toIsoInstant(rows[0].updated_at),
+    };
   }
 
   async getFile(datasetRid: string, path: string): Promise<StoredFile> {
@@ -81,6 +103,7 @@ export class PgFileStore {
       contentType: row.content_type,
       content,
       transactionRid: row.transaction_rid,
+      updatedTime: toIsoInstant(row.updated_at),
     };
   }
 
@@ -96,6 +119,7 @@ export class PgFileStore {
       contentType: row.content_type,
       content: this.contentCache.get(this.cacheKey(datasetRid, row.path)) ?? new Uint8Array(0),
       transactionRid: row.transaction_rid,
+      updatedTime: toIsoInstant(row.updated_at),
     }));
   }
 

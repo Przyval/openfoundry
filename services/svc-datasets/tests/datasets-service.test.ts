@@ -399,8 +399,17 @@ describe("File upload/download", () => {
       headers: { "content-type": "text/csv" },
     });
     expect(res.statusCode).toBe(201);
+    // `datasets_models.File` (v2): the size is `sizeBytes`, `updatedTime` is
+    // required, and `contentType` is not part of the model.
+    expect(Object.keys(res.json()).sort()).toEqual([
+      "path",
+      "sizeBytes",
+      "transactionRid",
+      "updatedTime",
+    ]);
     expect(res.json().path).toBe("data.csv");
-    expect(res.json().size).toBeGreaterThan(0);
+    expect(res.json().sizeBytes).toBeGreaterThan(0);
+    expect(Date.parse(res.json().updatedTime)).not.toBeNaN();
   });
 
   it("GET downloads a file", async () => {

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { DatasetReadWriteStore } from "../../store/dataset-store.js";
 import { datasetRoutesV1 } from "./datasets.js";
-import { fileRoutesV1, type FileDeleteStore } from "./files.js";
+import { fileRoutesV1, type FileReadDeleteStore } from "./files.js";
 
 /**
  * The `/api/v1` dataset surface.
@@ -12,7 +12,7 @@ import { fileRoutesV1, type FileDeleteStore } from "./files.js";
  */
 export async function v1Routes(
   app: FastifyInstance,
-  opts: { datasetStore: DatasetReadWriteStore; fileStore: FileDeleteStore },
+  opts: { datasetStore: DatasetReadWriteStore; fileStore: FileReadDeleteStore },
 ): Promise<void> {
   // Each child gets a freshly built options object: `opts` still carries the
   // `prefix` this plugin was registered with, and passing it through would
