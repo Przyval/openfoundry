@@ -44,9 +44,10 @@ export interface OpenFoundryClaims {
    * "ADMIN" or "EDITOR VIEWER". Optional: tokens minted before this claim
    * existed do not carry it, and a token without it simply conveys no roles.
    *
-   * This is the only trustworthy source of a caller's roles. The downstream
-   * `X-User-Roles` header is set by the gateway from this claim and from
-   * nothing else - see services/svc-gateway/src/proxy.ts.
+   * Minted, but with no consumer yet: the gateway asserts no identity
+   * downstream (services/svc-gateway/src/proxy.ts). The permission-model work
+   * that unifies the guarded routes is what will read this claim, and it is
+   * the only trustworthy source of a caller's roles when it does.
    */
   readonly roles?: string;
 }

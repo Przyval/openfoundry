@@ -188,7 +188,9 @@ services:
       PORT: "8080"
       HOST: "0.0.0.0"
       AUTH_PUBLIC_KEY: ${AUTH_PUBLIC_KEY:-}
-      AUTH_ISSUER: ${AUTH_ISSUER:-openfoundry}
+      # AUTH_ISSUER is deliberately unset: the gateway's own default is the
+      # `iss` svc-multipass signs, and a stale override here rejected every
+      # real token. Set it only alongside a change to what multipass signs.
       AUTH_AUDIENCE: ${AUTH_AUDIENCE:-openfoundry-api}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://console.openfoundry.local}
       RATE_LIMIT_ENABLED: "true"

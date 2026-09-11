@@ -100,11 +100,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () =>
       new TokenManager({
         ...oauthOptions,
-        onTokenChange: (token: TokenResponse) => {
-          const stored: StoredToken = {
-            ...token,
-            expiresAt: Date.now() + token.expiresIn * 1000,
-          };
+        onTokenChange: (token: TokenResponse, expiresAt: number) => {
+          const stored: StoredToken = { ...token, expiresAt };
           localStorage.setItem(LOCAL_STORAGE_TOKEN_KEY, JSON.stringify(stored));
         },
       }),

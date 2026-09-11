@@ -15,9 +15,10 @@ export interface OAuthClient {
   readonly scopes: readonly string[];
   readonly isPublic: boolean;
   /**
-   * Platform roles this client's tokens may assert. The gateway turns them
-   * into the downstream X-User-Roles header, so a client with none gets a
-   * token that conveys no roles - never a token that conveys every role.
+   * Platform roles this client's tokens may assert. Minted into the token's
+   * `roles` claim, but with no consumer yet: the gateway asserts no identity
+   * downstream, and the permission-model work is what will read it. A client
+   * with no roles gets a token that conveys none - never one that conveys all.
    */
   readonly roles?: readonly string[];
 }

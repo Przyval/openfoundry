@@ -101,7 +101,7 @@ Fastify encapsulates anything passed to `app.register`, so a plugin that adds an
 `authPlugin` and `rateLimitPlugin` are therefore called directly on the root instance in `services/svc-gateway/src/server.ts`; registering either one silently guards nothing.
 
 The gateway enforces only when `AUTH_PUBLIC_KEY` is set; empty means every request passes, which is the demo default.
-The key must be the PEM that matches svc-multipass's `JWT_PRIVATE_KEY`, and `AUTH_ISSUER` must match the `iss` multipass signs (`openfoundry-multipass`) or every real token is rejected.
+The key must be the PEM that matches svc-multipass's `JWT_PRIVATE_KEY`, and `AUTH_ISSUER` must match the `iss` multipass signs (`openfoundry-multipass`) or every real token is rejected - which is why `deploy/` sets no value for it and lets the gateway's default stand.
 
 Every non-browser caller gets its bearer token from the environment through `scripts/lib/auth.sh` (`of_curl`) or `scripts/lib/auth.ts` (`authHeaders`): `OPENFOUNDRY_TOKEN`, or `OPENFOUNDRY_CLIENT_ID`/`OPENFOUNDRY_CLIENT_SECRET` exchanged for one.
 Both send no header when neither is set, so the demo still works unauthenticated. Never write a credential into a script - this repository is public.
@@ -113,6 +113,11 @@ That is deliberate: asserting roles there would make enforcement effective whate
 Minting the identity belongs to the work that unifies the guarded routes onto one permission model, where the role vocabulary is decided.
 svc-multipass does mint an optional `roles` claim - on the dev password login and on `client_credentials` against a seeded client, both only outside `NODE_ENV=production` - but nothing consumes it yet.
 The authorization_code and refresh grants mint no roles at all: `/multipass/api/oauth2/authorize` authenticates nobody (it hardcodes the approved user, auto-registers any `client_id` and accepts any `redirect_uri`), and the refresh grant checks only the refresh token value, with no client authentication.
+
+Two limits are known and accepted, not oversights.
+`/authorize` is exempt from gateway auth and authenticates nobody, so anyone who can reach the gateway can mint a token that passes validation - a roleless one, so it grants authentication and not authorization; closing it needs a real login flow, which is separate work.
+And `NODE_ENV=production` seeds no OAuth client (`ClientStore`) and there is no registration endpoint, so `client_credentials` cannot work there at all: only a pre-minted `OPENFOUNDRY_TOKEN` authenticates a script against a production deployment.
+That is the deliberate price of not shipping this public repository's published credentials into production.
 
 The proxy must not forward the incoming `Content-Length`: the body is re-serialised from Fastify's parsed form, and a stale length makes undici reject the request, which surfaces as a 502.
 
