@@ -109,6 +109,8 @@ Two different `requirePermission` exports coexist and only one is reachable.
 `services/svc-gateway/src/middleware/rbac.ts` has zero importers repo-wide; the one that actually guards 118 routes is `@openfoundry/permissions`, whose header-based variant reads `x-user-id` / `x-user-roles`.
 Those headers are a trusted-hop input, never a client input: the gateway proxy drops every `x-user-*` header so a caller cannot assert its own roles. Do not re-add them to the forwarded set, and do not introduce a second identity header without a hop that sets it from a verified token.
 Seed and sync scripts talk to the service ports directly, not through the gateway, so that strip does not reach them - which is also why a service port must never be publicly reachable.
+Role enforcement is still absent after that strip: what it removed was a role claim any caller could forge, not working enforcement, and nothing yet sets those headers from a verified token.
+Until a trusted hop does, `ENFORCE_PERMISSIONS=true` makes every gateway-proxied route answer 403, because the permission hook sees neither `x-user-id` nor `request.claims`.
 
 `request.claims` is never populated: `authPlugin` is registered unencapsulated at `services/svc-gateway/src/server.ts:153` without `fastify-plugin`, so its `onRequest` hook applies to nothing.
 Until that is fixed, no token-based permission check enforces anything. `claims.sub` is also a username, not a RID (`svc-multipass/src/routes/auth.ts:122`), and issued tokens carry no `roles` claim at all (`packages/auth-tokens/src/token-creator.ts`).

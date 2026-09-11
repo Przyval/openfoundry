@@ -35,6 +35,14 @@ const HOP_BY_HOP_HEADERS = new Set([
  * This only removes an inbound trust. It does not grant anyone access, and it
  * does not populate the headers either - see the note in `middleware/auth.ts`
  * about `request.claims` never being set.
+ *
+ * Known consequence: role-based enforcement does NOT work after this change.
+ * What was removed is fake enforcement - a client could assert its own roles -
+ * and real enforcement waits on the gateway task that validates JWTs and sets
+ * these headers from validated claims. Until that trusted hop exists, running
+ * with `ENFORCE_PERMISSIONS=true` makes every gateway-proxied route answer 403,
+ * because the permission hook sees neither `x-user-id` nor `request.claims`.
+ * That is known and accepted, not an oversight.
  */
 const CLIENT_ASSERTED_IDENTITY_PREFIX = "x-user-";
 
