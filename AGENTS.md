@@ -55,6 +55,8 @@ own default include globs rather than the root config's `**/tests/**` + `**/src/
 
 Integration tests are `pnpm run test:integration` (config in `tests/vitest.config.ts`).
 Most files start their own in-process server; `api-endpoints` and `sdk-compat` need a real gateway on `localhost:8080` via `bash start.sh`, which needs Docker Postgres.
+`api-endpoints` additionally needs *seeded* data: it reads the first existing ontology rather than creating one, so against an empty store its whole first test yields nothing and 20 tests cascade into "expected undefined to be defined".
+Seed with any `scripts/demo/seed-*.sh` before blaming a change. With data seeded it is 36/37, the one failure being Actions apply returning 404 where the test expects 400; that failure predates this note.
 
 Suites that start their own server pass `new OntologyStore(null)` / `new ObjectStore(null)` so they
 stay off the shared file store; a store built with the default path loads `/tmp/openfoundry-data/`,
@@ -100,6 +102,24 @@ Without `DATABASE_URL` every service uses its in-memory or `/tmp/openfoundry-dat
 `/tmp/openfoundry-data` is a fixed path with no env override, so two checkouts running at once share and overwrite it.
 
 Dev login is `admin` / `admin123` (see `DEV_USERS` in `services/svc-multipass/src/routes/auth.ts`).
+
+## Identity and permissions
+
+Two different `requirePermission` exports coexist and only one is reachable.
+`services/svc-gateway/src/middleware/rbac.ts` has zero importers repo-wide; the one that actually guards 118 routes is `@openfoundry/permissions`, whose header-based variant reads `x-user-id` / `x-user-roles`.
+Those headers are a trusted-hop input, never a client input: the gateway proxy drops every `x-user-*` header so a caller cannot assert its own roles. Do not re-add them to the forwarded set, and do not introduce a second identity header without a hop that sets it from a verified token.
+Seed and sync scripts talk to the service ports directly, not through the gateway, so that strip does not reach them - which is also why a service port must never be publicly reachable.
+Role enforcement is still absent after that strip: what it removed was a role claim any caller could forge, not working enforcement, and nothing yet sets those headers from a verified token.
+Until a trusted hop does, `ENFORCE_PERMISSIONS=true` makes every gateway-proxied route answer 403, because the permission hook sees neither `x-user-id` nor `request.claims`.
+
+`request.claims` is never populated: `authPlugin` is registered unencapsulated at `services/svc-gateway/src/server.ts:153` without `fastify-plugin`, so its `onRequest` hook applies to nothing.
+Until that is fixed, no token-based permission check enforces anything. `claims.sub` is also a username, not a RID (`svc-multipass/src/routes/auth.ts:122`), and issued tokens carry no `roles` claim at all (`packages/auth-tokens/src/token-creator.ts`).
+
+Neither model is Foundry's, so do not converge on either as-is.
+Foundry grants *roles on a resource* - `POST /v2/filesystem/resources/{resourceRid}/roles/add`, inherited by the container's contents, with principals that may be groups - while roles themselves are platform-defined and read-only over the API (`GET /v2/admin/roles/{roleId}` and `getBatch` only, no create or delete).
+Against that, `@openfoundry/permissions` roles are global (an EDITOR may write every ontology in the deployment) and `rbac.ts` is a bare `(subject, resource, permission)` ACL with no role, container, group or owner.
+`createPgStoreHook` in `packages/permissions/src/middleware.ts` is the one piece already shaped right: admin bypass, then resource grant, then role fallback.
+Tenant isolation is a separate, *mandatory* layer in Foundry (Organizations) and is `org_rid` + RLS here - no permission check delivers it, and none should be described as doing so.
 
 ## Front-end to service sharp edges
 
