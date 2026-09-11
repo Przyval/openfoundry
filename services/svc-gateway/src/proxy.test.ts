@@ -206,6 +206,58 @@ describe("Gateway proxy routing", () => {
     expect(headers["x-forwarded-for"]).toBeDefined();
   });
 
+  it("does not forward client-asserted x-user-* headers to upstream", async () => {
+    const mockResponse = new Response("{}", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse);
+
+    const app = await createServer({ config: TEST_CONFIG });
+    await app.inject({
+      method: "GET",
+      url: "/api/v2/ontologies",
+      headers: {
+        // Downstream, requirePermission("ontology:read") would honour these.
+        "x-user-id": "mallory",
+        "x-user-roles": "ADMIN",
+      },
+    });
+
+    const [, fetchOptions] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const headers = (fetchOptions as RequestInit).headers as Record<string, string>;
+    expect(headers["x-user-id"]).toBeUndefined();
+    expect(headers["x-user-roles"]).toBeUndefined();
+  });
+
+  it("strips x-user-* regardless of header casing, and keeps other headers", async () => {
+    const mockResponse = new Response("{}", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse);
+
+    const app = await createServer({ config: TEST_CONFIG });
+    await app.inject({
+      method: "GET",
+      url: "/api/v2/ontologies",
+      headers: {
+        "X-User-Roles": "ADMIN",
+        "X-User-Groups": "platform-admins",
+        authorization: "Bearer token-123",
+        "x-uploaded-by": "alice",
+      },
+    });
+
+    const [, fetchOptions] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const headers = (fetchOptions as RequestInit).headers as Record<string, string>;
+    const names = Object.keys(headers).map((k) => k.toLowerCase());
+    expect(names.some((n) => n.startsWith("x-user-"))).toBe(false);
+    // Everything the caller is entitled to assert still goes through.
+    expect(headers["authorization"]).toBe("Bearer token-123");
+    expect(headers["x-uploaded-by"]).toBe("alice");
+  });
+
   it("strips upstream hop-by-hop headers from response", async () => {
     const mockResponse = new Response("{}", {
       status: 200,
