@@ -405,8 +405,20 @@ CREATE TABLE IF NOT EXISTS dataset_files (
     transaction_rid TEXT REFERENCES dataset_transactions(rid) ON DELETE SET NULL,
     s3_key          TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- When the record was last written. Foundry's `File` model requires
+    -- `updatedTime` in both API versions, and `created_at` does not move when a
+    -- path is re-uploaded. Kept in step with db/migrations/010.
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (dataset_rid, path)
 );
+
+-- This file is loaded once at Docker Compose init, so an existing database
+-- created before `updated_at` existed keeps the old table; add the column to it
+-- too. See db/migrations/010 for why pre-existing rows take `created_at`.
+ALTER TABLE dataset_files ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+UPDATE dataset_files SET updated_at = created_at WHERE updated_at IS NULL;
+ALTER TABLE dataset_files ALTER COLUMN updated_at SET DEFAULT NOW();
+ALTER TABLE dataset_files ALTER COLUMN updated_at SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_dataset_files_transaction ON dataset_files (transaction_rid);
 

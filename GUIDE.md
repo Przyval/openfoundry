@@ -689,24 +689,28 @@ DELETE /api/v1/datasets/:rid/branches/:branchId               Hapus branch
 POST   /api/v1/datasets/:rid/transactions                     Buka transaksi
 POST   /api/v1/datasets/:rid/transactions/:rid/commit         Commit transaksi
 POST   /api/v1/datasets/:rid/transactions/:rid/abort          Batalkan transaksi
+GET    /api/v1/datasets/:rid/files                            List berkas
+GET    /api/v1/datasets/:rid/files/*                          Metadata berkas
 DELETE /api/v1/datasets/:rid/files/*                          Hapus berkas
 ```
 
 Filter v1 memakai bentuk `{"type": "<varian>", "field": "...", "value": ...}`, bukan bentuk v2.
 Contoh yang berhasil: `{"query": {"type": "eq", "field": "city", "value": "Jakarta"}, "pageSize": 3}`.
 
-**Tiga operasi v1 sengaja tidak disajikan**, dan semuanya menjawab 404 "Route not found":
+**Dua operasi v1 sengaja tidak disajikan**, dan keduanya menjawab 404 "Route not found":
 
 | Operasi | Alasan |
 |---------|--------|
-| `GET /api/v1/datasets/:rid/files` | Model `File` v1 mewajibkan `updatedTime`, dan rekaman berkas belum mencatat waktu tulis |
-| `GET /api/v1/datasets/:rid/files/:filePath` | Alasan yang sama |
+| `POST /api/v1/datasets/:rid/files:upload` | Unggahan v1 menaruh berkas ke dalam satu transaksi bernama, sedangkan penyimpanan hanya menyimpan satu rekaman per path |
 | Seluruh namespace `/api/v1/attachments` | Tidak ada backend-nya; mem-proxy-kannya akan menjawab 502, padahal 404 yang benar |
 
 Perhatikan bedanya: `DELETE /api/v1/datasets/:rid/files/*` **disajikan** dan menjawab 404 bernama `FileNotFound` ketika berkasnya tidak ada.
 Itu 404 yang berbeda artinya dari 404 "Route not found" di tabel atas.
 
-Operasi v1 juga menolak `branchId` dan `transactionRid` pada penghapusan berkas, karena file store tidak punya dimensi branch maupun transaksi; menerimanya berarti menghapus satu-satunya salinan sambil melaporkan penghapusan yang terbatas lingkup.
+Model `File` identik di v1 dan v2 - `path`, `transactionRid`, `sizeBytes`, `updatedTime` - dan penyimpanan berkas kini mencatat waktu tulis pada setiap unggahan, baik di memori maupun di Postgres, sehingga kedua versi menyajikan bentuk yang lengkap.
+`contentType` tidak ada dalam model Foundry dan tidak lagi ikut dikirim; ia tetap disajikan sebagai header `content-type` pada unduhan berkas.
+
+Seluruh operasi berkas v1 menolak `branchId`, `startTransactionRid`, `endTransactionRid` dan `transactionRid`, karena file store tidak punya dimensi branch maupun transaksi; menerimanya berarti menjawab dari satu-satunya salinan sambil melaporkan jawaban yang terbatas lingkup - dan pada penghapusan, menghapus salinan itu.
 
 ---
 
@@ -784,6 +788,9 @@ Semuanya nyata pada `master` saat panduan ini ditulis.
     Nomornya bentrok untuk hampir semua job, dan action menjawab 500 yang membungkus 409 alih-alih konflik yang bisa ditindaklanjuti.
     Pada semaian baru hanya `JOB-2026-008` yang lolos.
 20. Dengan `DATABASE_URL` terpasang, sebagian besar rute user dan grup di svc-admin menjawab 500 karena memanggil store asinkron secara sinkron.
+21. `GET /api/v2/datasets/:rid/files/:filePath` mengembalikan isi berkas, padahal di Foundry rute itu mengembalikan metadata `File` dan isinya diambil dari `.../files/:filePath/content`, yang belum ada di sini.
+    Bentuk `File` yang dikirim rute-rute lain sudah benar; yang belum cocok adalah operasi mana yang menempati path tersebut.
+    Memindahkannya berarti mengubah URL unduhan yang dipakai klien sekarang, jadi dibiarkan sampai rute `/content` ditambahkan.
 
 ---
 
