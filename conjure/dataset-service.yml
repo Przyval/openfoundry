@@ -81,12 +81,14 @@ types:
           type: TransactionType
 
       DatasetFile:
-        docs: Metadata about a file in a dataset (content not included)
+        docs: |
+          Metadata about a file in a dataset (content not included).
+          `updatedTime` is the ISO 8601 instant of the last write to the path.
         fields:
           path: string
-          size: integer
-          contentType: string
           transactionRid: string
+          sizeBytes: integer
+          updatedTime: datetime
 
       ListFilesResponse:
         fields:
