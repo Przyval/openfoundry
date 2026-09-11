@@ -19,17 +19,18 @@ import {
   LOCAL_STORAGE_USER_KEY,
   setAuthTokenSource,
 } from "../lib/authFetch";
-import { isRestorable, type StoredToken } from "../lib/session";
+import {
+  clearStoredSession,
+  restoreSession,
+  type AuthUser,
+  type StoredToken,
+} from "../lib/session";
+
+export type { AuthUser };
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface AuthUser {
-  username: string;
-  token: string;
-  roles: string[];
-}
 
 export interface AuthContextValue {
   /** The currently logged-in user, or null. */
@@ -56,11 +57,7 @@ export interface AuthContextValue {
 // is where they are read back from to authenticate outgoing requests.
 const PKCE_VERIFIER_KEY = "openfoundry_pkce_verifier";
 
-/** Drop the persisted session. The one place that knows what "logged out" is. */
-function clearStoredSession(): void {
-  localStorage.removeItem(LOCAL_STORAGE_TOKEN_KEY);
-  localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
-}
+
 
 const oauthOptions = {
   // `||`, not `??`: a build that defines the variable empty has no client id,
@@ -118,26 +115,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // ---- Restore session from localStorage on mount ----
   useEffect(() => {
-    try {
-      const storedToken = localStorage.getItem(LOCAL_STORAGE_TOKEN_KEY);
-      const storedUser = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
-      if (storedToken && storedUser) {
-        const stored: StoredToken = JSON.parse(storedToken);
-        if (isRestorable(stored)) {
-          const { expiresAt, ...token } = stored;
-          const user: AuthUser = JSON.parse(storedUser);
-          tokenManager.setToken(token, expiresAt);
-          setCurrentUser(user);
-        } else {
-          clearStoredSession();
-        }
-      }
-    } catch {
-      // Corrupted storage – ignore and require fresh login.
-      clearStoredSession();
-    } finally {
-      setLoading(false);
+    const restored = restoreSession();
+    if (restored) {
+      tokenManager.setToken(restored.token, restored.expiresAt);
+      setCurrentUser(restored.user);
     }
+    setLoading(false);
   }, [tokenManager]);
 
   // ---- Login with username/password (local dev mode) ----
