@@ -1,5 +1,6 @@
 import { Span } from "./span.js";
-import { SpanContext, generateTraceId, generateSpanId } from "./context.js";
+import type { SpanContext } from "./context.js";
+import { generateTraceId, generateSpanId } from "./context.js";
 
 export interface StartSpanOptions {
   parent?: Span;

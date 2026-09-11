@@ -55,7 +55,6 @@ export async function executeFunction(
 
     try {
       // Construct a function that receives `args` and `console` as parameters
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const executor = new Function("args", "console", fn.code);
       const output = executor(args, mockConsole);
 

@@ -1,4 +1,5 @@
-import { ClassificationLevel, SecurityClassification } from "./marking-types.js";
+import type { SecurityClassification } from "./marking-types.js";
+import { ClassificationLevel } from "./marking-types.js";
 
 /**
  * Ordered hierarchy from lowest to highest classification.

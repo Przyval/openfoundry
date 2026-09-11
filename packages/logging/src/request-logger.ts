@@ -3,7 +3,7 @@
  */
 
 import { safeArg } from "@openfoundry/errors";
-import { Logger } from "./logger.js";
+import type { Logger } from "./logger.js";
 
 /**
  * Creates a child logger with a requestId binding, suitable for

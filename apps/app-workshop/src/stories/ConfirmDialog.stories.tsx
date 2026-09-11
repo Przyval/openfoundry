@@ -66,25 +66,27 @@ export const Closed: Story = {
   },
 };
 
+function InteractiveStory() {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <>
+      <Button text="Open Dialog" onClick={() => setIsOpen(true)} intent="primary" />
+      <ConfirmDialog
+        isOpen={isOpen}
+        title="Confirm Deletion"
+        message="Are you sure you want to delete this resource?"
+        intent="danger"
+        confirmLabel="Delete"
+        onConfirm={() => {
+          setIsOpen(false);
+          alert("Resource deleted.");
+        }}
+        onCancel={() => setIsOpen(false)}
+      />
+    </>
+  );
+}
+
 export const Interactive: Story = {
-  render: () => {
-    const [isOpen, setIsOpen] = useState(false);
-    return (
-      <>
-        <Button text="Open Dialog" onClick={() => setIsOpen(true)} intent="primary" />
-        <ConfirmDialog
-          isOpen={isOpen}
-          title="Confirm Deletion"
-          message="Are you sure you want to delete this resource?"
-          intent="danger"
-          confirmLabel="Delete"
-          onConfirm={() => {
-            setIsOpen(false);
-            alert("Resource deleted.");
-          }}
-          onCancel={() => setIsOpen(false)}
-        />
-      </>
-    );
-  },
+  render: () => <InteractiveStory />,
 };

@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import fp from "fastify-plugin";
-import { AuditLogger } from "./audit-logger.js";
+import type { AuditLogger } from "./audit-logger.js";
 
 // ---------------------------------------------------------------------------
 // HTTP method -> audit action mapping

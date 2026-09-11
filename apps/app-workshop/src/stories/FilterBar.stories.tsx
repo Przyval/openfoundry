@@ -24,63 +24,53 @@ const mixedProperties: FilterProperty[] = [
   { apiName: "createdAt", displayName: "Created At", type: "DATETIME" },
 ];
 
+function FilterBarStory({
+  properties,
+  initialFilters = [],
+}: {
+  properties: FilterProperty[];
+  initialFilters?: Filter[];
+}) {
+  const [filters, setFilters] = useState<Filter[]>(initialFilters);
+  return (
+    <FilterBar properties={properties} filters={filters} onFiltersChange={setFilters} />
+  );
+}
+
 export const Default: Story = {
-  render: () => {
-    const [filters, setFilters] = useState<Filter[]>([]);
-    return (
-      <FilterBar
-        properties={stringProperties}
-        filters={filters}
-        onFiltersChange={setFilters}
-      />
-    );
-  },
+  render: () => <FilterBarStory properties={stringProperties} />,
 };
 
 export const WithActiveFilters: Story = {
-  render: () => {
-    const [filters, setFilters] = useState<Filter[]>([
-      { property: "name", operator: "contains", value: "Employee" },
-      { property: "owner", operator: "eq", value: "admin" },
-    ]);
-    return (
-      <FilterBar
-        properties={stringProperties}
-        filters={filters}
-        onFiltersChange={setFilters}
-      />
-    );
-  },
+  render: () => (
+    <FilterBarStory
+      properties={stringProperties}
+      initialFilters={[
+        { property: "name", operator: "contains", value: "Employee" },
+        { property: "owner", operator: "eq", value: "admin" },
+      ]}
+    />
+  ),
 };
 
 export const MixedPropertyTypes: Story = {
-  render: () => {
-    const [filters, setFilters] = useState<Filter[]>([
-      { property: "name", operator: "contains", value: "John" },
-      { property: "age", operator: "gte", value: "25" },
-      { property: "isActive", operator: "eq", value: "true" },
-    ]);
-    return (
-      <FilterBar
-        properties={mixedProperties}
-        filters={filters}
-        onFiltersChange={setFilters}
-      />
-    );
-  },
+  render: () => (
+    <FilterBarStory
+      properties={mixedProperties}
+      initialFilters={[
+        { property: "name", operator: "contains", value: "John" },
+        { property: "age", operator: "gte", value: "25" },
+        { property: "isActive", operator: "eq", value: "true" },
+      ]}
+    />
+  ),
 };
 
 export const SingleFilter: Story = {
-  render: () => {
-    const [filters, setFilters] = useState<Filter[]>([
-      { property: "name", operator: "eq", value: "Project Alpha" },
-    ]);
-    return (
-      <FilterBar
-        properties={stringProperties}
-        filters={filters}
-        onFiltersChange={setFilters}
-      />
-    );
-  },
+  render: () => (
+    <FilterBarStory
+      properties={stringProperties}
+      initialFilters={[{ property: "name", operator: "eq", value: "Project Alpha" }]}
+    />
+  ),
 };

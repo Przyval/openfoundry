@@ -1,8 +1,12 @@
 import type { OntologyDefinition } from "@openfoundry/ontology-schema";
-import { ObjectBuilder, defineObject } from "./define-object.js";
-import { ActionBuilder, defineAction } from "./define-action.js";
-import { LinkBuilder, defineLink } from "./define-link.js";
-import { InterfaceBuilder, defineInterface } from "./define-interface.js";
+import type { ObjectBuilder } from "./define-object.js";
+import { defineObject } from "./define-object.js";
+import type { ActionBuilder } from "./define-action.js";
+import { defineAction } from "./define-action.js";
+import type { LinkBuilder } from "./define-link.js";
+import { defineLink } from "./define-link.js";
+import type { InterfaceBuilder } from "./define-interface.js";
+import { defineInterface } from "./define-interface.js";
 
 export class OntologyBuilder {
   private _displayName = "";

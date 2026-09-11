@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { Pool } from "pg";
 import {
   type ObjectReadWriteStore,
   type ObjectTypeSchemaSource,
@@ -246,7 +247,7 @@ export async function objectRoutes(
   opts: {
     store: ObjectReadWriteStore;
     objectTypeSchema?: ObjectTypeSchemaSource;
-    pool?: import("pg").Pool;
+    pool?: Pool;
   },
 ): Promise<void> {
   const { store, objectTypeSchema, pool } = opts;

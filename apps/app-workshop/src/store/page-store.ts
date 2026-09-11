@@ -1,4 +1,4 @@
-import { WidgetInstance } from "../widgets/widget-registry";
+import type { WidgetInstance } from "../widgets/widget-registry";
 
 /** A Workshop page */
 export interface WorkshopPage {

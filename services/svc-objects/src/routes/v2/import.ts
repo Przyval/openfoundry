@@ -88,7 +88,7 @@ export async function importRoutes(
     "/ontologies/:ontologyRid/import/csv",
     async (request, reply) => {
       const { csvContent, objectType, primaryKeyColumn } = request.body;
-      let columnMapping = request.body.columnMapping ?? {};
+      const columnMapping = request.body.columnMapping ?? {};
 
       if (!csvContent || !objectType || !primaryKeyColumn) {
         return reply.status(400).send({

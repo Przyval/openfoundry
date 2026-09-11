@@ -84,7 +84,6 @@ export function createEmbeddingHook(aipServiceUrl: string): OnObjectUpsert {
         // Embedding failure must never break object creation.
         // In production this would go to a structured logger; for now
         // we write to stderr so it's visible in dev but non-blocking.
-        // eslint-disable-next-line no-console
         console.error(
           `[embedding-hook] Failed to generate embedding for ${objectType}:${primaryKey}`,
         );
