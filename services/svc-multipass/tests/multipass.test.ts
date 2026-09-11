@@ -215,10 +215,10 @@ describe("ClientStore", () => {
 // ---------------------------------------------------------------------------
 
 /**
- * The seeded confidential clients carry platform roles, and the gateway turns
- * a token's roles claim into X-User-Roles for all guarded routes. Published
- * credentials must therefore convey nothing in production, exactly as
- * DEV_USERS conveys nothing there.
+ * The seeded confidential clients carry platform roles. The claim is minted
+ * with no consumer yet - the permission-model work is what will read it - so
+ * published credentials must convey nothing in production before that lands,
+ * exactly as DEV_USERS conveys nothing there.
  */
 describe("seeded dev clients under NODE_ENV=production", () => {
   const originalNodeEnv = process.env.NODE_ENV;
@@ -404,9 +404,8 @@ describe("OAuth routes", () => {
   /**
    * The authorize endpoint authenticates nobody - it hardcodes the approved
    * user, auto-registers any client and accepts any redirect_uri - so the
-   * token it leads to must convey no authority. The gateway forwards no
-   * X-User-Id/X-User-Roles for a token with no roles claim (see
-   * services/svc-gateway/tests/trusted-identity.test.ts).
+   * token it leads to must convey no authority, whatever eventually consumes
+   * the roles claim.
    */
   it("should mint an authorization_code token with no roles claim", async () => {
     clientStore.registerClient({

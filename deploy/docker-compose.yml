@@ -237,6 +237,11 @@ services:
     environment:
       <<: *service-env
       PORT: "8084"
+      # The pair multipass signs with. JWT_PUBLIC_KEY must be the same PEM the
+      # gateway verifies with (AUTH_PUBLIC_KEY); empty means an ephemeral pair
+      # nothing else can verify. See deploy/.env.production.
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       TOKEN_EXPIRY_SECONDS: ${TOKEN_EXPIRY_SECONDS:-3600}
       OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-openfoundry-console}
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
