@@ -14,6 +14,12 @@ export interface OAuthClient {
   readonly grantTypes: readonly string[];
   readonly scopes: readonly string[];
   readonly isPublic: boolean;
+  /**
+   * Platform roles this client's tokens may assert. The gateway turns them
+   * into the downstream X-User-Roles header, so a client with none gets a
+   * token that conveys no roles - never a token that conveys every role.
+   */
+  readonly roles?: readonly string[];
 }
 
 /** Default development client, pre-seeded for local development. */
@@ -40,6 +46,7 @@ const CONFIDENTIAL_DEV_CLIENTS: OAuthClient[] = [
     redirectUris: [],
     grantTypes: ["client_credentials"],
     scopes: ["api:read", "api:write"],
+    roles: ["ADMIN"],
   },
   {
     clientId: "developer",
@@ -49,6 +56,7 @@ const CONFIDENTIAL_DEV_CLIENTS: OAuthClient[] = [
     redirectUris: [],
     grantTypes: ["client_credentials"],
     scopes: ["api:read", "api:write"],
+    roles: ["EDITOR"],
   },
 ];
 

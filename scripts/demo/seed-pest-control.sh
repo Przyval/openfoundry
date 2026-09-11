@@ -9,17 +9,22 @@ ONTOLOGY_SVC="${ONTOLOGY_SERVICE_URL:-http://localhost:8081}"
 OBJECTS_SVC="${OBJECTS_SERVICE_URL:-http://localhost:8082}"
 ACTIONS_SVC="${ACTIONS_SERVICE_URL:-http://localhost:8083}"
 
+# Bearer credentials for every request below. Reads OPENFOUNDRY_TOKEN or
+# OPENFOUNDRY_CLIENT_ID/_CLIENT_SECRET from the environment or .env, and sends
+# nothing when neither is set. See scripts/lib/auth.sh.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/auth.sh"
+
 echo "Seeding Pest Control ontology..."
 
 # --- Create or Reuse Ontology ---
-EXISTING_ONT=$(curl -sf "$ONTOLOGY_SVC/api/v2/ontologies" \
+EXISTING_ONT=$(of_curl -sf "$ONTOLOGY_SVC/api/v2/ontologies" \
   | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; print(d[0]['rid'] if d else '')" 2>/dev/null || echo "")
 
 if [ -n "$EXISTING_ONT" ]; then
   PEST_ONT="$EXISTING_ONT"
   echo "  Reusing existing ontology: $PEST_ONT"
 else
-  PEST_ONT=$(curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies" \
+  PEST_ONT=$(of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies" \
     -H "Content-Type: application/json" \
     -d '{"apiName":"pest-control","displayName":"Pest Control Management","description":"Complete pest control business management - customers, technicians, jobs, treatments, and inventory"}' \
     | python3 -c "import json,sys; print(json.load(sys.stdin)['rid'])")
@@ -35,7 +40,7 @@ for OT in \
   '{"apiName":"Invoice","displayName":"Invoice","description":"Customer billing invoice","primaryKey":"invoiceId","properties":{"invoiceId":{"type":"string","description":"Invoice ID"},"customerId":{"type":"string","description":"Customer ID"},"jobId":{"type":"string","description":"Job ID"},"invoiceDate":{"type":"string","description":"Invoice date"},"dueDate":{"type":"string","description":"Due date"},"amount":{"type":"integer","description":"Amount (IDR)"},"tax":{"type":"integer","description":"Tax (IDR)"},"totalAmount":{"type":"integer","description":"Total amount (IDR)"},"status":{"type":"string","description":"draft/sent/paid/overdue"},"paymentMethod":{"type":"string","description":"transfer/cash/credit"},"paidDate":{"type":"string","description":"Payment date"},"notes":{"type":"string","description":"Notes"}}}' \
   '{"apiName":"Vehicle","displayName":"Vehicle","description":"Company vehicle for technician transport","primaryKey":"vehicleId","properties":{"vehicleId":{"type":"string","description":"Vehicle ID"},"plateNumber":{"type":"string","description":"Plate number"},"type":{"type":"string","description":"van/pickup/motorcycle"},"brand":{"type":"string","description":"Brand"},"model":{"type":"string","description":"Model"},"year":{"type":"integer","description":"Year"},"assignedTechnicianId":{"type":"string","description":"Assigned technician"},"status":{"type":"string","description":"active/maintenance/retired"},"lastServiceDate":{"type":"string","description":"Last service date"},"nextServiceDate":{"type":"string","description":"Next service date"},"fuelType":{"type":"string","description":"Fuel type"},"odometerKm":{"type":"integer","description":"Odometer (km)"}}}' \
   '{"apiName":"Schedule","displayName":"Schedule","description":"Technician service schedule","primaryKey":"scheduleId","properties":{"scheduleId":{"type":"string","description":"Schedule ID"},"customerId":{"type":"string","description":"Customer ID"},"technicianId":{"type":"string","description":"Technician ID"},"vehicleId":{"type":"string","description":"Vehicle ID"},"date":{"type":"string","description":"Date"},"timeSlot":{"type":"string","description":"Time slot"},"jobId":{"type":"string","description":"Job ID"},"serviceType":{"type":"string","description":"Service type"},"status":{"type":"string","description":"confirmed/pending/cancelled"},"notes":{"type":"string","description":"Notes"}}}'; do
-  curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$PEST_ONT/objectTypes" \
+  of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$PEST_ONT/objectTypes" \
     -H "Content-Type: application/json" -d "$OT" > /dev/null
 done
 echo "  7 object types created"
@@ -51,7 +56,7 @@ for LT in \
   '{"apiName":"TechnicianHasSchedules","objectTypeApiName":"Technician","linkedObjectTypeApiName":"Schedule","cardinality":"MANY","foreignKeyPropertyApiName":"technicianId"}' \
   '{"apiName":"JobHasInvoice","objectTypeApiName":"ServiceJob","linkedObjectTypeApiName":"Invoice","cardinality":"ONE","foreignKeyPropertyApiName":"jobId"}' \
   '{"apiName":"ScheduleForJob","objectTypeApiName":"Schedule","linkedObjectTypeApiName":"ServiceJob","cardinality":"ONE","foreignKeyPropertyApiName":"jobId"}'; do
-  curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$PEST_ONT/linkTypes" \
+  of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$PEST_ONT/linkTypes" \
     -H "Content-Type: application/json" -d "$LT" > /dev/null
 done
 echo "  8 link types created"
@@ -63,7 +68,7 @@ for AT in \
   '{"apiName":"schedule-new-job","description":"Schedule a new pest control service job: create the job, increment technician active jobs, and create a schedule entry","parameters":{"customerId":{"type":"string","required":true,"description":"Customer ID"},"technicianId":{"type":"string","required":true,"description":"Technician to assign"},"serviceType":{"type":"string","required":true,"description":"Service type (treatment/inspection/emergency/follow-up)"},"pestType":{"type":"string","required":true,"description":"Target pest type"},"scheduledDate":{"type":"string","required":true,"description":"Scheduled date (YYYY-MM-DD)"},"priority":{"type":"string","required":true,"description":"Priority (normal/high/emergency)"},"address":{"type":"string","required":true,"description":"Service address"}},"modifiedEntities":{"ServiceJob":{"created":true,"modified":false},"Technician":{"created":false,"modified":true},"Schedule":{"created":true,"modified":false}},"status":"ACTIVE"}' \
   '{"apiName":"assign-technician","description":"Reassign a service job to a different technician, adjusting active job counts on both old and new technicians","parameters":{"jobId":{"type":"string","required":true,"description":"The service job to reassign"},"technicianId":{"type":"string","required":true,"description":"New technician ID"},"vehicleId":{"type":"string","required":false,"description":"Vehicle to assign to the technician"}},"modifiedEntities":{"ServiceJob":{"created":false,"modified":true},"Technician":{"created":false,"modified":true},"Vehicle":{"created":false,"modified":true}},"status":"ACTIVE"}' \
   '{"apiName":"reorder-product","description":"Reorder a treatment product: increase stock quantity and record the supplier","parameters":{"productId":{"type":"string","required":true,"description":"Product ID to reorder"},"quantity":{"type":"integer","required":true,"description":"Quantity to add to stock"},"supplier":{"type":"string","required":false,"description":"Override supplier name"}},"modifiedEntities":{"TreatmentProduct":{"created":false,"modified":true}},"status":"ACTIVE"}'; do
-  curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$PEST_ONT/actionTypes" \
+  of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$PEST_ONT/actionTypes" \
     -H "Content-Type: application/json" -d "$AT" > /dev/null
 done
 echo "  4 action types created"
@@ -81,7 +86,7 @@ for DATA in \
   '{"primaryKey":"CUST-006","properties":{"customerId":"CUST-006","name":"Gudang Tokopedia Cikupa","phone":"021-29001234","email":"warehouse@tokopedia.com","address":"Jl. Raya Cikupa-Pasar Kemis KM.5","city":"Tangerang","customerType":"commercial","contractType":"monthly","monthlyRate":7500000,"joinDate":"2024-01-15","status":"active","notes":"Gudang 5000m2, fokus rodent control"}}' \
   '{"primaryKey":"CUST-007","properties":{"customerId":"CUST-007","name":"RS Pondok Indah","phone":"021-7657525","email":"facility@rspondokindah.co.id","address":"Jl. Metro Duta Kav. UE","city":"Jakarta Selatan","customerType":"commercial","contractType":"monthly","monthlyRate":8500000,"joinDate":"2023-11-01","status":"active","notes":"Sertifikat pest management untuk akreditasi JCI"}}' \
   '{"primaryKey":"CUST-008","properties":{"customerId":"CUST-008","name":"Ahmad Fauzi","phone":"0878-5544-3322","email":"fauzi.ahmad@gmail.com","address":"Cluster Anggrek No.15, Kota Wisata","city":"Bogor","customerType":"residential","contractType":"annual","monthlyRate":350000,"joinDate":"2025-06-01","status":"inactive","notes":"Kontrak habis, belum perpanjang"}}'; do
-  curl -sf -X POST "$BASE/Customer" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Customer" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Technicians ---
@@ -92,7 +97,7 @@ for DATA in \
   '{"primaryKey":"TECH-003","properties":{"technicianId":"TECH-003","name":"Rizky Ramadhan","phone":"0857-5555-6666","specialization":"fumigation","certificationLevel":"senior","activeJobCount":1,"region":"Tangerang","status":"available","hireDate":"2022-01-10","rating":42}}' \
   '{"primaryKey":"TECH-004","properties":{"technicianId":"TECH-004","name":"Wahyu Setiawan","phone":"0858-7777-8888","specialization":"rodent","certificationLevel":"lead","activeJobCount":4,"region":"Bekasi","status":"on-job","hireDate":"2019-11-20","rating":49}}' \
   '{"primaryKey":"TECH-005","properties":{"technicianId":"TECH-005","name":"Fajar Nugroho","phone":"0821-9999-0000","specialization":"mosquito","certificationLevel":"junior","activeJobCount":1,"region":"Depok","status":"available","hireDate":"2025-06-01","rating":38}}'; do
-  curl -sf -X POST "$BASE/Technician" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Technician" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Service Jobs ---
@@ -106,7 +111,7 @@ for DATA in \
   '{"primaryKey":"JOB-2026-006","properties":{"jobId":"JOB-2026-006","customerId":"CUST-006","technicianId":"TECH-004","serviceType":"treatment","pestType":"rodent","scheduledDate":"2026-03-13","completedDate":"","status":"scheduled","priority":"normal","address":"Jl. Raya Cikupa-Pasar Kemis KM.5","treatmentUsed":"","amountCharged":7500000,"technicianNotes":"","customerRating":0,"followUpRequired":"no"}}' \
   '{"primaryKey":"JOB-2026-007","properties":{"jobId":"JOB-2026-007","customerId":"CUST-007","technicianId":"TECH-001","serviceType":"inspection","pestType":"general","scheduledDate":"2026-03-15","completedDate":"","status":"scheduled","priority":"normal","address":"Jl. Metro Duta Kav. UE","treatmentUsed":"","amountCharged":8500000,"technicianNotes":"","customerRating":0,"followUpRequired":"no"}}' \
   '{"primaryKey":"JOB-2026-008","properties":{"jobId":"JOB-2026-008","customerId":"CUST-001","technicianId":"TECH-004","serviceType":"follow-up","pestType":"rodent","scheduledDate":"2026-03-24","completedDate":"","status":"scheduled","priority":"high","address":"Jl. Industri Raya No.45, MM2100","treatmentUsed":"","amountCharged":0,"technicianNotes":"Follow-up JOB-2026-001, cek bait station","customerRating":0,"followUpRequired":"no"}}'; do
-  curl -sf -X POST "$BASE/ServiceJob" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/ServiceJob" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Treatment Products ---
@@ -120,7 +125,7 @@ for DATA in \
   '{"primaryKey":"PRD-006","properties":{"productId":"PRD-006","name":"Vikane Gas Fumigant","category":"fumigant","targetPest":"termite","unitPrice":1500000,"stockQty":8,"minStockLevel":3,"supplier":"Douglas Products","safetyClass":"Class I","expiryDate":"2028-01-15"}}' \
   '{"primaryKey":"PRD-007","properties":{"productId":"PRD-007","name":"Mosquito Larvicide Granules (BTI)","category":"insecticide","targetPest":"mosquito","unitPrice":95000,"stockQty":60,"minStockLevel":20,"supplier":"Summit Chemical","safetyClass":"Class IV","expiryDate":"2027-08-10"}}' \
   '{"primaryKey":"PRD-008","properties":{"productId":"PRD-008","name":"Snap-E Mouse Trap","category":"trap","targetPest":"rodent","unitPrice":35000,"stockQty":150,"minStockLevel":30,"supplier":"Kness Manufacturing","safetyClass":"Class IV","expiryDate":"2030-12-31"}}'; do
-  curl -sf -X POST "$BASE/TreatmentProduct" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/TreatmentProduct" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Invoices ---
@@ -132,7 +137,7 @@ for DATA in \
   '{"primaryKey":"INV-2026-004","properties":{"invoiceId":"INV-2026-004","customerId":"CUST-005","jobId":"JOB-2026-004","invoiceDate":"2026-03-12","dueDate":"2026-03-26","amount":750000,"tax":82500,"totalAmount":832500,"status":"draft","paymentMethod":"","paidDate":"","notes":""}}' \
   '{"primaryKey":"INV-2026-005","properties":{"invoiceId":"INV-2026-005","customerId":"CUST-006","jobId":"JOB-2026-006","invoiceDate":"2026-03-13","dueDate":"2026-03-27","amount":7500000,"tax":825000,"totalAmount":8325000,"status":"draft","paymentMethod":"","paidDate":"","notes":""}}' \
   '{"primaryKey":"INV-2026-006","properties":{"invoiceId":"INV-2026-006","customerId":"CUST-007","jobId":"JOB-2026-007","invoiceDate":"2026-03-15","dueDate":"2026-03-29","amount":8500000,"tax":935000,"totalAmount":9435000,"status":"draft","paymentMethod":"","paidDate":"","notes":""}}'; do
-  curl -sf -X POST "$BASE/Invoice" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Invoice" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Vehicles ---
@@ -142,7 +147,7 @@ for DATA in \
   '{"primaryKey":"VHC-002","properties":{"vehicleId":"VHC-002","plateNumber":"B 5678 PCO","type":"pickup","brand":"Mitsubishi","model":"L300","year":2022,"assignedTechnicianId":"TECH-004","status":"active","lastServiceDate":"2026-01-20","nextServiceDate":"2026-04-20","fuelType":"diesel","odometerKm":62000}}' \
   '{"primaryKey":"VHC-003","properties":{"vehicleId":"VHC-003","plateNumber":"B 9012 PCO","type":"motorcycle","brand":"Honda","model":"PCX 160","year":2024,"assignedTechnicianId":"TECH-005","status":"active","lastServiceDate":"2026-03-01","nextServiceDate":"2026-06-01","fuelType":"gasoline","odometerKm":12000}}' \
   '{"primaryKey":"VHC-004","properties":{"vehicleId":"VHC-004","plateNumber":"B 3456 PCO","type":"van","brand":"Daihatsu","model":"Gran Max","year":2021,"assignedTechnicianId":"TECH-002","status":"maintenance","lastServiceDate":"2026-03-10","nextServiceDate":"2026-03-20","fuelType":"gasoline","odometerKm":78000}}'; do
-  curl -sf -X POST "$BASE/Vehicle" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Vehicle" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Schedules ---
@@ -156,7 +161,7 @@ for DATA in \
   '{"primaryKey":"SCH-2026-006","properties":{"scheduleId":"SCH-2026-006","customerId":"CUST-001","technicianId":"TECH-004","vehicleId":"VHC-002","date":"2026-03-24","timeSlot":"08:00-10:00","jobId":"JOB-2026-008","serviceType":"follow-up","status":"confirmed","notes":"Follow-up bait station"}}' \
   '{"primaryKey":"SCH-2026-007","properties":{"scheduleId":"SCH-2026-007","customerId":"CUST-004","technicianId":"TECH-002","vehicleId":"VHC-001","date":"2026-03-14","timeSlot":"21:00-23:00","jobId":"","serviceType":"treatment","status":"pending","notes":"Monthly treatment restoran"}}' \
   '{"primaryKey":"SCH-2026-008","properties":{"scheduleId":"SCH-2026-008","customerId":"CUST-009","technicianId":"TECH-003","vehicleId":"VHC-001","date":"2026-03-16","timeSlot":"08:00-10:00","jobId":"","serviceType":"inspection","status":"pending","notes":"Initial inspection Alfamart DC"}}'; do
-  curl -sf -X POST "$BASE/Schedule" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Schedule" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 LINKS="$OBJECTS_SVC/api/v2/ontologies/$PEST_ONT/objects"
@@ -174,7 +179,7 @@ for PAIR in \
   "CUST-007 JOB-2026-007"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Customer/$SRC/links/CustomerHasJobs" \
+  of_curl -sf -X POST "$LINKS/Customer/$SRC/links/CustomerHasJobs" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"ServiceJob\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -190,7 +195,7 @@ for PAIR in \
   "CUST-007 INV-2026-006"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Customer/$SRC/links/CustomerHasInvoices" \
+  of_curl -sf -X POST "$LINKS/Customer/$SRC/links/CustomerHasInvoices" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"Invoice\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -208,7 +213,7 @@ for PAIR in \
   "TECH-004 JOB-2026-008"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Technician/$SRC/links/TechnicianAssignedJobs" \
+  of_curl -sf -X POST "$LINKS/Technician/$SRC/links/TechnicianAssignedJobs" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"ServiceJob\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -222,7 +227,7 @@ for PAIR in \
   "TECH-005 VHC-003"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Technician/$SRC/links/TechnicianDrivesVehicle" \
+  of_curl -sf -X POST "$LINKS/Technician/$SRC/links/TechnicianDrivesVehicle" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"Vehicle\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -238,7 +243,7 @@ for PAIR in \
   "JOB-2026-007 INV-2026-006"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/ServiceJob/$SRC/links/JobHasInvoice" \
+  of_curl -sf -X POST "$LINKS/ServiceJob/$SRC/links/JobHasInvoice" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"Invoice\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -250,7 +255,7 @@ PIPE_URL="$DATASETS_SVC/api/v2/pipelines"
 echo "  Creating pipelines..."
 
 # Pipeline 1: Revenue Analysis
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Revenue by Customer Type",
@@ -268,7 +273,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 2: Technician Performance
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Technician Performance Scorecard",
@@ -286,7 +291,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 3: Inventory Alert
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Low Stock Alert Generator",
@@ -303,7 +308,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 4: Customer Churn Risk
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Customer Churn Risk Analysis",
@@ -321,7 +326,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 5: Job Schedule Optimizer
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Daily Schedule Optimizer",
@@ -350,7 +355,7 @@ for DS in \
   '{"name":"pest-control-product-inventory","parentFolderRid":"ri.compass.main.folder.root"}' \
   '{"name":"pest-control-revenue-daily","parentFolderRid":"ri.compass.main.folder.root"}' \
   '{"name":"pest-control-technician-performance","parentFolderRid":"ri.compass.main.folder.root"}'; do
-  curl -sf -X POST "$DS_URL" \
+  of_curl -sf -X POST "$DS_URL" \
     -H "Content-Type: application/json" -d "$DS" > /dev/null
 done
 echo "  5 datasets created"
@@ -360,7 +365,7 @@ echo "  Creating functions..."
 FUNCTIONS_SVC="${FUNCTIONS_SERVICE_URL:-http://localhost:8088}"
 FUNC_URL="$FUNCTIONS_SVC/api/v2/functions"
 
-curl -sf -X POST "$FUNC_URL" \
+of_curl -sf -X POST "$FUNC_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "apiName":"getActiveCustomerCount",
@@ -370,7 +375,7 @@ curl -sf -X POST "$FUNC_URL" \
     "code":"return objects.filter(o => o.properties.status === \"active\").length;"
   }' > /dev/null
 
-curl -sf -X POST "$FUNC_URL" \
+of_curl -sf -X POST "$FUNC_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "apiName":"getLowStockProducts",
@@ -380,7 +385,7 @@ curl -sf -X POST "$FUNC_URL" \
     "code":"return objects.filter(o => o.properties.stockQty < o.properties.minStockLevel).map(o => ({ name: o.properties.name, stock: o.properties.stockQty, min: o.properties.minStockLevel }));"
   }' > /dev/null
 
-curl -sf -X POST "$FUNC_URL" \
+of_curl -sf -X POST "$FUNC_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "apiName":"calculateTechnicianUtilization",

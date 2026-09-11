@@ -14,6 +14,10 @@ import {
 } from "@openfoundry/sdk-oauth";
 import type { TokenResponse } from "@openfoundry/sdk-oauth";
 import { API_BASE_URL } from "../config";
+import {
+  LOCAL_STORAGE_TOKEN_KEY,
+  LOCAL_STORAGE_USER_KEY,
+} from "../lib/authFetch";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,8 +50,8 @@ export interface AuthContextValue {
 // Constants
 // ---------------------------------------------------------------------------
 
-const LOCAL_STORAGE_TOKEN_KEY = "openfoundry_token";
-const LOCAL_STORAGE_USER_KEY = "openfoundry_user";
+// LOCAL_STORAGE_TOKEN_KEY / LOCAL_STORAGE_USER_KEY live in lib/authFetch, which
+// is where they are read back from to authenticate outgoing requests.
 const PKCE_VERIFIER_KEY = "openfoundry_pkce_verifier";
 
 const oauthOptions = {

@@ -127,6 +127,10 @@ export async function authRoutes(
         iss: "openfoundry-multipass",
         aud: "openfoundry-api",
         scope: "api:read api:write",
+        // Signed into the token so the gateway can hand downstream services a
+        // role set they can trust. A role that only travels in this response
+        // body is a role the client could have invented.
+        roles: user.roles.join(" "),
       },
       config.tokenExpirySeconds,
     );

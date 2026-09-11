@@ -28,23 +28,29 @@ const HOP_BY_HOP_HEADERS = new Set([
  * from a verified token, and never safe to forward from the public edge.
  *
  * The gateway is that edge, so it drops every `x-user-*` header arriving from
- * a client. Nothing legitimate sends them today: the console authenticates
- * with `Authorization: Bearer`, and the seed and sync scripts talk to the
- * service ports directly rather than through this proxy.
+ * a client, whether or not it has a validated claim to put in its place.
+ * Nothing legitimate sends them: the console authenticates with
+ * `Authorization: Bearer`, and the seed and sync scripts talk to the service
+ * ports directly rather than through this proxy.
  *
- * This only removes an inbound trust. It does not grant anyone access, and it
- * does not populate the headers either; `request.claims` is never set either,
- * because `authPlugin` is registered unencapsulated in `server.ts`.
- *
- * Known consequence: role-based enforcement does NOT work after this change.
- * What was removed is fake enforcement - a client could assert its own roles -
- * and real enforcement waits on the gateway task that validates JWTs and sets
- * these headers from validated claims. Until that trusted hop exists, running
- * with `ENFORCE_PERMISSIONS=true` makes every gateway-proxied route answer 403,
- * because the permission hook sees neither `x-user-id` nor `request.claims`.
- * That is known and accepted, not an oversight.
+ * The gateway is now also the trusted hop that sets them: `authPlugin` runs on
+ * every route and `request.claims` is populated, so the identity written below
+ * comes from a verified token and from nothing else. Role-based enforcement
+ * therefore works - see the assertion further down for why both headers are
+ * set together or not at all.
  */
 const CLIENT_ASSERTED_IDENTITY_PREFIX = "x-user-";
+
+/**
+ * Headers that describe the *incoming* body and cannot describe the outgoing
+ * one. The body below is re-serialised from Fastify's parsed representation,
+ * so it is rarely byte-identical to what arrived - a pretty-printed JSON
+ * payload shrinks. Forwarding the original length made undici reject the
+ * request with "Request body length does not match content-length header",
+ * which the gateway then reported as a 502. `fetch` sets the correct length
+ * itself, so the safe move is to not send one.
+ */
+const BODY_DESCRIBING_HEADERS = new Set(["content-length"]);
 
 // ---------------------------------------------------------------------------
 // Proxy
@@ -57,7 +63,11 @@ const CLIENT_ASSERTED_IDENTITY_PREFIX = "x-user-";
  * Behaviour:
  * - Preserves method, path, query string, headers, and body.
  * - Strips hop-by-hop headers from both the outgoing and incoming directions.
- * - Strips client-asserted `x-user-*` identity headers from the outgoing direction.
+ * - Strips client-asserted `x-user-*` identity headers from the outgoing
+ *   direction, and re-asserts `X-User-Id` / `X-User-Roles` from the verified
+ *   JWT claims when the token carries roles.
+ * - Drops the incoming `Content-Length`, which no longer describes the
+ *   re-serialised body.
  * - Injects `X-Forwarded-For` and `X-Request-Id` headers.
  * - Returns 502 Bad Gateway when the target is unreachable.
  */
@@ -81,9 +91,22 @@ export async function proxyRequest(
     if (lowerKey === "content-length") continue;
     // Never forward a caller's own claim about its identity or roles.
     if (lowerKey.startsWith(CLIENT_ASSERTED_IDENTITY_PREFIX)) continue;
+    if (BODY_DESCRIBING_HEADERS.has(lowerKey)) continue;
     if (value !== undefined) {
       outgoingHeaders[key] = Array.isArray(value) ? value.join(", ") : value;
     }
+  }
+
+  // Assert the caller's identity from the JWT the auth middleware verified.
+  // Both headers are set together or not at all: the permission middleware
+  // denies a request that has a user id but no roles, so a half-filled
+  // identity would 403 every downstream route. A token that carries no roles
+  // claim therefore travels with no identity headers, and downstream decides
+  // for itself exactly as it does today.
+  const claims = request.claims;
+  if (claims?.sub && claims.roles) {
+    outgoingHeaders["x-user-id"] = claims.sub;
+    outgoingHeaders["x-user-roles"] = claims.roles;
   }
 
   // Inject proxy headers

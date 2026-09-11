@@ -52,9 +52,14 @@ jobs:
         run: |
           echo "Waiting for gateway to be ready..."
           GATEWAY_URL="http://localhost:8080"
+          # The probe hits a real API route, so it needs the same credentials
+          # every other caller uses. CI sets none and the gateway runs without
+          # AUTH_PUBLIC_KEY, so of_curl sends no header - but the probe stays
+          # correct the day either of those changes.
+          source scripts/lib/auth.sh
           MAX_ATTEMPTS=60
           ATTEMPT=0
-          until curl -sf "${GATEWAY_URL}/api/v2/ontologies" > /dev/null 2>&1; do
+          until of_curl -sf "${GATEWAY_URL}/api/v2/ontologies" > /dev/null 2>&1; do
             ATTEMPT=$((ATTEMPT + 1))
             if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
               echo "Gateway did not become ready after ${MAX_ATTEMPTS} attempts"

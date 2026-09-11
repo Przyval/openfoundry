@@ -38,6 +38,17 @@ export interface OpenFoundryClaims {
    * e.g. "api:ontologies-read api:datasets-read"
    */
   readonly scope: string;
+
+  /**
+   * Platform roles held by the subject - a space-separated string, e.g.
+   * "ADMIN" or "EDITOR VIEWER". Optional: tokens minted before this claim
+   * existed do not carry it, and a token without it simply conveys no roles.
+   *
+   * This is the only trustworthy source of a caller's roles. The downstream
+   * `X-User-Roles` header is set by the gateway from this claim and from
+   * nothing else - see services/svc-gateway/src/proxy.ts.
+   */
+  readonly roles?: string;
 }
 
 /**
@@ -45,6 +56,14 @@ export interface OpenFoundryClaims {
  * Fields like `iat` are set automatically at creation time.
  */
 export type TokenInput = Omit<OpenFoundryClaims, "iat">;
+
+/**
+ * Parse the space-separated role string into an array of individual roles.
+ */
+export function parseRoles(roles: string | undefined): string[] {
+  if (!roles || roles.trim().length === 0) return [];
+  return roles.trim().split(/\s+/);
+}
 
 /**
  * Parse the space-separated scope string into an array of individual scopes.

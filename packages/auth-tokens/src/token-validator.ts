@@ -1,4 +1,4 @@
-import { jwtVerify, type KeyLike, type JWTVerifyOptions } from "jose";
+import { importSPKI, jwtVerify, type KeyLike, type JWTVerifyOptions } from "jose";
 import type { OpenFoundryClaims } from "./claims.js";
 import { isValidClaimsShape } from "./token-creator.js";
 
@@ -45,6 +45,52 @@ export interface ValidateTokenOptions {
 
   /** The JWS algorithms to accept (default: ["ES256"]). */
   readonly algorithms?: readonly string[];
+}
+
+// ---------------------------------------------------------------------------
+// Key import
+// ---------------------------------------------------------------------------
+
+const SPKI_HEADER = "-----BEGIN PUBLIC KEY-----";
+
+/**
+ * Turn a configured public key into something `validateToken` can verify with.
+ *
+ * Tokens are signed with ES256, whose verification key must be a real key
+ * object: handing jose the PEM's bytes as a `Uint8Array` makes it treat them
+ * as an HMAC secret and reject every ES256 token. Callers that read a key out
+ * of the environment must come through here.
+ *
+ * @param pem       - A PEM-encoded SubjectPublicKeyInfo block. Literal `\n`
+ *                    escapes are accepted, since a PEM carried in an
+ *                    environment variable usually arrives with them.
+ * @param algorithm - The algorithm the key will verify (default: "ES256").
+ * @throws {TokenValidationError} if the value is not a PEM public key.
+ */
+export async function importVerificationKey(
+  pem: string,
+  algorithm: string = "ES256",
+): Promise<KeyLike> {
+  const normalised = pem.replace(/\\n/g, "\n").trim();
+
+  if (!normalised.startsWith(SPKI_HEADER)) {
+    throw new TokenValidationError(
+      TokenValidationErrorCode.INVALID_SIGNATURE,
+      `Verification key must be a PEM block beginning "${SPKI_HEADER}"; ` +
+        "got a value that is not one. An HMAC secret cannot verify an " +
+        "ES256 token.",
+    );
+  }
+
+  try {
+    return await importSPKI(normalised, algorithm);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new TokenValidationError(
+      TokenValidationErrorCode.INVALID_SIGNATURE,
+      `Verification key could not be imported as ${algorithm}: ${message}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

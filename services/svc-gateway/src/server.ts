@@ -150,7 +150,14 @@ export async function createServer(
   await app.register(metricsPlugin);
 
   // -- Auth middleware -----------------------------------------------------
-  await app.register(authPlugin, { config });
+  // Called directly (not via app.register) so the onRequest hook applies
+  // across all encapsulated route contexts - same pattern as rate limiting
+  // above. `app.register(authPlugin, ...)` gives the plugin its own child
+  // context, and a hook added there guards only routes registered inside that
+  // child. healthRoutes/v2Routes/v1Routes/multipassRoutes are siblings on the
+  // parent, so registering this plugin guarded nothing and every request was
+  // served unauthenticated even with AUTH_PUBLIC_KEY configured.
+  await authPlugin(app, { config });
 
   // -- Config decorator (available to all route plugins) -------------------
   app.decorate("config", config);

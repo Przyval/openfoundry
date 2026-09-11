@@ -9,17 +9,22 @@ ONTOLOGY_SVC="${ONTOLOGY_SERVICE_URL:-http://localhost:8081}"
 OBJECTS_SVC="${OBJECTS_SERVICE_URL:-http://localhost:8082}"
 ACTIONS_SVC="${ACTIONS_SERVICE_URL:-http://localhost:8083}"
 
+# Bearer credentials for every request below. Reads OPENFOUNDRY_TOKEN or
+# OPENFOUNDRY_CLIENT_ID/_CLIENT_SECRET from the environment or .env, and sends
+# nothing when neither is set. See scripts/lib/auth.sh.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/auth.sh"
+
 echo "Seeding Smart Manufacturing ontology..."
 
 # --- Create or Reuse Ontology ---
-EXISTING_ONT=$(curl -sf "$ONTOLOGY_SVC/api/v2/ontologies" \
+EXISTING_ONT=$(of_curl -sf "$ONTOLOGY_SVC/api/v2/ontologies" \
   | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; print(d[0]['rid'] if d else '')" 2>/dev/null || echo "")
 
 if [ -n "$EXISTING_ONT" ]; then
   MFG_ONT="$EXISTING_ONT"
   echo "  Reusing existing ontology: $MFG_ONT"
 else
-  MFG_ONT=$(curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies" \
+  MFG_ONT=$(of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies" \
     -H "Content-Type: application/json" \
     -d '{"apiName":"manufacturing","displayName":"Smart Manufacturing","description":"End-to-end smart manufacturing management - production orders, machines, workers, materials, quality, inventory, and maintenance"}' \
     | python3 -c "import json,sys; print(json.load(sys.stdin)['rid'])")
@@ -35,7 +40,7 @@ for OT in \
   '{"apiName":"QualityCheck","displayName":"Quality Check","description":"Quality inspection record for production orders","primaryKey":"checkId","properties":{"checkId":{"type":"string","description":"Unique check ID"},"orderId":{"type":"string","description":"Related production order"},"inspectorId":{"type":"string","description":"QC inspector worker ID"},"checkDate":{"type":"string","description":"Inspection date"},"result":{"type":"string","description":"pass/fail/conditional"},"defectsFound":{"type":"integer","description":"Number of defects found"},"defectType":{"type":"string","description":"Type of defect"},"severity":{"type":"string","description":"minor/major/critical"},"notes":{"type":"string","description":"Inspector notes"}}}' \
   '{"apiName":"Inventory","displayName":"Inventory","description":"Finished goods inventory tracking","primaryKey":"inventoryId","properties":{"inventoryId":{"type":"string","description":"Unique inventory ID"},"productName":{"type":"string","description":"Product name"},"sku":{"type":"string","description":"Stock keeping unit code"},"quantity":{"type":"integer","description":"Quantity in stock"},"warehouseLocation":{"type":"string","description":"Warehouse zone/shelf"},"status":{"type":"string","description":"in-stock/low-stock/out-of-stock/reserved"},"lastUpdated":{"type":"string","description":"Last inventory update date"}}}' \
   '{"apiName":"MaintenanceLog","displayName":"Maintenance Log","description":"Machine maintenance and repair records","primaryKey":"logId","properties":{"logId":{"type":"string","description":"Unique log ID"},"machineId":{"type":"string","description":"Machine serviced"},"technicianId":{"type":"string","description":"Technician worker ID"},"date":{"type":"string","description":"Maintenance date"},"type":{"type":"string","description":"preventive/corrective/emergency"},"duration_hours":{"type":"integer","description":"Duration in hours"},"partsReplaced":{"type":"string","description":"Parts replaced"},"cost":{"type":"integer","description":"Maintenance cost"},"status":{"type":"string","description":"completed/in-progress/scheduled"}}}'; do
-  curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$MFG_ONT/objectTypes" \
+  of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$MFG_ONT/objectTypes" \
     -H "Content-Type: application/json" -d "$OT" > /dev/null
 done
 echo "  7 object types created"
@@ -51,7 +56,7 @@ for LT in \
   '{"apiName":"MachineRunsOrders","objectTypeApiName":"Machine","linkedObjectTypeApiName":"ProductionOrder","cardinality":"MANY","foreignKeyPropertyApiName":"machineId"}' \
   '{"apiName":"WorkerOperatesMachine","objectTypeApiName":"Worker","linkedObjectTypeApiName":"Machine","cardinality":"ONE","foreignKeyPropertyApiName":"workerId"}' \
   '{"apiName":"MaterialUsedInOrders","objectTypeApiName":"RawMaterial","linkedObjectTypeApiName":"ProductionOrder","cardinality":"MANY","foreignKeyPropertyApiName":"materialId"}'; do
-  curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$MFG_ONT/linkTypes" \
+  of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$MFG_ONT/linkTypes" \
     -H "Content-Type: application/json" -d "$LT" > /dev/null
 done
 echo "  8 link types created"
@@ -63,7 +68,7 @@ for AT in \
   '{"apiName":"complete-production","description":"Complete a production order: move status to completed, set completed date, update finished goods inventory, free the machine","parameters":{"orderId":{"type":"string","required":true,"description":"Production order ID to complete"},"quantityProduced":{"type":"integer","required":true,"description":"Actual quantity produced"},"warehouseLocation":{"type":"string","required":true,"description":"Warehouse location for finished goods"},"notes":{"type":"string","required":false,"description":"Completion notes"}},"modifiedEntities":{"ProductionOrder":{"created":false,"modified":true},"Inventory":{"created":true,"modified":false},"Machine":{"created":false,"modified":true}},"status":"ACTIVE"}' \
   '{"apiName":"schedule-maintenance","description":"Schedule maintenance for a machine: create a maintenance log, update machine status to maintenance, assign a technician","parameters":{"machineId":{"type":"string","required":true,"description":"Machine ID requiring maintenance"},"technicianId":{"type":"string","required":true,"description":"Technician worker ID to assign"},"maintenanceType":{"type":"string","required":true,"description":"preventive/corrective/emergency"},"scheduledDate":{"type":"string","required":true,"description":"Scheduled maintenance date"},"estimatedHours":{"type":"integer","required":true,"description":"Estimated duration in hours"}},"modifiedEntities":{"Machine":{"created":false,"modified":true},"MaintenanceLog":{"created":true,"modified":false},"Worker":{"created":false,"modified":true}},"status":"ACTIVE"}' \
   '{"apiName":"record-quality-check","description":"Record a quality inspection result for a production order, update order status based on pass/fail result","parameters":{"orderId":{"type":"string","required":true,"description":"Production order ID to inspect"},"inspectorId":{"type":"string","required":true,"description":"QC inspector worker ID"},"result":{"type":"string","required":true,"description":"pass/fail/conditional"},"defectsFound":{"type":"integer","required":true,"description":"Number of defects found"},"defectType":{"type":"string","required":false,"description":"Type of defect if any"},"severity":{"type":"string","required":false,"description":"minor/major/critical"},"notes":{"type":"string","required":false,"description":"Inspector notes"}},"modifiedEntities":{"QualityCheck":{"created":true,"modified":false},"ProductionOrder":{"created":false,"modified":true}},"status":"ACTIVE"}'; do
-  curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$MFG_ONT/actionTypes" \
+  of_curl -sf -X POST "$ONTOLOGY_SVC/api/v2/ontologies/$MFG_ONT/actionTypes" \
     -H "Content-Type: application/json" -d "$AT" > /dev/null
 done
 echo "  4 action types created"
@@ -81,7 +86,7 @@ for DATA in \
   '{"primaryKey":"PO-2026-006","properties":{"orderId":"PO-2026-006","productName":"Rubber Gasket Set","quantity":10000,"status":"completed","priority":"low","startDate":"2026-02-20","dueDate":"2026-03-10","completedDate":"2026-03-08","unitCost":120}}' \
   '{"primaryKey":"PO-2026-007","properties":{"orderId":"PO-2026-007","productName":"Precision Bearing Sleeve","quantity":3000,"status":"shipped","priority":"high","startDate":"2026-02-01","dueDate":"2026-02-20","completedDate":"2026-02-18","unitCost":5200}}' \
   '{"primaryKey":"PO-2026-008","properties":{"orderId":"PO-2026-008","productName":"Custom Hydraulic Cylinder","quantity":150,"status":"planned","priority":"urgent","startDate":"","dueDate":"2026-04-05","completedDate":"","unitCost":95000}}'; do
-  curl -sf -X POST "$BASE/ProductionOrder" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/ProductionOrder" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Machines (7) ---
@@ -94,7 +99,7 @@ for DATA in \
   '{"primaryKey":"MCH-005","properties":{"machineId":"MCH-005","name":"Arburg Allrounder 570A","type":"Injection-Molding","status":"running","location":"Building D - Bay 1","utilizationRate":94,"lastMaintenance":"2026-02-10","nextMaintenance":"2026-04-10"}}' \
   '{"primaryKey":"MCH-006","properties":{"machineId":"MCH-006","name":"Bosch Packaging CUC","type":"Packaging","status":"running","location":"Building E - Line 1","utilizationRate":78,"lastMaintenance":"2026-03-05","nextMaintenance":"2026-05-05"}}' \
   '{"primaryKey":"MCH-007","properties":{"machineId":"MCH-007","name":"DMG Mori NLX 2500","type":"CNC","status":"breakdown","location":"Building A - Bay 3","utilizationRate":0,"lastMaintenance":"2026-01-20","nextMaintenance":"2026-03-20"}}'; do
-  curl -sf -X POST "$BASE/Machine" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Machine" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Workers (8) ---
@@ -108,7 +113,7 @@ for DATA in \
   '{"primaryKey":"WRK-006","properties":{"workerId":"WRK-006","fullName":"Yuki Tanaka","role":"Technician","shift":"afternoon","station":"Injection Molding Bay","certifications":"Robotics Maintenance,PLC Programming","yearsExperience":7,"status":"active"}}' \
   '{"primaryKey":"WRK-007","properties":{"workerId":"WRK-007","fullName":"Carlos Rivera","role":"Operator","shift":"night","station":"Packaging Line 1","certifications":"Packaging Systems,Forklift License","yearsExperience":4,"status":"active"}}' \
   '{"primaryKey":"WRK-008","properties":{"workerId":"WRK-008","fullName":"Sophie Laurent","role":"QC-Inspector","shift":"afternoon","station":"Quality Lab","certifications":"Six Sigma Green Belt,Statistical Process Control","yearsExperience":5,"status":"on-leave"}}'; do
-  curl -sf -X POST "$BASE/Worker" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Worker" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Raw Materials (8) ---
@@ -122,7 +127,7 @@ for DATA in \
   '{"primaryKey":"MAT-006","properties":{"materialId":"MAT-006","name":"Carbon Steel Tube","category":"Metal","stockQty":600,"minStockLevel":200,"unit":"meter","unitCost":320,"supplier":"Nippon Steel","leadTime_days":28}}' \
   '{"primaryKey":"MAT-007","properties":{"materialId":"MAT-007","name":"Nylon 66 Pellets","category":"Plastic","stockQty":4500,"minStockLevel":1000,"unit":"kg","unitCost":220,"supplier":"DuPont","leadTime_days":12}}' \
   '{"primaryKey":"MAT-008","properties":{"materialId":"MAT-008","name":"Synthetic Rubber Compound","category":"Chemical","stockQty":350,"minStockLevel":100,"unit":"kg","unitCost":560,"supplier":"Lanxess AG","leadTime_days":15}}'; do
-  curl -sf -X POST "$BASE/RawMaterial" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/RawMaterial" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Quality Checks (6) ---
@@ -134,7 +139,7 @@ for DATA in \
   '{"primaryKey":"QC-2026-004","properties":{"checkId":"QC-2026-004","orderId":"PO-2026-007","inspectorId":"WRK-004","checkDate":"2026-02-17","result":"pass","defectsFound":5,"defectType":"Dimensional out-of-spec","severity":"minor","notes":"5 sleeves 0.02mm over tolerance. Accepted per customer concession."}}' \
   '{"primaryKey":"QC-2026-005","properties":{"checkId":"QC-2026-005","orderId":"PO-2026-002","inspectorId":"WRK-008","checkDate":"2026-03-20","result":"fail","defectsFound":45,"defectType":"Porosity","severity":"critical","notes":"Batch 3 has porosity defects in valve bore. Root cause: contaminated raw stock. Quarantined."}}' \
   '{"primaryKey":"QC-2026-006","properties":{"checkId":"QC-2026-006","orderId":"PO-2026-003","inspectorId":"WRK-004","checkDate":"2026-03-22","result":"pass","defectsFound":8,"defectType":"Flash excess","severity":"minor","notes":"Minor flash on 8 units, trimmed during inspection. Mold maintenance recommended."}}'; do
-  curl -sf -X POST "$BASE/QualityCheck" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/QualityCheck" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Inventory (6) ---
@@ -146,7 +151,7 @@ for DATA in \
   '{"primaryKey":"INV-004","properties":{"inventoryId":"INV-004","productName":"Stainless Steel Valve Body","sku":"VLV-SS-1200","quantity":45,"warehouseLocation":"WH-A Zone 2 Shelf 5","status":"low-stock","lastUpdated":"2026-03-15"}}' \
   '{"primaryKey":"INV-005","properties":{"inventoryId":"INV-005","productName":"Electronic Control Board","sku":"ECB-FR4-800","quantity":200,"warehouseLocation":"WH-C Zone 1 Shelf 2","status":"reserved","lastUpdated":"2026-03-19"}}' \
   '{"primaryKey":"INV-006","properties":{"inventoryId":"INV-006","productName":"Plastic Connector Shell","sku":"CON-ABS-5K","quantity":1200,"warehouseLocation":"WH-B Zone 1 Shelf 4","status":"in-stock","lastUpdated":"2026-03-18"}}'; do
-  curl -sf -X POST "$BASE/Inventory" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/Inventory" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 # --- Maintenance Logs (7) ---
@@ -159,7 +164,7 @@ for DATA in \
   '{"primaryKey":"MNT-2026-005","properties":{"logId":"MNT-2026-005","machineId":"MCH-002","technicianId":"WRK-006","date":"2026-03-01","type":"preventive","duration_hours":3,"partsReplaced":"Tool magazine chain, coolant pump seal","cost":95000,"status":"completed"}}' \
   '{"primaryKey":"MNT-2026-006","properties":{"logId":"MNT-2026-006","machineId":"MCH-003","technicianId":"WRK-006","date":"2026-04-15","type":"preventive","duration_hours":5,"partsReplaced":"","cost":0,"status":"scheduled"}}' \
   '{"primaryKey":"MNT-2026-007","properties":{"logId":"MNT-2026-007","machineId":"MCH-006","technicianId":"WRK-003","date":"2026-03-05","type":"preventive","duration_hours":2,"partsReplaced":"Conveyor belt, sensor alignment","cost":65000,"status":"completed"}}'; do
-  curl -sf -X POST "$BASE/MaintenanceLog" -H "Content-Type: application/json" -d "$DATA" > /dev/null
+  of_curl -sf -X POST "$BASE/MaintenanceLog" -H "Content-Type: application/json" -d "$DATA" > /dev/null
 done
 
 LINKS="$OBJECTS_SVC/api/v2/ontologies/$MFG_ONT/objects"
@@ -175,7 +180,7 @@ for PAIR in \
   "PO-2026-003 QC-2026-006"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/ProductionOrder/$SRC/links/OrderHasQualityChecks" \
+  of_curl -sf -X POST "$LINKS/ProductionOrder/$SRC/links/OrderHasQualityChecks" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"QualityCheck\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -192,7 +197,7 @@ for PAIR in \
   "MCH-006 MNT-2026-007"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Machine/$SRC/links/MachineHasMaintenanceLogs" \
+  of_curl -sf -X POST "$LINKS/Machine/$SRC/links/MachineHasMaintenanceLogs" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"MaintenanceLog\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -208,7 +213,7 @@ for PAIR in \
   "WRK-004 QC-2026-006"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Worker/$SRC/links/WorkerPerformsQualityChecks" \
+  of_curl -sf -X POST "$LINKS/Worker/$SRC/links/WorkerPerformsQualityChecks" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"QualityCheck\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -225,7 +230,7 @@ for PAIR in \
   "WRK-003 MNT-2026-007"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/Worker/$SRC/links/WorkerPerformsMaintenance" \
+  of_curl -sf -X POST "$LINKS/Worker/$SRC/links/WorkerPerformsMaintenance" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"MaintenanceLog\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -241,7 +246,7 @@ for PAIR in \
   "PO-2026-003 INV-006"; do
   SRC=$(echo "$PAIR" | cut -d' ' -f1)
   TGT=$(echo "$PAIR" | cut -d' ' -f2)
-  curl -sf -X POST "$LINKS/ProductionOrder/$SRC/links/OrderProducesInventory" \
+  of_curl -sf -X POST "$LINKS/ProductionOrder/$SRC/links/OrderProducesInventory" \
     -H "Content-Type: application/json" \
     -d "{\"targetObjectType\":\"Inventory\",\"targetPrimaryKey\":\"$TGT\"}" > /dev/null
 done
@@ -253,7 +258,7 @@ PIPE_URL="$DATASETS_SVC/api/v2/pipelines"
 echo "  Creating pipelines..."
 
 # Pipeline 1: Production Efficiency
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Production Efficiency Dashboard",
@@ -271,7 +276,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 2: Machine Utilization
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Machine Utilization Report",
@@ -288,7 +293,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 3: Quality Defect Analysis
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Quality Defect Trend Analysis",
@@ -306,7 +311,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 4: Raw Material Consumption Forecast
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Material Consumption Forecast",
@@ -323,7 +328,7 @@ curl -sf -X POST "$PIPE_URL" \
   }' > /dev/null
 
 # Pipeline 5: Worker Productivity
-curl -sf -X POST "$PIPE_URL" \
+of_curl -sf -X POST "$PIPE_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Worker Productivity Analysis",
@@ -351,7 +356,7 @@ for DS in \
   '{"name":"manufacturing-quality-metrics","parentFolderRid":"ri.compass.main.folder.root"}' \
   '{"name":"manufacturing-material-inventory","parentFolderRid":"ri.compass.main.folder.root"}' \
   '{"name":"manufacturing-maintenance-history","parentFolderRid":"ri.compass.main.folder.root"}'; do
-  curl -sf -X POST "$DS_URL" \
+  of_curl -sf -X POST "$DS_URL" \
     -H "Content-Type: application/json" -d "$DS" > /dev/null
 done
 echo "  5 datasets created"
@@ -361,7 +366,7 @@ echo "  Creating functions..."
 FUNCTIONS_SVC="${FUNCTIONS_SERVICE_URL:-http://localhost:8088}"
 FUNC_URL="$FUNCTIONS_SVC/api/v2/functions"
 
-curl -sf -X POST "$FUNC_URL" \
+of_curl -sf -X POST "$FUNC_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "apiName":"getMachineUtilizationSummary",
@@ -371,7 +376,7 @@ curl -sf -X POST "$FUNC_URL" \
     "code":"const machines = objects; const total = machines.length; const running = machines.filter(m => m.properties.status === \"running\").length; const avgUtil = total > 0 ? Math.round(machines.reduce((sum, m) => sum + m.properties.utilizationRate, 0) / total) : 0; return { totalMachines: total, running, idle: machines.filter(m => m.properties.status === \"idle\").length, maintenance: machines.filter(m => m.properties.status === \"maintenance\" || m.properties.status === \"breakdown\").length, avgUtilization: avgUtil };"
   }' > /dev/null
 
-curl -sf -X POST "$FUNC_URL" \
+of_curl -sf -X POST "$FUNC_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "apiName":"getOverdueOrders",
@@ -381,7 +386,7 @@ curl -sf -X POST "$FUNC_URL" \
     "code":"const today = new Date().toISOString().split(\"T\")[0]; return objects.filter(o => o.properties.dueDate < today && ![\"completed\", \"shipped\"].includes(o.properties.status)).map(o => ({ orderId: o.properties.orderId, productName: o.properties.productName, dueDate: o.properties.dueDate, status: o.properties.status, priority: o.properties.priority }));"
   }' > /dev/null
 
-curl -sf -X POST "$FUNC_URL" \
+of_curl -sf -X POST "$FUNC_URL" \
   -H "Content-Type: application/json" \
   -d '{
     "apiName":"getMaterialsNeedingReorder",

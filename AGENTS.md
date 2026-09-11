@@ -95,6 +95,25 @@ Fastify hands a plugin the options object it was registered with, `prefix` inclu
 Passing that object straight on to a child `app.register` applies the prefix a second time, so the routes land under `/api/v1/api/v1/...` and every request 404s - build a fresh options object for each child.
 No static route scan can see this, so confirm a new route is really reachable with `app.printRoutes()` or an `app.inject` test rather than trusting an inventory of the source.
 
+## Authentication and caller identity
+
+Fastify encapsulates anything passed to `app.register`, so a plugin that adds an `onRequest` hook there guards only routes registered inside that child context.
+`authPlugin` and `rateLimitPlugin` are therefore called directly on the root instance in `services/svc-gateway/src/server.ts`; registering either one silently guards nothing.
+
+The gateway enforces only when `AUTH_PUBLIC_KEY` is set; empty means every request passes, which is the demo default.
+The key must be the PEM that matches svc-multipass's `JWT_PRIVATE_KEY`, and `AUTH_ISSUER` must match the `iss` multipass signs (`openfoundry-multipass`) or every real token is rejected.
+
+Every non-browser caller gets its bearer token from the environment through `scripts/lib/auth.sh` (`of_curl`) or `scripts/lib/auth.ts` (`authHeaders`): `OPENFOUNDRY_TOKEN`, or `OPENFOUNDRY_CLIENT_ID`/`OPENFOUNDRY_CLIENT_SECRET` exchanged for one.
+Both send no header when neither is set, so the demo still works unauthenticated. Never write a credential into a script - this repository is public.
+The console covers its ~80 `fetch` call sites with one interceptor, `apps/app-console/src/lib/authFetch.ts`, installed from `main.tsx`.
+
+Downstream services read identity from `X-User-Id` / `X-User-Roles` (`packages/permissions/src/middleware.ts`).
+`services/svc-gateway/src/proxy.ts` always drops those headers on the way in and re-asserts them from the verified claims, so a client cannot pick its own roles.
+It sets both or neither: the permission middleware denies a request carrying a user id without roles, so a half-filled identity 403s every downstream route.
+Roles travel in an optional `roles` claim minted by svc-multipass; a token without it conveys no roles and downstream decides as it did before.
+
+The proxy must not forward the incoming `Content-Length`: the body is re-serialised from Fastify's parsed form, and a stale length makes undici reject the request, which surfaces as a 502.
+
 ## Running the console end to end
 
 `bash start.sh` boots ten services plus the console on :3000, but it first kills whatever holds ports 8080-8088, 8092 and 3000 - check those are yours before running it.
@@ -107,7 +126,7 @@ Running a second one therefore merges another industry's object types into the f
 Without `DATABASE_URL` every service uses its in-memory or `/tmp/openfoundry-data` store; that is the mode the demo is built for, and the only mode in which svc-admin's user and group routes work.
 `/tmp/openfoundry-data` is a fixed path with no env override, so two checkouts running at once share and overwrite it.
 
-Dev login is `admin` / `admin123` (see `DEV_USERS` in `services/svc-multipass/src/routes/auth.ts`).
+Dev login is `admin` / `admin123` (see `DEV_USERS` in `services/svc-multipass/src/routes/auth.ts`); the `admin` / `admin123` and `developer` / `dev123` pairs also work as OAuth client credentials.
 
 ## Identity and permissions
 

@@ -181,6 +181,8 @@ export async function oauthRoutes(
       userId,
       redirectUri,
       scope,
+      // An auto-registered client has no roles, so its tokens assert none.
+      ...(client.roles ? { roles: client.roles.join(" ") } : {}),
       codeChallenge: query.code_challenge,
       codeChallengeMethod: query.code_challenge_method,
     });
@@ -300,7 +302,13 @@ export async function oauthRoutes(
       }
     }
 
-    return issueTokens(authCode.userId, authCode.scope, clientId, reply);
+    return issueTokens(
+      authCode.userId,
+      authCode.scope,
+      clientId,
+      reply,
+      authCode.roles,
+    );
   }
 
   async function handleClientCredentialsGrant(
@@ -327,7 +335,13 @@ export async function oauthRoutes(
 
     const scope = body.scope ?? client.scopes.join(" ");
 
-    return issueTokens(`service:${clientId}`, scope, clientId, reply);
+    return issueTokens(
+      `service:${clientId}`,
+      scope,
+      clientId,
+      reply,
+      client.roles?.join(" "),
+    );
   }
 
   async function handleRefreshTokenGrant(
@@ -346,7 +360,13 @@ export async function oauthRoutes(
     // Revoke the old refresh token (rotation)
     tokenStore.revokeRefreshToken(body.refresh_token);
 
-    return issueTokens(stored.userId, stored.scope, stored.clientId, reply);
+    return issueTokens(
+      stored.userId,
+      stored.scope,
+      stored.clientId,
+      reply,
+      stored.roles,
+    );
   }
 
   async function issueTokens(
@@ -354,6 +374,7 @@ export async function oauthRoutes(
     scope: string,
     clientId: string,
     reply: FastifyReply,
+    roles?: string,
   ): Promise<TokenResponse> {
     const rid = generateRid("multipass", "token");
     const sessionId = crypto.randomUUID();
@@ -368,6 +389,10 @@ export async function oauthRoutes(
         iss: "openfoundry-multipass",
         aud: "openfoundry-api",
         scope,
+        // Signed in, so the gateway can give downstream services a role set
+        // that no client could have forged. Absent when the client asserts no
+        // roles - the gateway then sends no role header at all.
+        ...(roles ? { roles } : {}),
       },
       config.tokenExpirySeconds,
     );
@@ -383,6 +408,7 @@ export async function oauthRoutes(
       clientId,
       userId,
       scope,
+      ...(roles ? { roles } : {}),
       expiresAt: refreshExpiresAt,
       revoked: false,
     });

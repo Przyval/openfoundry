@@ -26,7 +26,11 @@ export interface GatewayConfig {
    */
   readonly authPublicKey: string;
 
-  /** Expected JWT issuer claim. */
+  /**
+   * Expected JWT issuer claim. Must match what svc-multipass signs into
+   * `iss` (see services/svc-multipass/src/routes/oauth.ts), or every token
+   * the platform mints is rejected.
+   */
   readonly authIssuer: string;
 
   /** Expected JWT audience claim. */
@@ -84,7 +88,10 @@ export function loadConfig(): GatewayConfig {
     port: envInt("PORT", 8080),
     host: env("HOST", "0.0.0.0"),
     authPublicKey: env("AUTH_PUBLIC_KEY", ""),
-    authIssuer: env("AUTH_ISSUER", "openfoundry"),
+    // "openfoundry-multipass" is the only issuer this platform mints - the
+    // previous default of "openfoundry" matched nothing, which went unnoticed
+    // while the auth hook was never running.
+    authIssuer: env("AUTH_ISSUER", "openfoundry-multipass"),
     authAudience: env("AUTH_AUDIENCE", "openfoundry-api"),
     services: {
       multipass: env("MULTIPASS_SERVICE_URL", "http://localhost:8084"),

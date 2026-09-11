@@ -3,6 +3,7 @@ export {
   type OpenFoundryClaims,
   type TokenInput,
   parseScopes,
+  parseRoles,
   hasScope,
 } from "./claims.js";
 
@@ -16,6 +17,7 @@ export {
 // Token validation
 export {
   validateToken,
+  importVerificationKey,
   TokenValidationError,
   TokenValidationErrorCode,
   type ValidateTokenOptions,
