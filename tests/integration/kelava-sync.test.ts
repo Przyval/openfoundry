@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { authHeaders } from "../../scripts/lib/auth";
 
-const BASE = process.env.OPENFOUNDRY_HOST ?? "http://localhost:8080";
+const BASE = process.env.OPENFOUNDRY_HOST || "http://localhost:8080";
 
 // ---------------------------------------------------------------------------
 // Helpers

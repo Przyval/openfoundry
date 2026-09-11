@@ -249,6 +249,39 @@ describe("default config", () => {
       if (previousAudience !== undefined) process.env.AUTH_AUDIENCE = previousAudience;
     }
   });
+
+  it("treats an empty AUTH_ISSUER as unset rather than as 'verify nothing'", async () => {
+    // Blanking the line instead of deleting it must not switch the issuer
+    // check off: the middleware maps an empty value to `undefined`, which jose
+    // reads as "do not verify this claim".
+    const previousIssuer = process.env.AUTH_ISSUER;
+    const previousAudience = process.env.AUTH_AUDIENCE;
+    process.env.AUTH_ISSUER = "";
+    process.env.AUTH_AUDIENCE = "";
+    try {
+      const { loadConfig } = await import("../src/config.js");
+      const config = loadConfig();
+      expect(config.authIssuer).toBe(MULTIPASS_ISSUER);
+      expect(config.authAudience).toBe(MULTIPASS_AUDIENCE);
+
+      const app = await createServer({
+        config: { ...configWith(publicKeyPem), authIssuer: config.authIssuer, authAudience: config.authAudience },
+      });
+      const foreign = await signToken({ iss: "someone-else" });
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v2/ontologies",
+        headers: { authorization: `Bearer ${foreign}` },
+      });
+      expect(res.statusCode).toBe(401);
+      await app.close();
+    } finally {
+      if (previousIssuer === undefined) delete process.env.AUTH_ISSUER;
+      else process.env.AUTH_ISSUER = previousIssuer;
+      if (previousAudience === undefined) delete process.env.AUTH_AUDIENCE;
+      else process.env.AUTH_AUDIENCE = previousAudience;
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

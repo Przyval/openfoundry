@@ -10,7 +10,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { Ontologies, Datasets, Admin } from "@osdk/foundry";
 import { resolveAccessToken } from "../../scripts/lib/auth";
 
-const HOST = process.env.OPENFOUNDRY_HOST ?? "http://localhost:8080";
+const HOST = process.env.OPENFOUNDRY_HOST || "http://localhost:8080";
 
 // ---------------------------------------------------------------------------
 // SDK client setup

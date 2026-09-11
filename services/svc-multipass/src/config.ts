@@ -32,13 +32,21 @@ export interface MultipassConfig {
   readonly nodeEnv: string;
 }
 
+/**
+ * An environment variable that is set but empty is treated as absent, so it
+ * falls back to the value below rather than through it. An exported empty
+ * string is what a blanked line in a `.env` file produces, and for a variable
+ * like AUTH_ISSUER it would otherwise mean "verify no issuer at all" - a check
+ * silently switched off by a line an operator thought was harmless.
+ */
 function env(key: string, fallback: string): string {
-  return process.env[key] ?? fallback;
+  const raw = process.env[key];
+  return raw === undefined || raw === "" ? fallback : raw;
 }
 
 function envInt(key: string, fallback: number): number {
   const raw = process.env[key];
-  if (raw === undefined) return fallback;
+  if (raw === undefined || raw === "") return fallback;
   const parsed = parseInt(raw, 10);
   if (Number.isNaN(parsed)) {
     throw new Error(`Environment variable ${key} must be a valid integer, got: "${raw}"`);

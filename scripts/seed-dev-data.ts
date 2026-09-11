@@ -2,7 +2,7 @@
 // Seeds the dev environment with sample data
 import { authHeaders } from "./lib/auth";
 
-const GATEWAY_URL = process.env.GATEWAY_URL ?? "http://localhost:8080";
+const GATEWAY_URL = process.env.GATEWAY_URL || "http://localhost:8080";
 
 async function seed() {
   console.log("🌱 Seeding OpenFoundry dev environment...\n");

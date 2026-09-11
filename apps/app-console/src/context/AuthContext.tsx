@@ -65,7 +65,11 @@ export interface AuthContextValue {
 const PKCE_VERIFIER_KEY = "openfoundry_pkce_verifier";
 
 const oauthOptions = {
-  clientId: (import.meta.env.VITE_OAUTH_CLIENT_ID as string) ?? "openfoundry-console",
+  // `||`, not `??`: a build that defines the variable empty has no client id,
+  // not an intentionally blank one.
+  clientId:
+    (import.meta.env.VITE_OAUTH_CLIENT_ID as string | undefined) ||
+    "openfoundry-console",
   baseUrl: API_BASE_URL,
   redirectUri: `${window.location.origin}/login`,
   scopes: ["api:read", "api:write"],

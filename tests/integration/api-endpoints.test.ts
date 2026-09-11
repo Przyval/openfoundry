@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { resolveAccessToken } from "../../scripts/lib/auth";
 
-const BASE = process.env.OPENFOUNDRY_HOST ?? "http://localhost:8080";
+const BASE = process.env.OPENFOUNDRY_HOST || "http://localhost:8080";
 
 /**
  * The credential this suite sends. It comes from the environment through

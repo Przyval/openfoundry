@@ -119,6 +119,9 @@ Two limits are known and accepted, not oversights.
 And `NODE_ENV=production` seeds no OAuth client (`ClientStore`) and there is no registration endpoint, so `client_credentials` cannot work there at all: only a pre-minted `OPENFOUNDRY_TOKEN` authenticates a script against a production deployment.
 That is the deliberate price of not shipping this public repository's published credentials into production.
 
+The rate limiter's per-tenant bucket is dead code: `extractKey` keys on `request.orgRid`, but `rateLimitPlugin` is called before `authPlugin` and Fastify runs same-context `onRequest` hooks in registration order, so `orgRid` is still undefined and every authenticated request falls through to a hash of its Authorization header - a new bucket on every token refresh, not per-tenant isolation.
+Fixing it means deciding whether JWT verification should run before throttling, which is a real edge-behaviour tradeoff, so the order is left alone deliberately.
+
 The proxy must not forward the incoming `Content-Length`: the body is re-serialised from Fastify's parsed form, and a stale length makes undici reject the request, which surfaces as a 502.
 
 ## Running the console end to end
