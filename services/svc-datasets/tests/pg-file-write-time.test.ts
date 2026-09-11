@@ -264,14 +264,13 @@ describe("dataset_files carries updated_at in every schema source", () => {
     expect(updatedAt!.default).toMatch(/^NOW\(\)$/i);
   });
 
-  it.each([
-    ["db/migrations (pnpm db:migrate)", migrationSchema],
-    ["scripts/migrate.sql (Docker Compose init)", composeSchema],
-  ])("%s never backfills an existing row with the time of the migration", (_label, build) => {
+  it("db/migrations never backfills an existing row with the time of the migration", () => {
     // A pre-existing row's write time is its `created_at` - the overwrite path
     // could not succeed before this migration, so the insert is the only write
-    // that row ever had. `NOW()` would invent one.
-    const { backfills } = build();
+    // that row ever had. `NOW()` would invent one. Only db/migrations has a
+    // pre-existing row to backfill; the Compose source runs on an empty
+    // directory and declares the column in its CREATE TABLE.
+    const { backfills } = migrationSchema();
     const onUpdatedAt = backfills.filter(
       (b) => b.table === "dataset_files" && b.column === "updated_at",
     );

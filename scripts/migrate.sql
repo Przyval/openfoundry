@@ -412,17 +412,6 @@ CREATE TABLE IF NOT EXISTS dataset_files (
     PRIMARY KEY (dataset_rid, path)
 );
 
--- These keep this file in step with db/migrations/010 on a fresh init, where
--- an earlier CREATE TABLE above may already have run. They do not reach an
--- existing Compose volume: Postgres runs /docker-entrypoint-initdb.d only when
--- the data directory is empty, so a database initialised before `updated_at`
--- existed gets the column from `pnpm db:migrate` and nowhere else.
--- See db/migrations/010 for why pre-existing rows take `created_at`.
-ALTER TABLE dataset_files ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
-UPDATE dataset_files SET updated_at = created_at WHERE updated_at IS NULL;
-ALTER TABLE dataset_files ALTER COLUMN updated_at SET DEFAULT NOW();
-ALTER TABLE dataset_files ALTER COLUMN updated_at SET NOT NULL;
-
 CREATE INDEX IF NOT EXISTS idx_dataset_files_transaction ON dataset_files (transaction_rid);
 
 -- ============================================================================
