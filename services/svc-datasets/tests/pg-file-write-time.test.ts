@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type pg from "pg";
@@ -115,25 +115,168 @@ describe("PgFileStore records the write time", () => {
 // 2. Both schema sources have the column the store writes
 // ---------------------------------------------------------------------------
 
+type Column = { name: string; type: string; notNull: boolean; default?: string };
+type Schema = Map<string, Map<string, Column>>;
+type Backfill = { table: string; column: string; value: string };
+
+function stripComments(sql: string): string {
+  return sql.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+function statements(sql: string): string[] {
+  return stripComments(sql)
+    .split(";")
+    .map((s) => s.trim().replace(/\s+/g, " "))
+    .filter(Boolean);
+}
+
+function splitTopLevel(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const char of body) {
+    if (char === "(") depth += 1;
+    if (char === ")") depth -= 1;
+    if (char === "," && depth === 0) {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+const TABLE_CONSTRAINT =
+  /^(PRIMARY KEY|FOREIGN KEY|UNIQUE|CHECK|CONSTRAINT|EXCLUDE)\b/i;
+
+function column(definition: string): Column | null {
+  if (TABLE_CONSTRAINT.test(definition)) return null;
+  const [name, ...rest] = definition.split(/\s+/);
+  const tail = rest.join(" ");
+  return {
+    name: name.toLowerCase(),
+    type: (rest[0] ?? "").toUpperCase(),
+    notNull: /\bNOT NULL\b/i.test(tail),
+    default: tail.match(/\bDEFAULT\s+(.+?)(?=\s+NOT NULL|\s+REFERENCES|$)/i)?.[1],
+  };
+}
+
+/**
+ * Applies a SQL source to a schema model: CREATE TABLE, ALTER TABLE ... ADD
+ * COLUMN and ALTER COLUMN ... SET, recording UPDATE ... SET assignments as
+ * backfills. Comments are stripped first, so nothing commented out counts.
+ */
+function apply(sql: string, schema: Schema, backfills: Backfill[]): void {
+  for (const statement of statements(sql)) {
+    const create = statement.match(
+      /^CREATE TABLE (?:IF NOT EXISTS )?(\w+)\s*\(([\s\S]*)\)[^)]*$/i,
+    );
+    if (create) {
+      const table = create[1].toLowerCase();
+      const columns = schema.get(table) ?? new Map<string, Column>();
+      for (const definition of splitTopLevel(create[2])) {
+        const parsed = column(definition);
+        if (parsed) columns.set(parsed.name, parsed);
+      }
+      schema.set(table, columns);
+      continue;
+    }
+
+    const add = statement.match(
+      /^ALTER TABLE (\w+) ADD COLUMN (?:IF NOT EXISTS )?(.+)$/i,
+    );
+    if (add) {
+      const columns = schema.get(add[1].toLowerCase());
+      const parsed = column(add[2]);
+      if (columns && parsed && !columns.has(parsed.name)) columns.set(parsed.name, parsed);
+      continue;
+    }
+
+    const alter = statement.match(
+      /^ALTER TABLE (\w+) ALTER COLUMN (\w+) SET (NOT NULL|DEFAULT (.+))$/i,
+    );
+    if (alter) {
+      const existing = schema.get(alter[1].toLowerCase())?.get(alter[2].toLowerCase());
+      if (existing) {
+        if (/^NOT NULL$/i.test(alter[3])) existing.notNull = true;
+        else existing.default = alter[4];
+      }
+      continue;
+    }
+
+    const update = statement.match(/^UPDATE (\w+) SET (\w+) = (.+?)(?: WHERE .+)?$/i);
+    if (update) {
+      backfills.push({
+        table: update[1].toLowerCase(),
+        column: update[2].toLowerCase(),
+        value: update[3].trim(),
+      });
+    }
+  }
+}
+
+function read(relative: string): string {
+  return readFileSync(path.join(REPO_ROOT, relative), "utf8");
+}
+
+/** The schema `pnpm db:migrate` produces: every migration applied in order. */
+function migrationSchema(): { schema: Schema; backfills: Backfill[] } {
+  const schema: Schema = new Map();
+  const backfills: Backfill[] = [];
+  const dir = path.join(REPO_ROOT, "db/migrations");
+  for (const file of readdirSync(dir)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()) {
+    apply(readFileSync(path.join(dir, file), "utf8"), schema, backfills);
+  }
+  return { schema, backfills };
+}
+
+/** The schema Docker Compose loads at init. */
+function composeSchema(): { schema: Schema; backfills: Backfill[] } {
+  const schema: Schema = new Map();
+  const backfills: Backfill[] = [];
+  apply(read("scripts/migrate.sql"), schema, backfills);
+  return { schema, backfills };
+}
+
 describe("dataset_files carries updated_at in every schema source", () => {
   it.each([
-    ["db/migrations (pnpm db:migrate)", "db/migrations/010_dataset_file_updated_at.sql"],
-    ["scripts/migrate.sql (Docker Compose init)", "scripts/migrate.sql"],
-  ])("%s", (_label, relative) => {
-    const sql = readFileSync(path.join(REPO_ROOT, relative), "utf8");
-    expect(sql).toMatch(/dataset_files[\s\S]*updated_at/);
+    ["db/migrations (pnpm db:migrate)", migrationSchema],
+    ["scripts/migrate.sql (Docker Compose init)", composeSchema],
+  ])("%s", (_label, build) => {
+    const { schema } = build();
+
+    // Guards the parser itself: a source that parsed to nothing would pass any
+    // column assertion below by vacuous absence of the table.
+    const table = schema.get("dataset_files");
+    expect(table).toBeDefined();
+    expect([...table!.keys()]).toEqual(
+      expect.arrayContaining(["dataset_rid", "path", "created_at"]),
+    );
+
+    const updatedAt = table!.get("updated_at");
+    expect(updatedAt).toBeDefined();
+    expect(updatedAt!.type).toBe("TIMESTAMPTZ");
+    expect(updatedAt!.notNull).toBe(true);
+    expect(updatedAt!.default).toMatch(/^NOW\(\)$/i);
   });
 
-  it("never backfills an existing row with the time of the migration", () => {
+  it.each([
+    ["db/migrations (pnpm db:migrate)", migrationSchema],
+    ["scripts/migrate.sql (Docker Compose init)", composeSchema],
+  ])("%s never backfills an existing row with the time of the migration", (_label, build) => {
     // A pre-existing row's write time is its `created_at` - the overwrite path
     // could not succeed before this migration, so the insert is the only write
     // that row ever had. `NOW()` would invent one.
-    const sql = readFileSync(
-      path.join(REPO_ROOT, "db/migrations/010_dataset_file_updated_at.sql"),
-      "utf8",
+    const { backfills } = build();
+    const onUpdatedAt = backfills.filter(
+      (b) => b.table === "dataset_files" && b.column === "updated_at",
     );
-    expect(sql).toMatch(/UPDATE dataset_files SET updated_at = created_at/);
-    expect(sql).not.toMatch(/SET updated_at = NOW\(\)\s+WHERE/);
+    expect(onUpdatedAt).toHaveLength(1);
+    expect(onUpdatedAt[0].value).toBe("created_at");
   });
 });
 
