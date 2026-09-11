@@ -75,6 +75,10 @@ export async function proxyRequest(
     const lowerKey = key.toLowerCase();
     if (HOP_BY_HOP_HEADERS.has(lowerKey)) continue;
     if (lowerKey === "host") continue; // let fetch set the correct Host
+    // The body below is re-serialized from the parsed object, so the client's
+    // Content-Length no longer describes it. Forwarding it makes undici reject
+    // every request whose JSON was not already compact. Let fetch set it.
+    if (lowerKey === "content-length") continue;
     // Never forward a caller's own claim about its identity or roles.
     if (lowerKey.startsWith(CLIENT_ASSERTED_IDENTITY_PREFIX)) continue;
     if (value !== undefined) {
