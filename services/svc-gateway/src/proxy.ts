@@ -33,8 +33,8 @@ const HOP_BY_HOP_HEADERS = new Set([
  * service ports directly rather than through this proxy.
  *
  * This only removes an inbound trust. It does not grant anyone access, and it
- * does not populate the headers either - see the note in `middleware/auth.ts`
- * about `request.claims` never being set.
+ * does not populate the headers either; `request.claims` is never set either,
+ * because `authPlugin` is registered unencapsulated in `server.ts`.
  *
  * Known consequence: role-based enforcement does NOT work after this change.
  * What was removed is fake enforcement - a client could assert its own roles -
