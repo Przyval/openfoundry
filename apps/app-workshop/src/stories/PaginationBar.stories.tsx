@@ -60,21 +60,23 @@ export const SinglePage: Story = {
   },
 };
 
+function WithPageSizeControlStory() {
+  const [pageSize, setPageSize] = useState(25);
+  return (
+    <PaginationBar
+      hasNext={true}
+      hasPrevious={true}
+      pageSize={pageSize}
+      onPageSizeChange={setPageSize}
+      totalCount={500}
+      onNext={() => alert("Next")}
+      onPrevious={() => alert("Previous")}
+    />
+  );
+}
+
 export const WithPageSizeControl: Story = {
-  render: () => {
-    const [pageSize, setPageSize] = useState(25);
-    return (
-      <PaginationBar
-        hasNext={true}
-        hasPrevious={true}
-        pageSize={pageSize}
-        onPageSizeChange={setPageSize}
-        totalCount={500}
-        onNext={() => alert("Next")}
-        onPrevious={() => alert("Previous")}
-      />
-    );
-  },
+  render: () => <WithPageSizeControlStory />,
 };
 
 export const WithoutTotalCount: Story = {

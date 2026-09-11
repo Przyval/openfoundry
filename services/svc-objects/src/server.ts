@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
+import type { Pool } from "pg";
 import { OpenFoundryApiError } from "@openfoundry/errors";
 import { createPool } from "@openfoundry/db";
 import { type ObjectsConfig, loadConfig } from "./config.js";
@@ -40,7 +41,7 @@ export async function createServer(
   const config = options.config ?? loadConfig();
 
   let store: ObjectStore | PgObjectStore;
-  let pgPool: import("pg").Pool | undefined;
+  let pgPool: Pool | undefined;
   if (options.store) {
     store = options.store;
   } else if (config.databaseUrl) {

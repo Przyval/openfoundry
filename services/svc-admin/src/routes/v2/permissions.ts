@@ -1,8 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import {
-  PgPermissionStore,
-  requirePermission,
-} from "@openfoundry/permissions";
+import type { PgPermissionStore } from "@openfoundry/permissions";
+import { requirePermission } from "@openfoundry/permissions";
 import { generateRid } from "@openfoundry/rid";
 import { notFound, invalidArgument } from "@openfoundry/errors";
 

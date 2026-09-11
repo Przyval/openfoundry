@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { importPKCS8, importSPKI, type CryptoKey } from "jose";
 import { createToken, buildTokenInput, validateToken } from "@openfoundry/auth-tokens";
 import { invalidArgument } from "@openfoundry/errors";
@@ -250,7 +250,7 @@ export async function oauthRoutes(
 
   async function handleAuthorizationCodeGrant(
     body: TokenRequest,
-    reply: import("fastify").FastifyReply,
+    reply: FastifyReply,
   ): Promise<TokenResponse> {
     if (!body.code) {
       throw invalidArgument("code", "is required for authorization_code grant");
@@ -305,7 +305,7 @@ export async function oauthRoutes(
 
   async function handleClientCredentialsGrant(
     body: TokenRequest,
-    reply: import("fastify").FastifyReply,
+    reply: FastifyReply,
   ): Promise<TokenResponse> {
     const clientId = body.client_id;
     if (!clientId) {
@@ -332,7 +332,7 @@ export async function oauthRoutes(
 
   async function handleRefreshTokenGrant(
     body: TokenRequest,
-    reply: import("fastify").FastifyReply,
+    reply: FastifyReply,
   ): Promise<TokenResponse> {
     if (!body.refresh_token) {
       throw invalidArgument("refresh_token", "is required for refresh_token grant");
@@ -353,7 +353,7 @@ export async function oauthRoutes(
     userId: string,
     scope: string,
     clientId: string,
-    reply: import("fastify").FastifyReply,
+    reply: FastifyReply,
   ): Promise<TokenResponse> {
     const rid = generateRid("multipass", "token");
     const sessionId = crypto.randomUUID();

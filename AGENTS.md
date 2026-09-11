@@ -9,10 +9,21 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 `pnpm run build` is green (49/49), as is `typecheck` (45/45). Keep it that way.
 Run `npx turbo run build --continue` to see every failure at once; plain `build` stops at the first.
 
-`pnpm run lint` reports 21/21 but checks nothing: no package declares a `lint` script, so every
-turbo `lint` task is a no-op, and `eslint` itself is not even installed (only `typescript-eslint`
-and the root `eslint.config.js` exist). Treat a green lint run as no signal.
-Prettier is likewise unenforced - `pnpm run format` writes, nothing checks, and most files are
+`pnpm run lint` is a real check now: it runs `eslint .` directly over all 598 `.ts`/`.tsx`/`.mts`
+files in the repo, not `turbo run lint`. There is no per-package `lint` script and no per-package
+eslint config on purpose - one root `eslint.config.mjs` means no package can silently opt out,
+which is exactly how this task's predecessor reported 21/21 green while checking zero files.
+It is green at 0 errors with 227 warnings outstanding (181 `no-explicit-any`, 35 `no-unused-vars`,
+11 `react-hooks/exhaustive-deps`); only errors fail the run, so a growing warning count is
+visible but unguarded.
+`no-console` is off for `scripts/`, `services/` and `tests/`, plus three library modules whose
+job is printing (`packages/logging/src/logger.ts`, `packages/redis/src/client.ts`,
+`packages/sdk/sdk-cli/src/output.ts`). Scope the rule, never add per-line disables.
+`eslint-plugin-react-hooks` is pinned to the two classic rules (`rules-of-hooks`,
+`exhaustive-deps`). Its v7 `recommended` preset also enables the React Compiler rules
+(`set-state-in-effect`, `refs`, `immutability`, `preserve-manual-memoization`), which flag 46
+further errors in the console; adopting those is a deliberate decision, not a config default.
+Prettier is unenforced - `pnpm run format` writes, nothing checks, and most files are
 not Prettier-clean; do not reformat a file wholesale just because `prettier --check` flags it.
 
 `noUnusedLocals` and `noUnusedParameters` are on, so an unused import or local is a hard error.

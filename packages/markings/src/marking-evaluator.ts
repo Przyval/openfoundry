@@ -1,4 +1,5 @@
-import { Marking, MarkingType } from "./marking-types.js";
+import type { Marking } from "./marking-types.js";
+import { MarkingType } from "./marking-types.js";
 
 /**
  * Evaluates access based on mandatory and discretionary markings.

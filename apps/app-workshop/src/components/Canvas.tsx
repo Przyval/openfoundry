@@ -100,7 +100,7 @@ export function Canvas({
         const dx = moveEvt.clientX - startX;
         const dy = moveEvt.clientY - startY;
         let newX = Math.max(1, Math.round(origX + dx / colWidth));
-        let newY = Math.max(1, Math.round(origY + dy / rowHeight));
+        const newY = Math.max(1, Math.round(origY + dy / rowHeight));
         newX = Math.min(newX, 12 - widget.position.w + 1);
 
         onUpdateWidget(widgetId, {

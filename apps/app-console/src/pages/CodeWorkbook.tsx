@@ -170,7 +170,7 @@ function formatCellValue(val: unknown): string {
 /* ------------------------------------------------------------------ */
 
 function renderMarkdown(src: string): string {
-  let html = src
+  const html = src
     // Code blocks
     .replace(/```([\s\S]*?)```/g, "<pre><code>$1</code></pre>")
     // Inline code

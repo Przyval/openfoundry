@@ -107,7 +107,7 @@ function applyForces(
       const b = nodes[j];
       let dx = b.x - a.x;
       let dy = b.y - a.y;
-      let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
       const minDist = 100;
       if (dist < minDist) {
         const force = ((minDist - dist) / dist) * 0.5;

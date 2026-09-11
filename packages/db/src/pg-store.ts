@@ -1,4 +1,4 @@
-import pg from "pg";
+import type pg from "pg";
 
 // ---------------------------------------------------------------------------
 // PgStore — generic JSONB-backed store with tenant isolation via RLS

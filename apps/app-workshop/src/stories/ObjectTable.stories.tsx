@@ -74,19 +74,21 @@ export const MinimalColumns: Story = {
   },
 };
 
+function WithSelectionStory() {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  return (
+    <ObjectTable
+      columns={sampleColumns}
+      data={sampleData}
+      primaryKeyField="id"
+      selectedRows={selected}
+      onSelectionChange={setSelected}
+    />
+  );
+}
+
 export const WithSelection: Story = {
-  render: () => {
-    const [selected, setSelected] = useState<Set<string>>(new Set());
-    return (
-      <ObjectTable
-        columns={sampleColumns}
-        data={sampleData}
-        primaryKeyField="id"
-        selectedRows={selected}
-        onSelectionChange={setSelected}
-      />
-    );
-  },
+  render: () => <WithSelectionStory />,
 };
 
 export const LargeDataset: Story = {

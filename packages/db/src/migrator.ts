@@ -1,4 +1,4 @@
-import pg from "pg";
+import type pg from "pg";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withTransaction } from "./pool.js";
