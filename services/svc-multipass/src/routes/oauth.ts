@@ -7,7 +7,6 @@ import type { MultipassConfig } from "../config.js";
 import { verifyCodeChallenge } from "../pkce.js";
 import { TokenStore } from "../store/token-store.js";
 import { ClientStore } from "../store/client-store.js";
-import { devUserRoles } from "./auth.js";
 
 /** Key type compatible with jose v5 (KeyLike) and v6 (CryptoKey). */
 type SigningKey = CryptoKey | Uint8Array;
@@ -173,10 +172,6 @@ export async function oauthRoutes(
     // In dev mode, auto-approve as the default admin user.
     const userId = "admin";
 
-    // Roles belong to the user, never to the OAuth client: a client's own
-    // roles are only correct for client_credentials, which has no user.
-    const userRoles = devUserRoles(userId);
-
     // Generate authorization code
     const code = crypto.randomUUID();
 
@@ -186,8 +181,11 @@ export async function oauthRoutes(
       userId,
       redirectUri,
       scope,
-      // A user with no role record asserts none.
-      ...(userRoles?.length ? { roles: userRoles.join(" ") } : {}),
+      // No roles claim. Roles belong to the authenticated user, and this flow
+      // authenticates nobody: the user above is hardcoded, any client_id is
+      // auto-registered and any redirect_uri accepted. Reading a fake user's
+      // roles would hand an anonymous caller whatever that name implies, so
+      // this issues none until there is a real user to read.
       codeChallenge: query.code_challenge,
       codeChallengeMethod: query.code_challenge_method,
     });
@@ -307,13 +305,7 @@ export async function oauthRoutes(
       }
     }
 
-    return issueTokens(
-      authCode.userId,
-      authCode.scope,
-      clientId,
-      reply,
-      authCode.roles,
-    );
+    return issueTokens(authCode.userId, authCode.scope, clientId, reply);
   }
 
   async function handleClientCredentialsGrant(

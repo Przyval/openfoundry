@@ -21,8 +21,6 @@ export interface StoredAuthCode {
   readonly userId: string;
   readonly redirectUri: string;
   readonly scope: string;
-  /** Space-separated platform roles granted at authorization time. */
-  readonly roles?: string;
   readonly codeChallenge?: string;
   readonly codeChallengeMethod?: "S256" | "plain";
   readonly expiresAt: number;

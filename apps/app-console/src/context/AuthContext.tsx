@@ -17,6 +17,7 @@ import { API_BASE_URL } from "../config";
 import {
   LOCAL_STORAGE_TOKEN_KEY,
   LOCAL_STORAGE_USER_KEY,
+  setAuthTokenSource,
 } from "../lib/authFetch";
 
 // ---------------------------------------------------------------------------
@@ -96,6 +97,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }),
     [],
   );
+
+  // ---- Let the fetch interceptor use the managed (refreshing) token ----
+  useEffect(() => {
+    setAuthTokenSource(tokenManager);
+    return () => setAuthTokenSource(null);
+  }, [tokenManager]);
 
   // ---- Restore session from localStorage on mount ----
   useEffect(() => {

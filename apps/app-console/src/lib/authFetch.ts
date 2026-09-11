@@ -27,6 +27,40 @@ const CREDENTIAL_ENDPOINTS = [
   "/multipass/api/auth/login",
 ];
 
+/**
+ * The live token source, an AuthContext TokenManager, which refreshes an
+ * expiring token before handing it back. Registered by the provider; null
+ * before it mounts, which is when the localStorage fallback below applies.
+ */
+export interface AuthTokenSource {
+  hasToken(): boolean;
+  getToken(): Promise<string>;
+}
+
+let tokenSource: AuthTokenSource | null = null;
+
+/** Register (or with null, unregister) the token source. */
+export function setAuthTokenSource(source: AuthTokenSource | null): void {
+  tokenSource = source;
+}
+
+/**
+ * The token to send: the managed one when a provider is mounted, so a session
+ * outliving the access token's hour is refreshed rather than 401ing on every
+ * screen, and the stored one otherwise.
+ */
+async function currentToken(): Promise<string | null> {
+  if (tokenSource?.hasToken()) {
+    try {
+      return await tokenSource.getToken();
+    } catch {
+      // Refresh failed (the dev password login mints no refresh token) - fall
+      // back to whatever is stored and let the gateway judge it.
+    }
+  }
+  return readStoredToken();
+}
+
 /** Read the stored access token, or null when nobody is logged in. */
 export function readStoredToken(): string | null {
   try {
@@ -61,7 +95,11 @@ const PROXIED_PREFIXES = ["/api/", "/multipass/"];
 function isApiRequest(url: string): boolean {
   let path: string;
   if (API_BASE_URL !== "" && url.startsWith(API_BASE_URL)) {
-    path = url.slice(API_BASE_URL.length) || "/";
+    const rest = url.slice(API_BASE_URL.length);
+    // A bare prefix match would also accept https://gateway.example.com.evil,
+    // so the prefix has to end on a URL boundary to be the gateway's origin.
+    if (rest !== "" && !"/?#".includes(rest[0])) return false;
+    path = rest || "/";
   } else if (url.startsWith("/")) {
     if (!PROXIED_PREFIXES.some((prefix) => url.startsWith(prefix))) return false;
     path = url;
@@ -107,7 +145,7 @@ export function installAuthFetch(): void {
       init?.headers ?? (input instanceof Request ? input.headers : undefined),
     );
     if (!headers.has("Authorization")) {
-      const token = readStoredToken();
+      const token = await currentToken();
       if (token) headers.set("Authorization", `Bearer ${token}`);
     }
 

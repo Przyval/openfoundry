@@ -176,6 +176,43 @@ describe("installAuthFetch", () => {
     expect(sentHeaders().get("Authorization")).toBe("Bearer tok-123");
   });
 
+  it("leaves a host that merely starts with the gateway's alone", async () => {
+    store.set("openfoundry_token", JSON.stringify({ accessToken: "tok-123" }));
+    const { installAuthFetch } = await loadFresh();
+    installAuthFetch();
+
+    await fetch(`${API_BASE_URL}.attacker.test/api/v2/ontologies`);
+    expect(sentHeaders().has("Authorization")).toBe(false);
+  });
+
+  it("prefers the managed token, which refreshes before it expires", async () => {
+    store.set("openfoundry_token", JSON.stringify({ accessToken: "tok-stale" }));
+    const { installAuthFetch, setAuthTokenSource } = await loadFresh();
+    installAuthFetch();
+    setAuthTokenSource({
+      hasToken: () => true,
+      getToken: async () => "tok-refreshed",
+    });
+
+    await fetch(`${API_BASE_URL}/api/v2/ontologies`);
+    expect(sentHeaders().get("Authorization")).toBe("Bearer tok-refreshed");
+  });
+
+  it("falls back to storage when the managed token cannot be refreshed", async () => {
+    store.set("openfoundry_token", JSON.stringify({ accessToken: "tok-123" }));
+    const { installAuthFetch, setAuthTokenSource } = await loadFresh();
+    installAuthFetch();
+    setAuthTokenSource({
+      hasToken: () => true,
+      getToken: async () => {
+        throw new Error("no refresh token");
+      },
+    });
+
+    await fetch(`${API_BASE_URL}/api/v2/ontologies`);
+    expect(sentHeaders().get("Authorization")).toBe("Bearer tok-123");
+  });
+
   it("installs only once", async () => {
     const { installAuthFetch } = await loadFresh();
     installAuthFetch();

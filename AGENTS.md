@@ -111,6 +111,9 @@ Downstream services read identity from `X-User-Id` / `X-User-Roles` (`packages/p
 `services/svc-gateway/src/proxy.ts` always drops those headers on the way in and re-asserts them from the verified claims, so a client cannot pick its own roles.
 It sets both or neither: the permission middleware denies a request carrying a user id without roles, so a half-filled identity 403s every downstream route.
 Roles travel in an optional `roles` claim minted by svc-multipass; a token without it conveys no roles and downstream decides as it did before.
+Only two flows mint that claim: the dev password login and the `client_credentials` grant against a seeded client - and both exist only outside `NODE_ENV=production`.
+The authorization_code flow mints no roles at all, because `/multipass/api/oauth2/authorize` authenticates nobody: it hardcodes the approved user, auto-registers any `client_id` and accepts any `redirect_uri`.
+So no production deployment has a token that carries roles, which is why `ENFORCE_PERMISSIONS` is off in `deploy/`.
 
 The proxy must not forward the incoming `Content-Length`: the body is re-serialised from Fastify's parsed form, and a stale length makes undici reject the request, which surfaces as a 502.
 
@@ -134,7 +137,7 @@ Two different `requirePermission` exports coexist and only one is reachable.
 `services/svc-gateway/src/middleware/rbac.ts` has zero importers repo-wide; the one that actually guards 118 routes is `@openfoundry/permissions`, whose header-based variant reads `x-user-id` / `x-user-roles`.
 Those headers are a trusted-hop input, never a client input: the gateway proxy drops every `x-user-*` header so a caller cannot assert its own roles. Do not re-add them to the forwarded set, and do not introduce a second identity header without a hop that sets it from a verified token.
 Seed and sync scripts talk to the service ports directly, not through the gateway, so that strip does not reach them - which is also why a service port must never be publicly reachable.
-The gateway is now that trusted hop, so role enforcement does work; how it sets those headers is described under "Authentication and caller identity" above.
+The gateway is now that trusted hop, so role enforcement works - but only for a caller whose token actually carries roles, which today means the dev password login and `client_credentials` outside production; how it sets those headers is described under "Authentication and caller identity" above.
 `claims.sub` is a username, not a RID (`svc-multipass/src/routes/auth.ts`), so the id downstream sees is a username too.
 
 Neither model is Foundry's, so do not converge on either as-is.
