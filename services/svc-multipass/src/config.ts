@@ -36,8 +36,8 @@ export interface MultipassConfig {
  * An environment variable that is set but empty is treated as absent, so it
  * falls back to the value below rather than through it. An exported empty
  * string is what a blanked line in a `.env` file produces, and for a variable
- * like AUTH_ISSUER it would otherwise mean "verify no issuer at all" - a check
- * silently switched off by a line an operator thought was harmless.
+ * like JWT_PRIVATE_KEY empty already has its own meaning - generate an
+ * ephemeral pair - so it must never be mistaken for a configured value.
  */
 function env(key: string, fallback: string): string {
   const raw = process.env[key];

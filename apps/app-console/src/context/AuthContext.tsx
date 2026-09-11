@@ -19,19 +19,11 @@ import {
   LOCAL_STORAGE_USER_KEY,
   setAuthTokenSource,
 } from "../lib/authFetch";
+import { isRestorable, type StoredToken } from "../lib/session";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-/**
- * The persisted session: the token response plus the absolute expiry it is
- * only meaningful with. `expiresIn` is relative to issue time, so a session
- * restored after a reload needs the wall-clock deadline to know it is stale.
- */
-interface StoredToken extends TokenResponse {
-  expiresAt?: number;
-}
 
 export interface AuthUser {
   username: string;
@@ -63,6 +55,12 @@ export interface AuthContextValue {
 // LOCAL_STORAGE_TOKEN_KEY / LOCAL_STORAGE_USER_KEY live in lib/authFetch, which
 // is where they are read back from to authenticate outgoing requests.
 const PKCE_VERIFIER_KEY = "openfoundry_pkce_verifier";
+
+/** Drop the persisted session. The one place that knows what "logged out" is. */
+function clearStoredSession(): void {
+  localStorage.removeItem(LOCAL_STORAGE_TOKEN_KEY);
+  localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+}
 
 const oauthOptions = {
   // `||`, not `??`: a build that defines the variable empty has no client id,
@@ -124,15 +122,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const storedToken = localStorage.getItem(LOCAL_STORAGE_TOKEN_KEY);
       const storedUser = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
       if (storedToken && storedUser) {
-        const { expiresAt, ...token }: StoredToken = JSON.parse(storedToken);
-        const user: AuthUser = JSON.parse(storedUser);
-        tokenManager.setToken(token, expiresAt);
-        setCurrentUser(user);
+        const stored: StoredToken = JSON.parse(storedToken);
+        if (isRestorable(stored)) {
+          const { expiresAt, ...token } = stored;
+          const user: AuthUser = JSON.parse(storedUser);
+          tokenManager.setToken(token, expiresAt);
+          setCurrentUser(user);
+        } else {
+          clearStoredSession();
+        }
       }
     } catch {
       // Corrupted storage – ignore and require fresh login.
-      localStorage.removeItem(LOCAL_STORAGE_TOKEN_KEY);
-      localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+      clearStoredSession();
     } finally {
       setLoading(false);
     }
@@ -227,8 +229,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     tokenManager.clear();
     setCurrentUser(null);
-    localStorage.removeItem(LOCAL_STORAGE_TOKEN_KEY);
-    localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+    clearStoredSession();
   }, [tokenManager]);
 
   const value = useMemo<AuthContextValue>(

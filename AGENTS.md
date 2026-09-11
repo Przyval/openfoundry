@@ -119,6 +119,8 @@ Two limits are known and accepted, not oversights.
 And `NODE_ENV=production` seeds no OAuth client (`ClientStore`) and there is no registration endpoint, so `client_credentials` cannot work there at all: only a pre-minted `OPENFOUNDRY_TOKEN` authenticates a script against a production deployment.
 That is the deliberate price of not shipping this public repository's published credentials into production.
 
+`SKIP_AUTH_PREFIXES` does not exempt `/metrics`, so with `AUTH_PUBLIC_KEY` set a Prometheus scrape gets 401 - a deliberate posture; nothing in `deploy/` scrapes it and the container healthcheck uses `/status/health`.
+
 The rate limiter's per-tenant bucket is dead code: `extractKey` keys on `request.orgRid`, but `rateLimitPlugin` is called before `authPlugin` and Fastify runs same-context `onRequest` hooks in registration order, so `orgRid` is still undefined and every authenticated request falls through to a hash of its Authorization header - a new bucket on every token refresh, not per-tenant isolation.
 Fixing it means deciding whether JWT verification should run before throttling, which is a real edge-behaviour tradeoff, so the order is left alone deliberately.
 
