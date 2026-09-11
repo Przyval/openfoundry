@@ -192,6 +192,13 @@ describe("with AUTH_PUBLIC_KEY configured", () => {
     }
   });
 
+  it("guards /metrics like every other route", async () => {
+    // Registered by a plugin rather than by a route module, so it is the one
+    // endpoint whose coverage depends on how the plugin was wired.
+    const res = await app.inject({ method: "GET", url: "/metrics" });
+    expect(res.statusCode).toBe(401);
+  });
+
   it("leaves the token endpoints reachable without a token", async () => {
     // Nothing is listening upstream, so a 502 is the success signal here:
     // the request was proxied rather than rejected with 401.

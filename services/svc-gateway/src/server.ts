@@ -146,9 +146,6 @@ export async function createServer(
     });
   });
 
-  // -- Metrics collection ----------------------------------------------------
-  await app.register(metricsPlugin);
-
   // -- Auth middleware -----------------------------------------------------
   // Called directly (not via app.register) so the onRequest hook applies
   // across all encapsulated route contexts - same pattern as rate limiting
@@ -157,7 +154,15 @@ export async function createServer(
   // child. healthRoutes/v2Routes/v1Routes/multipassRoutes are siblings on the
   // parent, so registering this plugin guarded nothing and every request was
   // served unauthenticated even with AUTH_PUBLIC_KEY configured.
+  //
+  // Everything that registers routes is kept below this call so the guard is
+  // in place first. A root hook added before ready() does reach routes from
+  // plugins registered earlier - /metrics is 401 either way, and the test
+  // suite pins that - but reading the order should not require knowing it.
   await authPlugin(app, { config });
+
+  // -- Metrics collection ----------------------------------------------------
+  await app.register(metricsPlugin);
 
   // -- Config decorator (available to all route plugins) -------------------
   app.decorate("config", config);
