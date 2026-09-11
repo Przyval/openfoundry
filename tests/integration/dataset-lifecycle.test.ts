@@ -96,8 +96,8 @@ describe("Dataset lifecycle: create, branch, upload, download, delete", () => {
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.path).toBe("data/test.csv");
-    expect(body.contentType).toBe("text/csv");
-    expect(body.size).toBe(Buffer.byteLength(content));
+    expect(body.sizeBytes).toBe(Buffer.byteLength(content));
+    expect(Date.parse(body.updatedTime)).not.toBeNaN();
   });
 
   it("lists files on the dataset", async () => {

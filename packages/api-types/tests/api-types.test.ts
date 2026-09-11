@@ -202,12 +202,12 @@ describe("@openfoundry/api-types", () => {
       rid: "ri.tx.1", datasetRid: "ri.ds.1", branchRid: "ri.br.1",
       type: "SNAPSHOT", status: "COMMITTED", createdAt: "2024-01-01T00:00:00Z",
     };
-    const f: DatasetFile = { path: "/data.csv", size: 1024, contentType: "text/csv", transactionRid: "ri.tx.1" };
+    const f: DatasetFile = { path: "/data.csv", sizeBytes: 1024, updatedTime: "2024-01-01T00:00:00Z", transactionRid: "ri.tx.1" };
 
     expect(ds.name).toBe("MyData");
     expect(br.datasetRid).toBe("ri.ds.1");
     expect(tx.type).toBe("SNAPSHOT");
-    expect(f.size).toBe(1024);
+    expect(f.sizeBytes).toBe(1024);
   });
 
   it("admin and compass types have correct shape", () => {
