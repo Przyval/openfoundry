@@ -213,6 +213,16 @@ describe("installAuthFetch", () => {
     expect(sentHeaders().get("Authorization")).toBe("Bearer tok-123");
   });
 
+  it("still matches when the configured base URL has a trailing slash", async () => {
+    config.API_BASE_URL = `${API_BASE_URL}/`;
+    store.set("openfoundry_token", JSON.stringify({ accessToken: "tok-123" }));
+    const { installAuthFetch } = await loadFresh();
+    installAuthFetch();
+
+    await fetch(`${API_BASE_URL}/api/v2/ontologies`);
+    expect(sentHeaders().get("Authorization")).toBe("Bearer tok-123");
+  });
+
   it("installs only once", async () => {
     const { installAuthFetch } = await loadFresh();
     installAuthFetch();

@@ -33,11 +33,12 @@ const HOP_BY_HOP_HEADERS = new Set([
  * `Authorization: Bearer`, and the seed and sync scripts talk to the service
  * ports directly rather than through this proxy.
  *
- * The gateway is now also the trusted hop that sets them: `authPlugin` runs on
- * every route and `request.claims` is populated, so the identity written below
- * comes from a verified token and from nothing else. Role-based enforcement
- * therefore works - see the assertion further down for why both headers are
- * set together or not at all.
+ * The gateway does not set them itself either, so downstream permission checks
+ * see no identity at all. That is deliberate: asserting roles here would make
+ * permission enforcement effective regardless of `ENFORCE_PERMISSIONS`, and
+ * enforcement is to be switched on deliberately. Minting the identity belongs
+ * with the work that unifies the 119 guarded routes onto one permission model,
+ * which is where the role vocabulary is actually decided.
  */
 const CLIENT_ASSERTED_IDENTITY_PREFIX = "x-user-";
 
@@ -64,8 +65,7 @@ const BODY_DESCRIBING_HEADERS = new Set(["content-length"]);
  * - Preserves method, path, query string, headers, and body.
  * - Strips hop-by-hop headers from both the outgoing and incoming directions.
  * - Strips client-asserted `x-user-*` identity headers from the outgoing
- *   direction, and re-asserts `X-User-Id` / `X-User-Roles` from the verified
- *   JWT claims when the token carries roles.
+ *   direction, and asserts none of its own.
  * - Drops the incoming `Content-Length`, which no longer describes the
  *   re-serialised body.
  * - Injects `X-Forwarded-For` and `X-Request-Id` headers.
@@ -95,18 +95,6 @@ export async function proxyRequest(
     if (value !== undefined) {
       outgoingHeaders[key] = Array.isArray(value) ? value.join(", ") : value;
     }
-  }
-
-  // Assert the caller's identity from the JWT the auth middleware verified.
-  // Both headers are set together or not at all: the permission middleware
-  // denies a request that has a user id but no roles, so a half-filled
-  // identity would 403 every downstream route. A token that carries no roles
-  // claim therefore travels with no identity headers, and downstream decides
-  // for itself exactly as it does today.
-  const claims = request.claims;
-  if (claims?.sub && claims.roles) {
-    outgoingHeaders["x-user-id"] = claims.sub;
-    outgoingHeaders["x-user-roles"] = claims.roles;
   }
 
   // Inject proxy headers

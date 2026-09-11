@@ -108,12 +108,11 @@ Both send no header when neither is set, so the demo still works unauthenticated
 The console covers its ~80 `fetch` call sites with one interceptor, `apps/app-console/src/lib/authFetch.ts`, installed from `main.tsx`.
 
 Downstream services read identity from `X-User-Id` / `X-User-Roles` (`packages/permissions/src/middleware.ts`).
-`services/svc-gateway/src/proxy.ts` always drops those headers on the way in and re-asserts them from the verified claims, so a client cannot pick its own roles.
-It sets both or neither: the permission middleware denies a request carrying a user id without roles, so a half-filled identity 403s every downstream route.
-Roles travel in an optional `roles` claim minted by svc-multipass; a token without it conveys no roles and downstream decides as it did before.
-Only two flows mint that claim: the dev password login and the `client_credentials` grant against a seeded client - and both exist only outside `NODE_ENV=production`.
-The authorization_code flow mints no roles at all, because `/multipass/api/oauth2/authorize` authenticates nobody: it hardcodes the approved user, auto-registers any `client_id` and accepts any `redirect_uri`.
-So no production deployment has a token that carries roles, which is why `ENFORCE_PERMISSIONS` is off in `deploy/`.
+`services/svc-gateway/src/proxy.ts` always drops those headers on the way in, and sets none of its own, so downstream permission checks see no caller at all.
+That is deliberate: asserting roles there would make enforcement effective whatever `ENFORCE_PERMISSIONS` says, and enforcement is to be switched on deliberately - which is why it is off in `deploy/`.
+Minting the identity belongs to the work that unifies the guarded routes onto one permission model, where the role vocabulary is decided.
+svc-multipass does mint an optional `roles` claim - on the dev password login and on `client_credentials` against a seeded client, both only outside `NODE_ENV=production` - but nothing consumes it yet.
+The authorization_code and refresh grants mint no roles at all: `/multipass/api/oauth2/authorize` authenticates nobody (it hardcodes the approved user, auto-registers any `client_id` and accepts any `redirect_uri`), and the refresh grant checks only the refresh token value, with no client authentication.
 
 The proxy must not forward the incoming `Content-Length`: the body is re-serialised from Fastify's parsed form, and a stale length makes undici reject the request, which surfaces as a 502.
 
@@ -137,7 +136,7 @@ Two different `requirePermission` exports coexist and only one is reachable.
 `services/svc-gateway/src/middleware/rbac.ts` has zero importers repo-wide; the one that actually guards 118 routes is `@openfoundry/permissions`, whose header-based variant reads `x-user-id` / `x-user-roles`.
 Those headers are a trusted-hop input, never a client input: the gateway proxy drops every `x-user-*` header so a caller cannot assert its own roles. Do not re-add them to the forwarded set, and do not introduce a second identity header without a hop that sets it from a verified token.
 Seed and sync scripts talk to the service ports directly, not through the gateway, so that strip does not reach them - which is also why a service port must never be publicly reachable.
-The gateway is now that trusted hop, so role enforcement works - but only for a caller whose token actually carries roles, which today means the dev password login and `client_credentials` outside production; how it sets those headers is described under "Authentication and caller identity" above.
+No hop sets those headers today - the gateway deliberately does not - so role enforcement reaches no route; see "Authentication and caller identity" above.
 `claims.sub` is a username, not a RID (`svc-multipass/src/routes/auth.ts`), so the id downstream sees is a username too.
 
 Neither model is Foundry's, so do not converge on either as-is.

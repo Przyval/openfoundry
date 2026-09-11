@@ -30,7 +30,7 @@ x-service-env: &service-env
   LOG_LEVEL: ${LOG_LEVEL:-warn}
   LOG_FORMAT: json
   NODE_ENV: production
-  # Off deliberately: no production flow mints a token carrying roles yet, so
+  # Off deliberately: the gateway asserts no identity downstream yet, so
   # enforcement would deny every request. See deploy/.env.production.
   ENFORCE_PERMISSIONS: "false"
   S3_ENDPOINT: http://minio:9000

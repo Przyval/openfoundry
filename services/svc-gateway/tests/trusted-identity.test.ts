@@ -3,8 +3,9 @@
  *
  * Downstream services read `X-User-Id` / `X-User-Roles` as identity
  * (packages/permissions/src/middleware.ts). Those headers used to arrive
- * straight from the client, so anyone could claim to be ADMIN. Here they are
- * dropped on the way in and re-asserted from the verified JWT claims.
+ * straight from the client, so anyone could claim to be ADMIN. They are now
+ * dropped on the way in, and the gateway asserts none of its own - so
+ * downstream sees no identity at all, deliberately.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { generateKeyPair, exportSPKI, exportPKCS8, importPKCS8 } from "jose";
@@ -105,7 +106,7 @@ describe("client-supplied identity headers", () => {
     await app.close();
   });
 
-  it("cannot override the identity carried by a valid token", async () => {
+  it("are dropped alongside a valid token rather than replaced", async () => {
     const app = await createServer({ config: configWith(publicKeyPem) });
     const token = await signToken({ roles: "VIEWER" });
 
@@ -120,34 +121,19 @@ describe("client-supplied identity headers", () => {
     });
 
     const headers = forwardedHeaders();
-    expect(headers["x-user-id"]).toBe("alice");
-    expect(headers["x-user-roles"]).toBe("VIEWER");
+    expect(headers["x-user-id"]).toBeUndefined();
+    expect(headers["x-user-roles"]).toBeUndefined();
     await app.close();
   });
 });
 
-describe("identity asserted from verified claims", () => {
-  it("is forwarded when the token carries roles", async () => {
+describe("the gateway's own headers", () => {
+  it("carry no identity even for a token whose claims could supply one", async () => {
+    // Asserting roles here would enforce permissions downstream whatever
+    // ENFORCE_PERMISSIONS says; that decision belongs to the permission-model
+    // work, not to this hop.
     const app = await createServer({ config: configWith(publicKeyPem) });
     const token = await signToken({ sub: "service:admin", roles: "ADMIN" });
-
-    await app.inject({
-      method: "GET",
-      url: "/api/v2/ontologies",
-      headers: { authorization: `Bearer ${token}` },
-    });
-
-    const headers = forwardedHeaders();
-    expect(headers["x-user-id"]).toBe("service:admin");
-    expect(headers["x-user-roles"]).toBe("ADMIN");
-    await app.close();
-  });
-
-  it("is omitted entirely when the token carries no roles claim", async () => {
-    // A half-filled identity (id, no roles) is a 403 downstream, so a roleless
-    // token must travel with neither header rather than with one.
-    const app = await createServer({ config: configWith(publicKeyPem) });
-    const token = await signToken();
 
     await app.inject({
       method: "GET",

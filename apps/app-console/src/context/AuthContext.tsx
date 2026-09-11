@@ -24,6 +24,15 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * The persisted session: the token response plus the absolute expiry it is
+ * only meaningful with. `expiresIn` is relative to issue time, so a session
+ * restored after a reload needs the wall-clock deadline to know it is stale.
+ */
+interface StoredToken extends TokenResponse {
+  expiresAt?: number;
+}
+
 export interface AuthUser {
   username: string;
   token: string;
@@ -92,7 +101,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       new TokenManager({
         ...oauthOptions,
         onTokenChange: (token: TokenResponse) => {
-          localStorage.setItem(LOCAL_STORAGE_TOKEN_KEY, JSON.stringify(token));
+          const stored: StoredToken = {
+            ...token,
+            expiresAt: Date.now() + token.expiresIn * 1000,
+          };
+          localStorage.setItem(LOCAL_STORAGE_TOKEN_KEY, JSON.stringify(stored));
         },
       }),
     [],
@@ -110,9 +123,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const storedToken = localStorage.getItem(LOCAL_STORAGE_TOKEN_KEY);
       const storedUser = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
       if (storedToken && storedUser) {
-        const token: TokenResponse = JSON.parse(storedToken);
+        const { expiresAt, ...token }: StoredToken = JSON.parse(storedToken);
         const user: AuthUser = JSON.parse(storedUser);
-        tokenManager.setToken(token);
+        tokenManager.setToken(token, expiresAt);
         setCurrentUser(user);
       }
     } catch {

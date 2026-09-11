@@ -97,10 +97,14 @@ export class TokenManager {
    * Sets the current token, typically after the initial authorization code exchange.
    *
    * @param token - The token response to store.
+   * @param expiresAt - Absolute expiry in epoch milliseconds. Pass it when
+   * restoring a persisted session: `expiresIn` is relative to when the token
+   * was issued, so a token stored hours ago would otherwise look fresh for
+   * another full `expiresIn` and never be refreshed.
    */
-  setToken(token: TokenResponse): void {
+  setToken(token: TokenResponse, expiresAt?: number): void {
     this.#currentToken = token;
-    this.#expiresAt = Date.now() + token.expiresIn * 1000;
+    this.#expiresAt = expiresAt ?? Date.now() + token.expiresIn * 1000;
     this.#options.onTokenChange?.(token);
   }
 

@@ -69,8 +69,10 @@ export class ClientStore {
   private readonly clients = new Map<string, OAuthClient>();
 
   constructor() {
-    // Development conveniences only - in production, clients are registered
-    // at runtime, exactly as DEV_USERS is empty there.
+    // Development conveniences only, exactly as DEV_USERS is empty in
+    // production. Production therefore seeds no client at all: there is no
+    // client-registration endpoint, and the only runtime registration is the
+    // implicit one /authorize performs for a public client.
     if (process.env.NODE_ENV === "production") return;
 
     // Seed the default dev client

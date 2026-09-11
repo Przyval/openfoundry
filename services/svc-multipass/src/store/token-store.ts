@@ -9,8 +9,6 @@ export interface StoredRefreshToken {
   readonly clientId: string;
   readonly userId: string;
   readonly scope: string;
-  /** Space-separated platform roles, preserved across refreshes. */
-  readonly roles?: string;
   readonly expiresAt: number;
   revoked: boolean;
 }

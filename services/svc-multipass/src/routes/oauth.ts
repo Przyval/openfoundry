@@ -357,13 +357,10 @@ export async function oauthRoutes(
     // Revoke the old refresh token (rotation)
     tokenStore.revokeRefreshToken(body.refresh_token);
 
-    return issueTokens(
-      stored.userId,
-      stored.scope,
-      stored.clientId,
-      reply,
-      stored.roles,
-    );
+    // No roles: this grant authenticates no client, it checks only the refresh
+    // token value, so replaying roles would hand whoever holds that value a
+    // roled token on every rotation.
+    return issueTokens(stored.userId, stored.scope, stored.clientId, reply);
   }
 
   async function issueTokens(
@@ -386,9 +383,9 @@ export async function oauthRoutes(
         iss: "openfoundry-multipass",
         aud: "openfoundry-api",
         scope,
-        // Signed in, so the gateway can give downstream services a role set
-        // that no client could have forged. Absent when the client asserts no
-        // roles - the gateway then sends no role header at all.
+        // Minted, but with no consumer yet: the gateway asserts no identity
+        // downstream. The permission-model work that unifies the guarded
+        // routes is what will read this claim.
         ...(roles ? { roles } : {}),
       },
       config.tokenExpirySeconds,
@@ -405,7 +402,6 @@ export async function oauthRoutes(
       clientId,
       userId,
       scope,
-      ...(roles ? { roles } : {}),
       expiresAt: refreshExpiresAt,
       revoked: false,
     });

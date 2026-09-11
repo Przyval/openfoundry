@@ -80,22 +80,28 @@ export function readStoredToken(): string | null {
   return null;
 }
 
+/**
+ * The gateway's origin, without a trailing slash: VITE_API_URL is often
+ * configured with one, and it would then never line up with a request URL.
+ */
+const GATEWAY_ORIGIN = API_BASE_URL.replace(/\/+$/, "");
+
 /** Root-relative prefixes the Vite dev proxy forwards to the gateway. */
 const PROXIED_PREFIXES = ["/api/", "/multipass/"];
 
 /**
  * Whether `url` addresses the gateway.
  *
- * An absolute URL under a non-empty API_BASE_URL is the gateway whatever its
- * path, so it gets the token. An empty API_BASE_URL (a same-origin build) is
- * a prefix of every URL, so it never identifies one. A relative URL is served by the console's own origin, and
+ * An absolute URL under a non-empty gateway origin is the gateway whatever its
+ * path, so it gets the token. An empty origin (a same-origin build) is a
+ * prefix of every URL, so it never identifies one. A relative URL is served by the console's own origin, and
  * only the prefixes the dev proxy forwards reach the gateway - the token must
  * not ride along on anything else.
  */
 function isApiRequest(url: string): boolean {
   let path: string;
-  if (API_BASE_URL !== "" && url.startsWith(API_BASE_URL)) {
-    const rest = url.slice(API_BASE_URL.length);
+  if (GATEWAY_ORIGIN !== "" && url.startsWith(GATEWAY_ORIGIN)) {
+    const rest = url.slice(GATEWAY_ORIGIN.length);
     // A bare prefix match would also accept https://gateway.example.com.evil,
     // so the prefix has to end on a URL boundary to be the gateway's origin.
     if (rest !== "" && !"/?#".includes(rest[0])) return false;

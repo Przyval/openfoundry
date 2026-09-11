@@ -267,6 +267,34 @@ describe("TokenManager", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("should refresh a restored token whose absolute expiry has passed", async () => {
+    // A session restored from storage replays the `expiresIn` it was issued
+    // with, so without the absolute deadline an hour-old token looks fresh for
+    // another full hour and is sent to the gateway dead.
+    const refreshedResponse = {
+      access_token: "refreshed-after-restore",
+      refresh_token: "refreshed-refresh-token",
+      token_type: "Bearer",
+      expires_in: 3600,
+      scope: "api:ontologies-read",
+    };
+
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(refreshedResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const manager = new TokenManager(DEFAULT_OPTIONS);
+    manager.setToken(
+      createMockTokenResponse({ expiresIn: 3600 }),
+      Date.now() - 60_000,
+    );
+
+    expect(await manager.getToken()).toBe("refreshed-after-restore");
+  });
+
   it("should report hasToken as false initially", () => {
     const manager = new TokenManager(DEFAULT_OPTIONS);
     expect(manager.hasToken()).toBe(false);
