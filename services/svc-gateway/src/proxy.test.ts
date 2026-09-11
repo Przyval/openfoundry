@@ -258,6 +258,37 @@ describe("Gateway proxy routing", () => {
     expect(headers["x-uploaded-by"]).toBe("alice");
   });
 
+  it("does not forward the client's Content-Length with a re-serialized body", async () => {
+    const mockResponse = new Response("{}", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse);
+
+    const app = await createServer({ config: TEST_CONFIG });
+    // Pretty-printed JSON: the body forwarded upstream is the compact
+    // re-serialization, so the caller's Content-Length no longer describes it
+    // and undici would reject the request outright.
+    const payload = '{\n  "username": "admin",\n  "orgName": "PT Uji"\n}';
+    await app.inject({
+      method: "POST",
+      url: "/api/v2/auth/signup",
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(Buffer.byteLength(payload)),
+      },
+      payload,
+    });
+
+    const [, fetchOptions] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const headers = (fetchOptions as RequestInit).headers as Record<string, string>;
+    const names = Object.keys(headers).map((k) => k.toLowerCase());
+    expect(names).not.toContain("content-length");
+    expect((fetchOptions as RequestInit).body).toBe(
+      JSON.stringify({ username: "admin", orgName: "PT Uji" }),
+    );
+  });
+
   it("strips upstream hop-by-hop headers from response", async () => {
     const mockResponse = new Response("{}", {
       status: 200,

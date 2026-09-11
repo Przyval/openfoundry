@@ -95,8 +95,12 @@ No static route scan can see this, so confirm a new route is really reachable wi
 
 ## Running the console end to end
 
-`bash start.sh` boots every service plus the console on :3000, but it first kills whatever holds ports 8080-8088, 8092 and 3000 - check those are yours before running it.
+`bash start.sh` boots ten services plus the console on :3000, but it first kills whatever holds ports 8080-8088, 8092 and 3000 - check those are yours before running it.
 It never checks :8091, where svc-sentinel actually listens.
+Three services are absent from its list entirely - svc-compass, svc-webhooks and svc-media - so `/api/v2/compass/*`, `/api/v2/webhooks*` and `/api/v2/media*` answer 502 and their console pages never load until you start them yourself.
+
+The four seeds in `scripts/demo/` reuse the *first existing* ontology rather than creating their own, and none of them reads `ORG_RID` (only the unused `scripts/seed-common.sh` does).
+Running a second one therefore merges another industry's object types into the first ontology instead of switching industries; `start.sh --industry <name>` is the only correct switch, because it clears the three store JSONs first.
 
 Without `DATABASE_URL` every service uses its in-memory or `/tmp/openfoundry-data` store; that is the mode the demo is built for, and the only mode in which svc-admin's user and group routes work.
 `/tmp/openfoundry-data` is a fixed path with no env override, so two checkouts running at once share and overwrite it.
@@ -152,6 +156,12 @@ Workflows trigger on `master`, the default branch. They previously listened on `
 Build the tag from a lowercased `GITHUB_REPOSITORY`, never from `github.repository` directly: the owner login is `Przyval`, and ghcr.io rejects any uppercase letter in a repository name.
 `Dockerfile.service` selects turbo packages by package name (`@openfoundry/${SERVICE}`), not by the `services/` directory name; the other `${SERVICE}` uses in that file are filesystem paths and stay bare.
 `release.yml` publishes nothing: the repo has no Actions secrets at all, so `NPM_TOKEN` is empty and `changeset publish` fails with ENEEDAUTH on every push.
+
+## The user guide
+
+`GUIDE.md` is the product's user guide, written in Indonesian and verified end to end against a running stack rather than from the code alone.
+Its closing "Batasan yang Diketahui" section is the current inventory of what is verified *not* to work (gateway auth not enforced, Network Graph edges, `/api/v2/search` without Postgres, Compass offline fallback, the `complete-service-job` invoice-id collision, the `VITE_API_URL` vs `VITE_API_BASE_URL` mismatch, and more).
+Read it before re-deriving any of that, and update it in the same change whenever one of those is fixed.
 
 ## Maintaining this file
 
