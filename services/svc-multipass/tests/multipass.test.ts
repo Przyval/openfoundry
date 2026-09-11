@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import { decodeJwt } from "jose";
 import { generateKeyPair, type KeyLike } from "jose";
 import { generateCodeChallenge, verifyCodeChallenge } from "../src/pkce.js";
 import { TokenStore } from "../src/store/token-store.js";
@@ -210,6 +211,82 @@ describe("ClientStore", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Seeded dev clients must not exist in production
+// ---------------------------------------------------------------------------
+
+/**
+ * The seeded confidential clients carry platform roles, and the gateway turns
+ * a token's roles claim into X-User-Roles for all guarded routes. Published
+ * credentials must therefore convey nothing in production, exactly as
+ * DEV_USERS conveys nothing there.
+ */
+describe("seeded dev clients under NODE_ENV=production", () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalNodeEnv;
+  });
+
+  async function tokenResponseFor(nodeEnv: string | undefined) {
+    if (nodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = nodeEnv;
+
+    // ClientStore reads NODE_ENV in its constructor, so it must be built here.
+    const app = await createServer({
+      config: {
+        port: 0,
+        host: "127.0.0.1",
+        databaseUrl: "",
+        jwtPrivateKey: "",
+        jwtPublicKey: "",
+        tokenExpirySeconds: 3600,
+        refreshTokenExpirySeconds: 86400 * 30,
+        logLevel: "silent",
+        nodeEnv: nodeEnv ?? "development",
+      },
+      oauthOptions: {
+        tokenStore: new TokenStore(),
+        clientStore: new ClientStore(),
+        privateKey,
+        publicKey,
+      },
+    });
+    await app.ready();
+
+    try {
+      return await app.inject({
+        method: "POST",
+        url: "/multipass/api/oauth2/token",
+        payload: {
+          grant_type: "client_credentials",
+          client_id: "admin",
+          client_secret: "admin123",
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  }
+
+  it("rejects the published admin credentials", async () => {
+    const response = await tokenResponseFor("production");
+    expect(response.statusCode).not.toBe(200);
+  });
+
+  it("still accepts them in development", async () => {
+    const response = await tokenResponseFor(undefined);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().access_token).toBeTruthy();
+  });
+
+  it("does not seed the public dev client either", async () => {
+    process.env.NODE_ENV = "production";
+    expect(new ClientStore().getClient("openfoundry-dev")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // OAuth route integration tests
 // ---------------------------------------------------------------------------
 
@@ -322,6 +399,50 @@ describe("OAuth routes", () => {
     expect(tokenBody.access_token).toBeTruthy();
     expect(tokenBody.refresh_token).toBeTruthy();
     expect(tokenBody.scope).toBe("api:read");
+  });
+
+  /**
+   * Roles on a user token come from the user, not from the OAuth client: the
+   * gateway turns the claim into X-User-Roles, so a client must not be able to
+   * lend its own authority to whoever logs in through it.
+   */
+  it("should carry the approved user's roles, not the client's", async () => {
+    clientStore.registerClient({
+      clientId: "roleful-app",
+      clientName: "Roleful App",
+      redirectUris: ["http://localhost:3000/callback"],
+      grantTypes: ["authorization_code", "refresh_token"],
+      scopes: ["api:read"],
+      isPublic: true,
+      roles: ["OWNER"],
+    });
+
+    const authorizeResponse = await app.inject({
+      method: "GET",
+      url: "/multipass/api/oauth2/authorize",
+      query: {
+        response_type: "code",
+        client_id: "roleful-app",
+        redirect_uri: "http://localhost:3000/callback",
+        scope: "api:read",
+      },
+    });
+
+    const tokenResponse = await app.inject({
+      method: "POST",
+      url: "/multipass/api/oauth2/token",
+      payload: {
+        grant_type: "authorization_code",
+        client_id: "roleful-app",
+        code: authorizeRedirectParams(authorizeResponse).get("code"),
+        redirect_uri: "http://localhost:3000/callback",
+      },
+    });
+
+    expect(tokenResponse.statusCode).toBe(200);
+    // /authorize auto-approves the dev user "admin", who is an ADMIN.
+    const claims = decodeJwt(tokenResponse.json().access_token);
+    expect(claims.roles).toBe("ADMIN");
   });
 
   it("should complete authorization code flow with PKCE", async () => {

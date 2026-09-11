@@ -22,7 +22,11 @@ export interface OAuthClient {
   readonly roles?: readonly string[];
 }
 
-/** Default development client, pre-seeded for local development. */
+/**
+ * Default development client, pre-seeded for local development only.
+ * Like DEV_USERS in ../routes/auth.ts, it is not seeded when
+ * NODE_ENV === "production".
+ */
 const DEFAULT_DEV_CLIENT: OAuthClient = {
   clientId: "openfoundry-dev",
   clientName: "OpenFoundry Dev Client",
@@ -33,8 +37,9 @@ const DEFAULT_DEV_CLIENT: OAuthClient = {
 };
 
 /**
- * Confidential client for client_credentials grant, compatible with
- * @osdk/client service-to-service authentication.
+ * Confidential clients for the client_credentials grant, compatible with
+ * @osdk/client service-to-service authentication. Seeded outside production
+ * only.
  * Uses admin/admin123 and developer/dev123 as client_id/client_secret pairs.
  */
 const CONFIDENTIAL_DEV_CLIENTS: OAuthClient[] = [
@@ -64,6 +69,10 @@ export class ClientStore {
   private readonly clients = new Map<string, OAuthClient>();
 
   constructor() {
+    // Development conveniences only - in production, clients are registered
+    // at runtime, exactly as DEV_USERS is empty there.
+    if (process.env.NODE_ENV === "production") return;
+
     // Seed the default dev client
     this.clients.set(DEFAULT_DEV_CLIENT.clientId, DEFAULT_DEV_CLIENT);
 

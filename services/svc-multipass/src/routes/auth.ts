@@ -54,6 +54,16 @@ const DEV_USERS: Record<string, { password: string; roles: string[]; displayName
         analyst: { password: "analyst123", roles: ["VIEWER"], displayName: "Analyst User" },
       };
 
+/**
+ * Platform roles held by a development user, or undefined when no such user
+ * record exists (every user, under NODE_ENV=production). The OAuth
+ * authorization_code flow reads roles from here so that a user token carries
+ * the user's roles rather than the OAuth client's.
+ */
+export function devUserRoles(username: string): readonly string[] | undefined {
+  return DEV_USERS[username]?.roles;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------

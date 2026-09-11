@@ -52,14 +52,15 @@ const PROXIED_PREFIXES = ["/api/", "/multipass/"];
 /**
  * Whether `url` addresses the gateway.
  *
- * An absolute URL under API_BASE_URL is the gateway whatever its path, so it
- * gets the token. A relative URL is served by the console's own origin, and
+ * An absolute URL under a non-empty API_BASE_URL is the gateway whatever its
+ * path, so it gets the token. An empty API_BASE_URL (a same-origin build) is
+ * a prefix of every URL, so it never identifies one. A relative URL is served by the console's own origin, and
  * only the prefixes the dev proxy forwards reach the gateway - the token must
  * not ride along on anything else.
  */
 function isApiRequest(url: string): boolean {
   let path: string;
-  if (url.startsWith(API_BASE_URL)) {
+  if (API_BASE_URL !== "" && url.startsWith(API_BASE_URL)) {
     path = url.slice(API_BASE_URL.length) || "/";
   } else if (url.startsWith("/")) {
     if (!PROXIED_PREFIXES.some((prefix) => url.startsWith(prefix))) return false;

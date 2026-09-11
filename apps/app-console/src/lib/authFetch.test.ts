@@ -7,9 +7,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * interceptor that closes the gap.
  */
 
-const API_BASE_URL = "http://localhost:8080";
+/**
+ * Mutable so a test can pin the same-origin build (VITE_API_URL set empty),
+ * where API_BASE_URL is "" and is therefore a prefix of every URL.
+ */
+const config = vi.hoisted(() => ({ API_BASE_URL: "http://localhost:8080" }));
 
-vi.mock("../config", () => ({ API_BASE_URL }));
+vi.mock("../config", () => config);
+
+const API_BASE_URL = config.API_BASE_URL;
 
 const store = new Map<string, string>();
 
@@ -49,6 +55,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  config.API_BASE_URL = API_BASE_URL;
 });
 
 describe("installAuthFetch", () => {
@@ -147,6 +154,26 @@ describe("installAuthFetch", () => {
 
     await expect(fetch(`${API_BASE_URL}/api/v2/ontologies`)).resolves.toBeDefined();
     expect(sentHeaders().has("Authorization")).toBe(false);
+  });
+
+  it("leaves third-party requests alone on a same-origin build", async () => {
+    config.API_BASE_URL = "";
+    store.set("openfoundry_token", JSON.stringify({ accessToken: "tok-123" }));
+    const { installAuthFetch } = await loadFresh();
+    installAuthFetch();
+
+    await fetch("https://example.com/api/v2/ontologies");
+    expect(sentHeaders().has("Authorization")).toBe(false);
+  });
+
+  it("still covers the proxied paths on a same-origin build", async () => {
+    config.API_BASE_URL = "";
+    store.set("openfoundry_token", JSON.stringify({ accessToken: "tok-123" }));
+    const { installAuthFetch } = await loadFresh();
+    installAuthFetch();
+
+    await fetch("/api/v2/ontologies");
+    expect(sentHeaders().get("Authorization")).toBe("Bearer tok-123");
   });
 
   it("installs only once", async () => {
