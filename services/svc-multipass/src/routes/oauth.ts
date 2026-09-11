@@ -1,15 +1,22 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { importPKCS8, importSPKI, type CryptoKey } from "jose";
-import { createToken, buildTokenInput, validateToken } from "@openfoundry/auth-tokens";
+import { type CryptoKey } from "jose";
+import {
+  createToken,
+  buildTokenInput,
+  validateToken,
+  importSigningKey,
+  type ImportedKey,
+  importVerificationKey,
+} from "@openfoundry/auth-tokens";
 import { invalidArgument } from "@openfoundry/errors";
 import { generateRid } from "@openfoundry/rid";
-import type { MultipassConfig } from "../config.js";
+import { warnIfHalfConfigured, type MultipassConfig } from "../config.js";
 import { verifyCodeChallenge } from "../pkce.js";
 import { TokenStore } from "../store/token-store.js";
 import { ClientStore } from "../store/client-store.js";
 
 /** Key type compatible with jose v5 (KeyLike) and v6 (CryptoKey). */
-type SigningKey = CryptoKey | Uint8Array;
+type SigningKey = ImportedKey | CryptoKey | Uint8Array;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -77,9 +84,10 @@ export async function oauthRoutes(
     privateKey = options.privateKey;
     publicKey = options.publicKey;
   } else if (config.jwtPrivateKey && config.jwtPublicKey) {
-    privateKey = await importPKCS8(config.jwtPrivateKey, "ES256");
-    publicKey = await importSPKI(config.jwtPublicKey, "ES256");
+    privateKey = await importSigningKey(config.jwtPrivateKey);
+    publicKey = await importVerificationKey(config.jwtPublicKey);
   } else {
+    warnIfHalfConfigured(app, config);
     // Auto-generate ephemeral dev keys when none are provided
     const { generateKeyPair } = await import("jose");
     const keyPair = await generateKeyPair("ES256");

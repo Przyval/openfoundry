@@ -59,14 +59,6 @@ export interface OpenFoundryClaims {
 export type TokenInput = Omit<OpenFoundryClaims, "iat">;
 
 /**
- * Parse the space-separated role string into an array of individual roles.
- */
-export function parseRoles(roles: string | undefined): string[] {
-  if (!roles || roles.trim().length === 0) return [];
-  return roles.trim().split(/\s+/);
-}
-
-/**
  * Parse the space-separated scope string into an array of individual scopes.
  */
 export function parseScopes(scope: string): string[] {

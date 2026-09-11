@@ -66,8 +66,8 @@ describe("OpenFoundry API Integration Tests", () => {
   // -------------------------------------------------------------------------
   describe("Authentication", () => {
     it("POST /multipass/api/oauth2/token (client_credentials)", async () => {
-      const clientId = process.env.OPENFOUNDRY_CLIENT_ID ?? "admin";
-      const clientSecret = process.env.OPENFOUNDRY_CLIENT_SECRET ?? "admin123";
+      const clientId = process.env.OPENFOUNDRY_CLIENT_ID || "admin";
+      const clientSecret = process.env.OPENFOUNDRY_CLIENT_SECRET || "admin123";
       const res = await fetch(`${BASE}/multipass/api/oauth2/token`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },

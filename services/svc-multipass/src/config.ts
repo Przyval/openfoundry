@@ -59,3 +59,22 @@ export function loadConfig(): MultipassConfig {
     nodeEnv: env("NODE_ENV", "development"),
   };
 }
+
+/**
+ * JWT_PRIVATE_KEY and JWT_PUBLIC_KEY are one pair. With only one of them set
+ * the service falls back to an ephemeral pair, and every token it then mints
+ * is rejected by whatever verifies with the key that *was* configured - a 401
+ * on every request, from a deployment that looks configured.
+ */
+export function warnIfHalfConfigured(
+  app: { log: { warn: (msg: string) => void } },
+  config: Pick<MultipassConfig, "jwtPrivateKey" | "jwtPublicKey">,
+): void {
+  if (!!config.jwtPrivateKey === !!config.jwtPublicKey) return;
+  const missing = config.jwtPrivateKey ? "JWT_PUBLIC_KEY" : "JWT_PRIVATE_KEY";
+  app.log.warn(
+    `Only one half of the JWT key pair is configured (${missing} is empty), ` +
+      "so an ephemeral pair is being generated instead. Nothing else can " +
+      "verify tokens signed with it.",
+  );
+}

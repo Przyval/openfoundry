@@ -5,12 +5,14 @@ import { invalidArgument } from "@openfoundry/errors";
 import {
   createToken,
   buildTokenInput,
+  importSigningKey,
+  type ImportedKey,
   isOpenSignupEnabled,
   OPEN_SIGNUP_ENV_VAR,
 } from "@openfoundry/auth-tokens";
 import { generateRid } from "@openfoundry/rid";
-import { importPKCS8, type CryptoKey } from "jose";
-import type { MultipassConfig } from "../config.js";
+import { type CryptoKey } from "jose";
+import { warnIfHalfConfigured, type MultipassConfig } from "../config.js";
 
 const scryptAsync = promisify(scrypt);
 
@@ -38,7 +40,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 /** Key type compatible with jose v5/v6. */
-type SigningKey = CryptoKey | Uint8Array;
+type SigningKey = ImportedKey | CryptoKey | Uint8Array;
 
 // ---------------------------------------------------------------------------
 // Default dev users — only available when NODE_ENV !== "production"
@@ -85,8 +87,9 @@ export async function authRoutes(
   if (options.privateKey) {
     privateKey = options.privateKey;
   } else if (config.jwtPrivateKey && config.jwtPublicKey) {
-    privateKey = await importPKCS8(config.jwtPrivateKey, "ES256");
+    privateKey = await importSigningKey(config.jwtPrivateKey);
   } else {
+    warnIfHalfConfigured(app, config);
     const { generateKeyPair } = await import("jose");
     const keyPair = await generateKeyPair("ES256");
     privateKey = keyPair.privateKey;

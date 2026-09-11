@@ -1,4 +1,4 @@
-import { importSPKI, jwtVerify, type KeyLike, type JWTVerifyOptions } from "jose";
+import { importPKCS8, importSPKI, jwtVerify, type KeyLike, type JWTVerifyOptions } from "jose";
 import type { OpenFoundryClaims } from "./claims.js";
 import { isValidClaimsShape } from "./token-creator.js";
 
@@ -51,7 +51,21 @@ export interface ValidateTokenOptions {
 // Key import
 // ---------------------------------------------------------------------------
 
+/** What the two key importers below return, for callers that name the type. */
+export type ImportedKey = KeyLike;
+
 const SPKI_HEADER = "-----BEGIN PUBLIC KEY-----";
+const PKCS8_HEADER = "-----BEGIN PRIVATE KEY-----";
+
+/**
+ * A PEM carried in an environment variable arrives with literal `\n` escapes,
+ * because neither a `.env` file nor a Docker Compose value can hold a real
+ * newline. Both key imports below go through here so the two halves of one
+ * pair are never read by two different rules.
+ */
+function normalisePem(pem: string): string {
+  return pem.replace(/\\n/g, "\n").trim();
+}
 
 /**
  * Turn a configured public key into something `validateToken` can verify with.
@@ -71,7 +85,7 @@ export async function importVerificationKey(
   pem: string,
   algorithm: string = "ES256",
 ): Promise<KeyLike> {
-  const normalised = pem.replace(/\\n/g, "\n").trim();
+  const normalised = normalisePem(pem);
 
   if (!normalised.startsWith(SPKI_HEADER)) {
     throw new TokenValidationError(
@@ -89,6 +103,44 @@ export async function importVerificationKey(
     throw new TokenValidationError(
       TokenValidationErrorCode.INVALID_SIGNATURE,
       `Verification key could not be imported as ${algorithm}: ${message}`,
+    );
+  }
+}
+
+/**
+ * Turn a configured private key into something `createToken` can sign with.
+ *
+ * The counterpart of `importVerificationKey`, and subject to the same rule:
+ * the two halves of a key pair come from the same environment, so they must be
+ * read the same way or a deployment that verifies fine fails to sign.
+ *
+ * @param pem       - A PEM-encoded PKCS#8 block. Literal `\n` escapes are
+ *                    accepted, since a PEM carried in an environment variable
+ *                    usually arrives with them.
+ * @param algorithm - The algorithm the key will sign with (default: "ES256").
+ * @throws {TokenValidationError} if the value is not a PEM private key.
+ */
+export async function importSigningKey(
+  pem: string,
+  algorithm: string = "ES256",
+): Promise<KeyLike> {
+  const normalised = normalisePem(pem);
+
+  if (!normalised.startsWith(PKCS8_HEADER)) {
+    throw new TokenValidationError(
+      TokenValidationErrorCode.INVALID_SIGNATURE,
+      `Signing key must be a PEM block beginning "${PKCS8_HEADER}"; ` +
+        "got a value that is not one.",
+    );
+  }
+
+  try {
+    return await importPKCS8(normalised, algorithm);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new TokenValidationError(
+      TokenValidationErrorCode.INVALID_SIGNATURE,
+      `Signing key could not be imported as ${algorithm}: ${message}`,
     );
   }
 }

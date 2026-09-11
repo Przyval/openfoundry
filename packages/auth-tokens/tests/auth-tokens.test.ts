@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { generateKeyPair } from "jose";
+import { generateKeyPair, exportPKCS8, exportSPKI } from "jose";
 import type { KeyLike } from "jose";
 import {
   type OpenFoundryClaims,
@@ -10,6 +10,8 @@ import {
   buildTokenInput,
   isValidClaimsShape,
   validateToken,
+  importSigningKey,
+  importVerificationKey,
   TokenValidationError,
   TokenValidationErrorCode,
   BearerToken,
@@ -159,6 +161,40 @@ describe("createToken + validateToken", () => {
     const jwt = await createToken(input, privateKey);
     const claims = await validateToken(jwt, publicKey, { audience: "svc-a" });
     expect(claims.aud).toContain("svc-a");
+  });
+});
+
+describe("key import from the environment", () => {
+  /**
+   * Neither a .env file nor a Docker Compose value can hold a real newline, so
+   * a PEM read from the environment arrives with literal \n escapes. Both
+   * halves of one pair must therefore be read the same way: a deployment that
+   * verifies fine but cannot sign is a 401 on every request.
+   */
+  async function escapedPems(): Promise<{ priv: string; pub: string }> {
+    const keys = await generateKeyPair("ES256", { extractable: true });
+    return {
+      priv: (await exportPKCS8(keys.privateKey)).replace(/\n/g, "\\n"),
+      pub: (await exportSPKI(keys.publicKey)).replace(/\n/g, "\\n"),
+    };
+  }
+
+  it("round-trips a pair whose PEMs carry literal \\n escapes", async () => {
+    const { priv, pub } = await escapedPems();
+
+    const input = makeTokenInput();
+    const token = await createToken(input, await importSigningKey(priv));
+    const claims = await validateToken(token, await importVerificationKey(pub));
+
+    expect(claims.sub).toBe(input.sub);
+  });
+
+  it("rejects a signing key that is not a PEM private key", async () => {
+    const { pub } = await escapedPems();
+    await expect(importSigningKey(pub)).rejects.toThrow(TokenValidationError);
+    await expect(importSigningKey("not-a-key")).rejects.toThrow(
+      TokenValidationError,
+    );
   });
 });
 

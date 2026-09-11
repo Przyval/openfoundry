@@ -96,7 +96,9 @@ async function mintAccessToken(baseUrl: string): Promise<string | null> {
 
   // The gateway leaves /multipass/api/oauth2/ reachable without a token by
   // design - it is where tokens come from.
-  const authUrl = process.env.OPENFOUNDRY_AUTH_URL ?? baseUrl;
+  // `||`, not `??`: .env.example ships this key empty and the sync scripts
+  // `set -a && source .env`, so an empty string is what a real run exports.
+  const authUrl = process.env.OPENFOUNDRY_AUTH_URL || baseUrl;
 
   try {
     const res = await fetch(`${authUrl}/multipass/api/oauth2/token`, {
