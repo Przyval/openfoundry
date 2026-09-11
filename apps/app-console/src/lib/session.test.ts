@@ -77,6 +77,23 @@ describe("restoreSession", () => {
     expect(restoreSession(NOW)).toBeNull();
   });
 
+  it("clears a token left behind without its user", () => {
+    store.set(
+      LOCAL_STORAGE_TOKEN_KEY,
+      JSON.stringify({ accessToken: "tok-1", expiresIn: 3600, expiresAt: NOW + 60_000 }),
+    );
+
+    expect(restoreSession(NOW)).toBeNull();
+    expect(store.has(LOCAL_STORAGE_TOKEN_KEY)).toBe(false);
+  });
+
+  it("clears a user left behind without their token", () => {
+    store.set(LOCAL_STORAGE_USER_KEY, JSON.stringify(USER));
+
+    expect(restoreSession(NOW)).toBeNull();
+    expect(store.has(LOCAL_STORAGE_USER_KEY)).toBe(false);
+  });
+
   it("clears corrupt storage instead of throwing", () => {
     store.set(LOCAL_STORAGE_TOKEN_KEY, "{not json");
     store.set(LOCAL_STORAGE_USER_KEY, JSON.stringify(USER));

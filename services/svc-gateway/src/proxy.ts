@@ -42,17 +42,6 @@ const HOP_BY_HOP_HEADERS = new Set([
  */
 const CLIENT_ASSERTED_IDENTITY_PREFIX = "x-user-";
 
-/**
- * Headers that describe the *incoming* body and cannot describe the outgoing
- * one. The body below is re-serialised from Fastify's parsed representation,
- * so it is rarely byte-identical to what arrived - a pretty-printed JSON
- * payload shrinks. Forwarding the original length made undici reject the
- * request with "Request body length does not match content-length header",
- * which the gateway then reported as a 502. `fetch` sets the correct length
- * itself, so the safe move is to not send one.
- */
-const BODY_DESCRIBING_HEADERS = new Set(["content-length"]);
-
 // ---------------------------------------------------------------------------
 // Proxy
 // ---------------------------------------------------------------------------
@@ -86,12 +75,13 @@ export async function proxyRequest(
     if (HOP_BY_HOP_HEADERS.has(lowerKey)) continue;
     if (lowerKey === "host") continue; // let fetch set the correct Host
     // The body below is re-serialized from the parsed object, so the client's
-    // Content-Length no longer describes it. Forwarding it makes undici reject
-    // every request whose JSON was not already compact. Let fetch set it.
+    // Content-Length no longer describes it - a pretty-printed JSON payload
+    // shrinks. Forwarding the original length made undici reject the request
+    // with "Request body length does not match content-length header", which
+    // the gateway then reported as a 502. `fetch` sets the correct one itself.
     if (lowerKey === "content-length") continue;
     // Never forward a caller's own claim about its identity or roles.
     if (lowerKey.startsWith(CLIENT_ASSERTED_IDENTITY_PREFIX)) continue;
-    if (BODY_DESCRIBING_HEADERS.has(lowerKey)) continue;
     if (value !== undefined) {
       outgoingHeaders[key] = Array.isArray(value) ? value.join(", ") : value;
     }

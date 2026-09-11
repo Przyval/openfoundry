@@ -56,7 +56,12 @@ export function restoreSession(now: number = Date.now()): RestoredSession | null
     return null;
   }
 
-  if (!storedToken || !storedUser) return null;
+  if (!storedToken || !storedUser) {
+    // Half a session is no session, and the token key alone is enough for the
+    // fetch interceptor to keep sending a dead bearer token.
+    if (storedToken || storedUser) clearStoredSession();
+    return null;
+  }
 
   try {
     const { expiresAt, ...token }: StoredToken = JSON.parse(storedToken);
