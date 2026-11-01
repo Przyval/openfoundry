@@ -607,6 +607,8 @@ POST /api/v2/auth/signup              Daftar user baru + buat org
                                        diset pada svc-multipass DAN gateway)
 POST /multipass/api/auth/login        Login mode pengembangan
 POST /multipass/api/oauth2/token      Token OAuth2
+GET  /multipass/api/oauth2/authorize  Halaman masuk produksi (lihat "Login produksi")
+POST /multipass/api/oauth2/authorize  Kirim form masuk, dialihkan dengan kode otorisasi
 GET  /multipass/api/auth/me           Info user saat ini
 GET  /api/v2/admin/users/getCurrent   Info user (kompatibel SDK Palantir)
 ```
