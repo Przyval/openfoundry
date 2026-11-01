@@ -22,6 +22,7 @@ import {
 import {
   clearStoredSession,
   restoreSession,
+  takeOAuthCallback,
   userFromAccessToken,
   type AuthUser,
   type StoredToken,
@@ -180,20 +181,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // ---- Handle OAuth callback (code or error in URL) ----
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get("code");
-    const error = params.get("error");
-    if (error) {
+    const callback = takeOAuthCallback();
+    if (!callback) return;
+    if ("error" in callback) {
       sessionStorage.removeItem(PKCE_VERIFIER_KEY);
       setOauthError(
-        error === "access_denied"
+        callback.error === "access_denied"
           ? "Sign-in was cancelled."
-          : `Sign-in failed: ${params.get("error_description") ?? error}`,
+          : `Sign-in failed: ${callback.errorDescription ?? callback.error}`,
       );
-      window.history.replaceState({}, "", window.location.pathname);
       return;
     }
-    if (!code) return;
 
     const codeVerifier = sessionStorage.getItem(PKCE_VERIFIER_KEY) ?? undefined;
     sessionStorage.removeItem(PKCE_VERIFIER_KEY);
@@ -202,22 +200,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const tokenResponse = await exchangeCodeForToken(
           oauthOptions,
-          code,
+          callback.code,
           codeVerifier,
         );
         tokenManager.setToken(tokenResponse);
 
         const user = userFromAccessToken(tokenResponse.accessToken);
 
+        setOauthError(null);
         setCurrentUser(user);
         localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(user));
-
-        // Clean the URL
-        window.history.replaceState({}, "", window.location.pathname);
       } catch (err) {
         console.error("OAuth callback failed:", err);
         setOauthError("Sign-in could not be completed. Please try again.");
-        window.history.replaceState({}, "", window.location.pathname);
       }
     })();
   }, [tokenManager]);
@@ -226,6 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     tokenManager.clear();
     setCurrentUser(null);
+    setOauthError(null);
     clearStoredSession();
   }, [tokenManager]);
 

@@ -101,3 +101,24 @@ export function restoreSession(now: number = Date.now()): RestoredSession | null
     return null;
   }
 }
+
+/** What the authorization server sent back on the redirect to /login. */
+export type OAuthCallback =
+  | { code: string }
+  | { error: string; errorDescription: string | null };
+
+/**
+ * Read the OAuth callback from the current URL and strip it, synchronously,
+ * so it is handled exactly once. React StrictMode runs the callback effect
+ * twice; if the URL were cleaned only after the async code swap, both runs
+ * would swap the same single-use code and the second would fail.
+ */
+export function takeOAuthCallback(): OAuthCallback | null {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  const error = params.get("error");
+  if (!code && !error) return null;
+  window.history.replaceState({}, "", window.location.pathname);
+  if (error) return { error, errorDescription: params.get("error_description") };
+  return { code: code as string };
+}
