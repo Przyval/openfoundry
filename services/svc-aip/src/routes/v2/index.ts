@@ -4,12 +4,15 @@ import type { ConversationStore } from "../../store/conversation-store.js";
 import type { EmbeddingStore } from "../../store/embedding-store.js";
 import type { PgConversationStore } from "../../store/pg-conversation-store.js";
 import type { PgEmbeddingStore } from "../../store/pg-embedding-store.js";
+import type { ModelStore } from "../../models/model-store.js";
 import { aipRoutes } from "./aip.js";
+import { modelRoutes } from "./models.js";
 
 export interface V2RouteOptions {
   llmClient: LlmClient;
   conversationStore: ConversationStore | PgConversationStore;
   embeddingStore: EmbeddingStore | PgEmbeddingStore;
+  modelStore: ModelStore;
 }
 
 export async function v2Routes(
@@ -21,4 +24,6 @@ export async function v2Routes(
     conversationStore: opts.conversationStore,
     embeddingStore: opts.embeddingStore,
   });
+  // A fresh options object: passing `opts` on would re-apply its `prefix`.
+  await app.register(modelRoutes, { store: opts.modelStore });
 }

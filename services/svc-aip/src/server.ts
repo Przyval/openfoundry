@@ -7,6 +7,8 @@ import { ConversationStore } from "./store/conversation-store.js";
 import { EmbeddingStore } from "./store/embedding-store.js";
 import { PgConversationStore } from "./store/pg-conversation-store.js";
 import { PgEmbeddingStore } from "./store/pg-embedding-store.js";
+import { MemoryModelStore, type ModelStore } from "./models/model-store.js";
+import { PgModelStore } from "./models/pg-model-store.js";
 import type { LlmClient } from "./llm/llm-client.js";
 import { createLlmClient } from "./llm/create-client.js";
 import { healthRoutes } from "./routes/health.js";
@@ -25,6 +27,8 @@ export interface CreateServerOptions {
   conversationStore?: ConversationStore | PgConversationStore;
   /** Inject an embedding store (useful for tests). */
   embeddingStore?: EmbeddingStore | PgEmbeddingStore;
+  /** Inject a model store (useful for tests). */
+  modelStore?: ModelStore;
 }
 
 /**
@@ -38,17 +42,21 @@ export async function createServer(
   // -- Stores ---------------------------------------------------------------
   let conversationStore: ConversationStore | PgConversationStore;
   let embeddingStore: EmbeddingStore | PgEmbeddingStore;
+  let modelStore: ModelStore;
 
   if (options.conversationStore && options.embeddingStore) {
     conversationStore = options.conversationStore;
     embeddingStore = options.embeddingStore;
+    modelStore = options.modelStore ?? new MemoryModelStore();
   } else if (config.databaseUrl) {
     const pool = createPool({ connectionString: config.databaseUrl });
     conversationStore = new PgConversationStore(pool);
     embeddingStore = new PgEmbeddingStore(pool);
+    modelStore = options.modelStore ?? new PgModelStore(pool);
   } else {
     conversationStore = new ConversationStore();
     embeddingStore = new EmbeddingStore();
+    modelStore = options.modelStore ?? new MemoryModelStore();
   }
 
   // -- LLM client -----------------------------------------------------------
@@ -116,6 +124,22 @@ export async function createServer(
       return reply.status(400).send(body);
     }
 
+    // Fastify's own request errors - malformed JSON, a body over the limit, an
+    // unsupported content type - carry a 4xx statusCode. They are the caller's
+    // mistake, and reporting them as an opaque 500 hides what to fix.
+    const clientStatus = (error as { statusCode?: unknown }).statusCode;
+    if (typeof clientStatus === "number" && clientStatus >= 400 && clientStatus < 500) {
+      const body = {
+        errorCode: clientStatus === 400 ? "INVALID_ARGUMENT" : "CUSTOM_CLIENT",
+        errorName: "InvalidRequest",
+        errorInstanceId: crypto.randomUUID(),
+        parameters: { message: error.message },
+        statusCode: clientStatus,
+      };
+      request.log.warn({ err: body, requestId: request.id }, error.message);
+      return reply.status(clientStatus).send(body);
+    }
+
     // Unexpected errors
     request.log.error(
       { err: error, requestId: request.id },
@@ -137,6 +161,7 @@ export async function createServer(
     llmClient,
     conversationStore,
     embeddingStore,
+    modelStore,
   });
 
   return app;

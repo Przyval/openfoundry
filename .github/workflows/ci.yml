@@ -39,6 +39,24 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    # Contract suites that are written once and run against every store run
+    # their Postgres half only when given a database; this one is scratch.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: openfoundry
+          POSTGRES_PASSWORD: openfoundry
+          POSTGRES_DB: openfoundry_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U openfoundry"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MODELS_TEST_DATABASE_URL: postgres://openfoundry:openfoundry@localhost:5432/openfoundry_test
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

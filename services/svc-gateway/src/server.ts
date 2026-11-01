@@ -132,6 +132,22 @@ export async function createServer(
       return reply.status(400).send(body);
     }
 
+    // Fastify's own request errors - malformed JSON, a body over the limit, an
+    // unsupported content type - carry a 4xx statusCode. They are the caller's
+    // mistake, and reporting them as an opaque 500 hides what to fix.
+    const clientStatus = (error as { statusCode?: unknown }).statusCode;
+    if (typeof clientStatus === "number" && clientStatus >= 400 && clientStatus < 500) {
+      const body = {
+        errorCode: clientStatus === 400 ? "INVALID_ARGUMENT" : "CUSTOM_CLIENT",
+        errorName: "InvalidRequest",
+        errorInstanceId: crypto.randomUUID(),
+        parameters: { message: error.message },
+        statusCode: clientStatus,
+      };
+      request.log.warn({ err: body, requestId: request.id }, error.message);
+      return reply.status(clientStatus).send(body);
+    }
+
     // Unexpected errors — log full details, return opaque 500
     request.log.error(
       { err: error, requestId: request.id },

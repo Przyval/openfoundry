@@ -14,6 +14,7 @@
   "dependencies": {
     "@openfoundry/db": "workspace:*",
     "@openfoundry/errors": "workspace:*",
+    "@openfoundry/pagination": "workspace:*",
     "@openfoundry/rid": "workspace:*",
     "fastify": "^5.3.0",
     "@fastify/cors": "^11.0.0",

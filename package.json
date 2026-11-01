@@ -38,6 +38,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@openfoundry/db": "workspace:*",
     "@osdk/foundry": "^2.56.0",
     "pino-pretty": "^13.1.3"
   }
