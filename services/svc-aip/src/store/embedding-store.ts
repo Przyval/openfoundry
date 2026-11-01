@@ -6,6 +6,7 @@ import { generateRid } from "@openfoundry/rid";
 
 export interface StoredEmbedding {
   rid: string;
+  ontologyRid: string | null;
   sourceRid: string;
   sourceType: string;
   content: string;
@@ -15,11 +16,18 @@ export interface StoredEmbedding {
 }
 
 export interface StoreEmbeddingInput {
+  ontologyRid: string | null;
   sourceRid: string;
   sourceType: string;
   content: string;
   embedding: number[];
   model: string;
+}
+
+export interface SemanticSearchOptions {
+  ontologyRid: string | null;
+  objectType?: string;
+  limit?: number;
 }
 
 export interface SemanticSearchResult {
@@ -60,6 +68,7 @@ export class EmbeddingStore {
     const rid = generateRid("aip", "embedding").toString();
     const stored: StoredEmbedding = {
       rid,
+      ontologyRid: input.ontologyRid,
       sourceRid: input.sourceRid,
       sourceType: input.sourceType,
       content: input.content,
@@ -78,13 +87,16 @@ export class EmbeddingStore {
 
   search(
     queryEmbedding: number[],
-    options?: { objectType?: string; limit?: number },
+    options: SemanticSearchOptions,
   ): SemanticSearchResult[] {
-    const limit = options?.limit ?? 10;
+    const limit = options.limit ?? 10;
     const results: SemanticSearchResult[] = [];
 
     for (const stored of this.embeddings.values()) {
-      if (options?.objectType && stored.sourceType !== options.objectType) {
+      if (stored.ontologyRid !== options.ontologyRid) {
+        continue;
+      }
+      if (options.objectType && stored.sourceType !== options.objectType) {
         continue;
       }
 

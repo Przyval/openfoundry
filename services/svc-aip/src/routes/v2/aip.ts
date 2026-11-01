@@ -36,10 +36,14 @@ interface GenerateFunctionBody {
 interface EmbeddingsBody {
   texts: string[];
   model?: string;
+  ontologyRid?: string;
+  sourceRid?: string;
+  sourceType?: string;
 }
 
 interface SemanticSearchBody {
   query: string;
+  ontologyRid?: string;
   objectType?: string;
   limit?: number;
 }
@@ -169,7 +173,8 @@ export async function aipRoutes(
   app.post<{ Body: EmbeddingsBody }>(
     "/aip/embeddings",
     async (request, reply) => {
-      const { texts, model } = request.body ?? ({} as EmbeddingsBody);
+      const { texts, model, ontologyRid, sourceRid, sourceType } =
+        request.body ?? ({} as EmbeddingsBody);
 
       if (!texts || !Array.isArray(texts) || texts.length === 0) {
         throw invalidArgument("texts", "must be a non-empty array of strings");
@@ -180,8 +185,9 @@ export async function aipRoutes(
 
       // Store the embeddings
       const inputs = texts.map((text, i) => ({
-        sourceRid: generateRid("aip", "text").toString(),
-        sourceType: "text",
+        ontologyRid: ontologyRid ?? null,
+        sourceRid: sourceRid ?? generateRid("aip", "text").toString(),
+        sourceType: sourceType ?? "text",
         content: text,
         embedding: embeddings[i],
         model: usedModel,
@@ -202,7 +208,7 @@ export async function aipRoutes(
   app.post<{ Body: SemanticSearchBody }>(
     "/aip/semantic-search",
     async (request, reply) => {
-      const { query, objectType, limit } =
+      const { query, ontologyRid, objectType, limit } =
         request.body ?? ({} as SemanticSearchBody);
 
       if (!query) {
@@ -213,7 +219,11 @@ export async function aipRoutes(
       const [queryEmbedding] = await llmClient.embed([query]);
 
       const results = await Promise.resolve(
-        embeddingStore.search(queryEmbedding, { objectType, limit }),
+        embeddingStore.search(queryEmbedding, {
+          ontologyRid: ontologyRid ?? null,
+          objectType,
+          limit,
+        }),
       );
 
       return reply.status(200).send({

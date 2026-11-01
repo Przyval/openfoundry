@@ -68,6 +68,7 @@ export async function semanticSearchRoutes(
         // Build the payload for svc-aip
         const aipPayload: Record<string, unknown> = {
           query,
+          ontologyRid,
           limit: searchLimit,
         };
         if (objectType) {

@@ -3,6 +3,7 @@ import { generateRid } from "@openfoundry/rid";
 import type {
   StoredEmbedding,
   StoreEmbeddingInput,
+  SemanticSearchOptions,
   SemanticSearchResult,
 } from "./embedding-store.js";
 
@@ -12,6 +13,7 @@ import type {
 
 interface EmbeddingRow {
   rid: string;
+  ontology_rid: string | null;
   source_rid: string;
   source_type: string;
   content: string;
@@ -40,6 +42,7 @@ function vectorToString(arr: number[]): string {
 function rowToEmbedding(row: EmbeddingRow): StoredEmbedding {
   return {
     rid: row.rid,
+    ontologyRid: row.ontology_rid,
     sourceRid: row.source_rid,
     sourceType: row.source_type,
     content: row.content,
@@ -60,11 +63,12 @@ export class PgEmbeddingStore {
     const rid = generateRid("aip", "embedding").toString();
 
     const { rows } = await this.pool.query<EmbeddingRow>({
-      text: `INSERT INTO aip_embeddings (rid, source_rid, source_type, content, embedding, model)
-             VALUES ($1, $2, $3, $4, $5, $6)
+      text: `INSERT INTO aip_embeddings (rid, ontology_rid, source_rid, source_type, content, embedding, model)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              RETURNING *`,
       values: [
         rid,
+        input.ontologyRid,
         input.sourceRid,
         input.sourceType,
         input.content,
@@ -86,30 +90,26 @@ export class PgEmbeddingStore {
 
   async search(
     queryEmbedding: number[],
-    options?: { objectType?: string; limit?: number },
+    options: SemanticSearchOptions,
   ): Promise<SemanticSearchResult[]> {
-    const limit = options?.limit ?? 10;
-    const vecStr = vectorToString(queryEmbedding);
-
-    let text: string;
-    let values: unknown[];
-
-    if (options?.objectType) {
-      text = `SELECT rid, source_rid, source_type, content,
-                     1 - (embedding <=> $1::vector) AS score
-              FROM aip_embeddings
-              WHERE source_type = $2
-              ORDER BY embedding <=> $1::vector
-              LIMIT $3`;
-      values = [vecStr, options.objectType, limit];
-    } else {
-      text = `SELECT rid, source_rid, source_type, content,
-                     1 - (embedding <=> $1::vector) AS score
-              FROM aip_embeddings
-              ORDER BY embedding <=> $1::vector
-              LIMIT $2`;
-      values = [vecStr, limit];
+    const limit = options.limit ?? 10;
+    const values: unknown[] = [
+      vectorToString(queryEmbedding),
+      options.ontologyRid,
+      limit,
+    ];
+    let typeFilter = "";
+    if (options.objectType) {
+      values.push(options.objectType);
+      typeFilter = "AND source_type = $4";
     }
+
+    const text = `SELECT rid, source_rid, source_type, content,
+                         1 - (embedding <=> $1::vector) AS score
+                  FROM aip_embeddings
+                  WHERE ontology_rid IS NOT DISTINCT FROM $2 ${typeFilter}
+                  ORDER BY embedding <=> $1::vector
+                  LIMIT $3`;
 
     const { rows } = await this.pool.query<{
       rid: string;
