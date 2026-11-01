@@ -532,7 +532,7 @@ Urutan itu diverifikasi langsung: setelah ketiga berkas dihapus dan layanan dist
 
 Objek dan link disimpan per ontologi, jadi dua ontologi boleh sama-sama punya object type `Employee` tanpa saling melihat datanya.
 `object-store.json` atau `link-store.json` dari versi sebelumnya tidak mencatat ontologi pemiliknya, sehingga svc-objects menyisihkannya utuh menjadi `*.unscoped-<ms>` saat start dan mulai kosong.
-`start.sh` mendeteksi `object-store.json` lama itu sebelum menyalakan layanan dan menyemai ulang dengan sendirinya.
+`start.sh` dan `docker-entrypoint.sh` mendeteksi `object-store.json` lama itu sebelum menyalakan layanan, menghapus ketiga berkas store, lalu menyemai ontologi baru dengan sendirinya.
 
 Keempat skrip itu juga **mengabaikan `ORG_RID`**.
 Hanya `scripts/seed-common.sh` yang membacanya, dan tak satu pun dari keempat skrip demo memakai berkas itu.

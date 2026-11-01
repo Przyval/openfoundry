@@ -101,14 +101,16 @@ done
 sleep 1
 
 # An object-store.json from before objects were stored per ontology records no
-# ontology, so svc-objects moves it aside at startup and serves none of it.
-# Checked before the services start, since by then the file is gone; such a
-# store is re-seeded rather than left with its ontology but no objects.
-UNSCOPED_OBJECTS=false
+# ontology, so svc-objects would move it aside and serve none of it. Such a
+# store is cleared before the services start, so they load nothing stale and
+# the no-persisted-data branch below seeds a fresh ontology.
 if [ -s /tmp/openfoundry-data/object-store.json ] && ! node -e \
     'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).formatVersion === 2 ? 0 : 1)' \
     /tmp/openfoundry-data/object-store.json 2>/dev/null; then
-  UNSCOPED_OBJECTS=true
+  echo "→ Objects were stored before per-ontology storage; clearing persisted data to re-seed..."
+  rm -f /tmp/openfoundry-data/ontology-store.json
+  rm -f /tmp/openfoundry-data/object-store.json
+  rm -f /tmp/openfoundry-data/link-store.json
 fi
 
 # Start backend services using pnpm (resolves workspace deps correctly)
@@ -179,10 +181,7 @@ seed_industry() {
 
 # --- Seed data ---
 echo ""
-if [ "$RESEED" = true ] || [ "$INDUSTRY_CHANGED" = true ] || [ "$UNSCOPED_OBJECTS" = true ]; then
-  if [ "$UNSCOPED_OBJECTS" = true ]; then
-    echo "→ Objects were stored before per-ontology storage, re-seeding..."
-  fi
+if [ "$RESEED" = true ] || [ "$INDUSTRY_CHANGED" = true ]; then
   echo "→ Clearing persisted data..."
   rm -f /tmp/openfoundry-data/ontology-store.json
   rm -f /tmp/openfoundry-data/object-store.json
