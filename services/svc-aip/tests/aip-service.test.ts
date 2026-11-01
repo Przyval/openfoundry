@@ -225,7 +225,11 @@ describe("POST /api/v2/aip/semantic-search", () => {
     await app.inject({
       method: "POST",
       url: "/api/v2/aip/embeddings",
-      payload: { texts: ["Employee: name=Unscoped Una"] },
+      payload: {
+        texts: ["Employee: name=Unscoped Una"],
+        sourceRid: "emp-u",
+        sourceType: "Employee",
+      },
     });
 
     const search = async (ontologyRid?: string) => {
@@ -244,7 +248,9 @@ describe("POST /api/v2/aip/semantic-search", () => {
     expect(await search(beta)).toEqual([
       expect.objectContaining({ rid: "emp-b", objectType: "Employee" }),
     ]);
-    expect(await search()).toEqual([]);
+    expect(await search()).toEqual([
+      expect.objectContaining({ rid: "emp-u", objectType: "Employee" }),
+    ]);
   });
 
   it("returns 400 when query is missing", async () => {
