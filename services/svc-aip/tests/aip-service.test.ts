@@ -203,6 +203,50 @@ describe("POST /api/v2/aip/semantic-search", () => {
     expect(body.results[0]).toHaveProperty("score");
   });
 
+  it("matches only embeddings of the requested ontology", async () => {
+    const alpha = "ri.ontology.main.ontology.alpha";
+    const beta = "ri.ontology.main.ontology.beta";
+    for (const [ontologyRid, primaryKey, text] of [
+      [alpha, "emp-a", "Employee: name=Alpha Ann"],
+      [beta, "emp-b", "Employee: name=Beta Bob"],
+    ]) {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v2/aip/embeddings",
+        payload: {
+          texts: [text],
+          ontologyRid,
+          sourceRid: primaryKey,
+          sourceType: "Employee",
+        },
+      });
+      expect(res.statusCode).toBe(200);
+    }
+    await app.inject({
+      method: "POST",
+      url: "/api/v2/aip/embeddings",
+      payload: { texts: ["Employee: name=Unscoped Una"] },
+    });
+
+    const search = async (ontologyRid?: string) => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v2/aip/semantic-search",
+        payload: { query: "Employee", objectType: "Employee", ontologyRid },
+      });
+      expect(res.statusCode).toBe(200);
+      return res.json().results;
+    };
+
+    expect(await search(alpha)).toEqual([
+      expect.objectContaining({ rid: "emp-a", objectType: "Employee" }),
+    ]);
+    expect(await search(beta)).toEqual([
+      expect.objectContaining({ rid: "emp-b", objectType: "Employee" }),
+    ]);
+    expect(await search()).toEqual([]);
+  });
+
   it("returns 400 when query is missing", async () => {
     const res = await app.inject({
       method: "POST",

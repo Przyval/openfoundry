@@ -11,7 +11,8 @@
  * Covered here three ways: every read and write route over the in-memory
  * stores, the stores' on-disk format (including the pre-scoping files, which
  * cannot be attributed to an ontology), and `PgObjectStore`'s type
- * resolution, which no in-memory test can reach.
+ * resolution, which no in-memory test can reach. Semantic search, which svc-aip
+ * answers, is scoped by forwarding the path's ontology.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -19,7 +20,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type pg from "pg";
-import type { FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { createServer } from "../src/server.js";
 import { ObjectStore } from "../src/store/object-store.js";
 import { LinkStore } from "../src/store/link-store.js";
@@ -575,5 +576,69 @@ describe("PgObjectStore scopes object-type resolution to the ontology", () => {
     const insert = pool.statements.find((s) => /INSERT INTO objects/.test(s.text))!;
     expect(insert.text).toMatch(/org_rid/);
     expect(insert.values[4]).toBe("org:acme");
+  });
+});
+
+// ===========================================================================
+// 4. Semantic search forwards the path's ontology to svc-aip
+// ===========================================================================
+
+describe("Semantic search is scoped to the ontology in the path", () => {
+  let aip: FastifyInstance;
+  let app: FastifyInstance;
+  const forwarded: Array<Record<string, unknown>> = [];
+
+  beforeEach(async () => {
+    forwarded.length = 0;
+    aip = Fastify();
+    aip.post("/api/v2/aip/semantic-search", async (request) => {
+      const body = request.body as Record<string, unknown>;
+      forwarded.push(body);
+      return {
+        results: [
+          {
+            rid: `emp-of-${String(body.ontologyRid)}`,
+            objectType: "Employee",
+            score: 1,
+            properties: {},
+          },
+        ],
+      };
+    });
+    const aipServiceUrl = await aip.listen({ port: 0, host: "127.0.0.1" });
+    app = await createServer({
+      config: { ...TEST_CONFIG, aipServiceUrl },
+      store: new ObjectStore(null),
+      linkStore: new LinkStore(null),
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+    await aip.close();
+  });
+
+  it("asks svc-aip only for the requested ontology's matches", async () => {
+    for (const ontologyRid of [ALPHA, BETA]) {
+      const res = await app.inject({
+        method: "POST",
+        url: `${v2(ontologyRid)}/objects/semantic-search`,
+        payload: { query: "engineer", objectType: "Employee" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        ontologyRid,
+        results: [
+          {
+            primaryKey: `emp-of-${ontologyRid}`,
+            objectType: "Employee",
+            properties: {},
+            score: 1,
+          },
+        ],
+      });
+    }
+
+    expect(forwarded.map((body) => body.ontologyRid)).toEqual([ALPHA, BETA]);
   });
 });

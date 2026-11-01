@@ -105,8 +105,8 @@ sleep 1
 # Checked before the services start, since by then the file is gone; such a
 # store is re-seeded rather than left with its ontology but no objects.
 UNSCOPED_OBJECTS=false
-if [ -s /tmp/openfoundry-data/object-store.json ] && ! python3 -c \
-    'import json,sys; sys.exit(json.load(open(sys.argv[1])).get("formatVersion") != 2)' \
+if [ -s /tmp/openfoundry-data/object-store.json ] && ! node -e \
+    'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).formatVersion === 2 ? 0 : 1)' \
     /tmp/openfoundry-data/object-store.json 2>/dev/null; then
   UNSCOPED_OBJECTS=true
 fi
