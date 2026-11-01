@@ -33,57 +33,70 @@ class AsyncObjectStore implements ObjectReadWriteStore {
 
   constructor(private readonly inner: ObjectStore) {}
 
-  async allObjects(objectType: string): Promise<StoredObject[]> {
+  async allObjects(ontologyRid: string, objectType: string): Promise<StoredObject[]> {
     this.calls.allObjects++;
-    return this.inner.allObjects(objectType);
+    return this.inner.allObjects(ontologyRid, objectType);
   }
 
   async listObjects(
+    ontologyRid: string,
     objectType: string,
     options: ListOptions = {},
   ): Promise<ListResult> {
-    return this.inner.listObjects(objectType, options);
+    return this.inner.listObjects(ontologyRid, objectType, options);
   }
 
-  async getObject(objectType: string, primaryKey: string): Promise<StoredObject> {
+  async getObject(
+    ontologyRid: string,
+    objectType: string,
+    primaryKey: string,
+  ): Promise<StoredObject> {
     this.calls.getObject++;
-    return this.inner.getObject(objectType, primaryKey);
+    return this.inner.getObject(ontologyRid, objectType, primaryKey);
   }
 
   async createObject(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
   ): Promise<StoredObject> {
-    return this.inner.createObject(objectType, primaryKey, properties);
+    return this.inner.createObject(ontologyRid, objectType, primaryKey, properties);
   }
 
   async upsertObject(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
   ): Promise<StoredObject> {
-    return this.inner.upsertObject(objectType, primaryKey, properties);
+    return this.inner.upsertObject(ontologyRid, objectType, primaryKey, properties);
   }
 
   async updateObject(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
   ): Promise<StoredObject> {
-    return this.inner.updateObject(objectType, primaryKey, properties);
+    return this.inner.updateObject(ontologyRid, objectType, primaryKey, properties);
   }
 
-  async deleteObject(objectType: string, primaryKey: string): Promise<void> {
-    this.inner.deleteObject(objectType, primaryKey);
+  async deleteObject(
+    ontologyRid: string,
+    objectType: string,
+    primaryKey: string,
+  ): Promise<void> {
+    this.inner.deleteObject(ontologyRid, objectType, primaryKey);
   }
 
   async getObjectsByKeys(
+    ontologyRid: string,
     objectType: string,
     primaryKeys: string[],
   ): Promise<StoredObject[]> {
     this.calls.getObjectsByKeys++;
-    return this.inner.getObjectsByKeys(objectType, primaryKeys);
+    return this.inner.getObjectsByKeys(ontologyRid, objectType, primaryKeys);
   }
 }
 
@@ -104,8 +117,8 @@ beforeEach(async () => {
     linkStore,
   });
 
-  inner.createObject("Employee", "emp-1", { name: "Carol", salary: 120000 });
-  inner.createObject("Employee", "emp-2", { name: "Alice", salary: 90000 });
+  inner.createObject(ONTOLOGY_RID, "Employee", "emp-1", { name: "Carol", salary: 120000 });
+  inner.createObject(ONTOLOGY_RID, "Employee", "emp-2", { name: "Alice", salary: 90000 });
 });
 
 describe("Object read endpoints against an async store", () => {
@@ -176,7 +189,7 @@ describe("Object read endpoints against an async store", () => {
       url: `${BASE_URL}/Employee/emp-3`,
     });
     expect(deleted.statusCode).toBe(204);
-    expect(inner.allObjects("Employee").map((o) => o.primaryKey)).toEqual([
+    expect(inner.allObjects(ONTOLOGY_RID, "Employee").map((o) => o.primaryKey)).toEqual([
       "emp-1",
       "emp-2",
     ]);
@@ -185,7 +198,7 @@ describe("Object read endpoints against an async store", () => {
 
 describe("Linked objects against an async store", () => {
   beforeEach(() => {
-    linkStore.createLink("Employee", "emp-1", "reportsTo", "Employee", "emp-2");
+    linkStore.createLink(ONTOLOGY_RID, "Employee", "emp-1", "reportsTo", "Employee", "emp-2");
   });
 
   const links = (query = "") =>
@@ -215,8 +228,8 @@ describe("Linked objects against an async store", () => {
   });
 
   it("orders by a property of the resolved linked objects", async () => {
-    inner.createObject("Employee", "emp-3", { name: "Bob", salary: 150000 });
-    linkStore.createLink("Employee", "emp-1", "reportsTo", "Employee", "emp-3");
+    inner.createObject(ONTOLOGY_RID, "Employee", "emp-3", { name: "Bob", salary: 150000 });
+    linkStore.createLink(ONTOLOGY_RID, "Employee", "emp-1", "reportsTo", "Employee", "emp-3");
 
     const res = await links("?orderBy=properties.name:desc");
 
@@ -229,11 +242,11 @@ describe("Linked objects against an async store", () => {
 
   it("resolves one batch per target type, not one read per link", async () => {
     for (let i = 3; i <= 40; i++) {
-      inner.createObject("Employee", `emp-${i}`, { name: `E${i}`, salary: i });
-      linkStore.createLink("Employee", "emp-1", "reportsTo", "Employee", `emp-${i}`);
+      inner.createObject(ONTOLOGY_RID, "Employee", `emp-${i}`, { name: `E${i}`, salary: i });
+      linkStore.createLink(ONTOLOGY_RID, "Employee", "emp-1", "reportsTo", "Employee", `emp-${i}`);
     }
-    inner.createObject("Office", "off-1", { name: "HQ" });
-    linkStore.createLink("Employee", "emp-1", "reportsTo", "Office", "off-1");
+    inner.createObject(ONTOLOGY_RID, "Office", "off-1", { name: "HQ" });
+    linkStore.createLink(ONTOLOGY_RID, "Employee", "emp-1", "reportsTo", "Office", "off-1");
 
     asyncStore.calls.getObject = 0;
     asyncStore.calls.getObjectsByKeys = 0;
@@ -250,10 +263,10 @@ describe("Linked objects against an async store", () => {
   });
 
   it("keeps link order and content when resolving in batches", async () => {
-    inner.createObject("Office", "off-1", { name: "HQ" });
-    linkStore.createLink("Employee", "emp-1", "reportsTo", "Office", "off-1");
-    inner.createObject("Employee", "emp-3", { name: "Bob", salary: 150000 });
-    linkStore.createLink("Employee", "emp-1", "reportsTo", "Employee", "emp-3");
+    inner.createObject(ONTOLOGY_RID, "Office", "off-1", { name: "HQ" });
+    linkStore.createLink(ONTOLOGY_RID, "Employee", "emp-1", "reportsTo", "Office", "off-1");
+    inner.createObject(ONTOLOGY_RID, "Employee", "emp-3", { name: "Bob", salary: 150000 });
+    linkStore.createLink(ONTOLOGY_RID, "Employee", "emp-1", "reportsTo", "Employee", "emp-3");
 
     const res = await links();
 
@@ -265,7 +278,7 @@ describe("Linked objects against an async store", () => {
   });
 
   it("skips a link whose target has since been deleted", async () => {
-    inner.deleteObject("Employee", "emp-2");
+    inner.deleteObject(ONTOLOGY_RID, "Employee", "emp-2");
     const res = await links();
 
     expect(res.statusCode).toBe(200);
@@ -341,7 +354,7 @@ describe("Object sets against an async store", () => {
   });
 
   it("resolves a search-around object set through the link store", async () => {
-    linkStore.createLink("Employee", "emp-1", "reportsTo", "Employee", "emp-2");
+    linkStore.createLink(ONTOLOGY_RID, "Employee", "emp-1", "reportsTo", "Employee", "emp-2");
 
     const res = await objectSets("loadObjects", {
       objectSet: {

@@ -74,9 +74,8 @@ Order by position instead: the in-memory stores are `Map`s and arrays in inserti
 `PgObjectStore` is fully async where `ObjectStore` is synchronous. Both satisfy `ObjectReadWriteStore`, whose methods return `T | Promise<T>`, and every route in `svc-objects/src/server.ts` is registered against that interface with no cast.
 Await every store call in a handler: an unawaited read passes every in-memory test and serves a pending promise as a 200 against Postgres.
 
-The declaration lookups (`PgObjectStore.propertyNames`, `linkTargetObjectType`) are scoped by `ontology_rid`, but `resolveObjectTypeRid` - which every data read goes through - is not.
-Where two ontologies declare a same-named object type, the property-existence check and the rows served can therefore come from different declarations; see the note on `propertyNames`.
-Scoping the store's type resolution is separate architecture work, not a patch.
+Object and link data are scoped by the ontology in the request path: every `ObjectReadWriteStore` and `LinkStore` method takes `ontologyRid` first, because an object type's API name is unique only within one ontology.
+The in-memory stores persist as `{ formatVersion: 2, ontologies: {...} }`; an older file records no ontology, so it is moved aside to `*.unscoped-<ms>` at load and `start.sh` re-seeds.
 
 There are no ontology branches, scenarios or ontology transactions - every `branch` in this repo is a *dataset* branch, and the console's Scenarios page persists nothing.
 The v2 ontology endpoints therefore reject any `branch`, `scenarioRid` or `transactionId` value rather than serving the only state there is; `packages/errors/src/ontology-scoping.ts` is the single place that policy lives.
@@ -171,7 +170,7 @@ The audit route, `GET /admin/groups/:groupRid/members` and all three `groupMembe
 A rule that has to override Blueprint therefore has to sit outside `@layer app`; the navbar override at the end of `app.css` is the worked example.
 
 `scripts/migrate.sql` (what Docker Compose loads at init) and `db/migrations/*.sql` (what `pnpm db:migrate` applies) have drifted: only the latter adds `org_rid` and row-level security.
-Code written against one schema fails against the other - `PgObjectStore` inserts `org_rid`, which the Compose database has no column for.
+Code written against one schema fails against the other - `PgObjectStore` names `org_rid` only when constructed with an organization, which the Compose database has no column for.
 A Pg store can also name a column no schema has at all and nothing catches it: `PgFileStore.putFile` set `updated_at` for months against a `dataset_files` table without that column, so every overwrite failed with `42703` while the in-memory suite stayed green.
 `services/svc-datasets/tests/pg-file-write-time.test.ts` is the pattern for guarding that - assert the SQL, then assert both schema sources carry what it names.
 

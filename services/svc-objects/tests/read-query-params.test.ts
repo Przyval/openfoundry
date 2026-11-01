@@ -31,17 +31,17 @@ beforeEach(async () => {
 
 /** Seeds three employees whose names and salaries sort in different orders. */
 function seedEmployees() {
-  store.createObject("Employee", "emp-1", {
+  store.createObject(ONTOLOGY_RID, "Employee", "emp-1", {
     name: "Carol",
     department: "Engineering",
     salary: 120000,
   });
-  store.createObject("Employee", "emp-2", {
+  store.createObject(ONTOLOGY_RID, "Employee", "emp-2", {
     name: "Alice",
     department: "Sales",
     salary: 90000,
   });
-  store.createObject("Employee", "emp-3", {
+  store.createObject(ONTOLOGY_RID, "Employee", "emp-3", {
     name: "Bob",
     department: "Engineering",
     salary: 150000,
@@ -224,7 +224,7 @@ describe("List objects — snapshot", () => {
     expect(token).toBeDefined();
 
     // A new object entering mid-paging must not appear in the frozen view.
-    store.createObject("Employee", "emp-4", { name: "Dave", salary: 70000 });
+    store.createObject(ONTOLOGY_RID, "Employee", "emp-4", { name: "Dave", salary: 70000 });
 
     const second = await app.inject({
       method: "GET",
@@ -242,7 +242,7 @@ describe("List objects — snapshot", () => {
     });
     const token = first.json().nextPageToken;
 
-    store.createObject("Employee", "emp-4", { name: "Dave", salary: 70000 });
+    store.createObject(ONTOLOGY_RID, "Employee", "emp-4", { name: "Dave", salary: 70000 });
 
     const second = await app.inject({
       method: "GET",
@@ -278,8 +278,8 @@ describe("List objects — snapshot", () => {
 
     // No await between the first page and these writes: a wall-clock snapshot
     // boundary would be unable to tell them apart from the seeded objects.
-    store.createObject("Employee", "emp-5", { name: "Erin" });
-    store.createObject("Employee", "emp-6", { name: "Frank" });
+    store.createObject(ONTOLOGY_RID, "Employee", "emp-5", { name: "Erin" });
+    store.createObject(ONTOLOGY_RID, "Employee", "emp-6", { name: "Frank" });
 
     const second = await app.inject({
       method: "GET",
@@ -353,11 +353,11 @@ describe("Get object — select and excludeRid", () => {
 describe("List linked objects — select, orderBy, excludeRid, snapshot", () => {
   beforeEach(() => {
     seedEmployees();
-    store.createObject("Project", "proj-1", { name: "Zeta", budget: 10 });
-    store.createObject("Project", "proj-2", { name: "Alpha", budget: 30 });
-    store.createObject("Project", "proj-3", { name: "Mu", budget: 20 });
+    store.createObject(ONTOLOGY_RID, "Project", "proj-1", { name: "Zeta", budget: 10 });
+    store.createObject(ONTOLOGY_RID, "Project", "proj-2", { name: "Alpha", budget: 30 });
+    store.createObject(ONTOLOGY_RID, "Project", "proj-3", { name: "Mu", budget: 20 });
     for (const pk of ["proj-1", "proj-2", "proj-3"]) {
-      linkStore.createLink("Employee", "emp-1", "projects", "Project", pk);
+      linkStore.createLink(ONTOLOGY_RID, "Employee", "emp-1", "projects", "Project", pk);
     }
   });
 
@@ -407,8 +407,8 @@ describe("List linked objects — select, orderBy, excludeRid, snapshot", () => 
     expect(first.json().data).toHaveLength(2);
     const token = first.json().nextPageToken;
 
-    store.createObject("Project", "proj-4", { name: "Later", budget: 1 });
-    linkStore.createLink("Employee", "emp-1", "projects", "Project", "proj-4");
+    store.createObject(ONTOLOGY_RID, "Project", "proj-4", { name: "Later", budget: 1 });
+    linkStore.createLink(ONTOLOGY_RID, "Employee", "emp-1", "projects", "Project", "proj-4");
 
     const second = await app.inject({
       method: "GET",
@@ -493,7 +493,7 @@ describe("Ontology scoping — branch, scenarioRid, transactionId", () => {
   // rather than silently served from the only state there is.
   beforeEach(() => {
     seedEmployees();
-    linkStore.createLink("Employee", "emp-1", "peers", "Employee", "emp-2");
+    linkStore.createLink(ONTOLOGY_RID, "Employee", "emp-1", "peers", "Employee", "emp-2");
   });
 
   const reads = () => [
@@ -625,12 +625,12 @@ describe("Unknown property names", () => {
     });
 
     // `endDate` is declared but populated on no object.
-    typedStore.createObject("Employee", "emp-1", {
+    typedStore.createObject(ONTOLOGY_RID, "Employee", "emp-1", {
       name: "Carol",
       department: "Engineering",
       salary: 120000,
     });
-    typedStore.createObject("Employee", "emp-2", {
+    typedStore.createObject(ONTOLOGY_RID, "Employee", "emp-2", {
       name: "Alice",
       department: "Sales",
       salary: 90000,
@@ -693,7 +693,7 @@ describe("Unknown property names", () => {
   });
 
   it("makes no claim about a type the definition source cannot answer for", async () => {
-    typedStore.createObject("Contractor", "c-1", { name: "Dana" });
+    typedStore.createObject(ONTOLOGY_RID, "Contractor", "c-1", { name: "Dana" });
     const res = await get("/objects/Contractor?select=whatever");
 
     expect(res.statusCode).toBe(200);
@@ -713,6 +713,7 @@ describe("Unknown property names", () => {
 
   it("checks select on the linked-objects endpoint the same way", async () => {
     typedLinkStore.createLink(
+      ONTOLOGY_RID,
       "Employee",
       "emp-1",
       "reportsTo",
@@ -847,7 +848,7 @@ describe("Unknown property names", () => {
   });
 
   it("makes no claim when a union branch has no declaration", async () => {
-    typedStore.createObject("Contractor", "c-1", { name: "Dana" });
+    typedStore.createObject(ONTOLOGY_RID, "Contractor", "c-1", { name: "Dana" });
 
     const res = await typedApp.inject({
       method: "POST",
@@ -965,7 +966,7 @@ describe("Linked objects — PropertiesNotFound names the target type", () => {
       },
     });
 
-    linkedStore.createObject("Employee", "emp-1", { name: "Carol" });
+    linkedStore.createObject(ONTOLOGY_RID, "Employee", "emp-1", { name: "Carol" });
 
     const res = await linkedApp.inject({
       method: "GET",
@@ -993,9 +994,9 @@ describe("Linked objects — PropertiesNotFound names the target type", () => {
       },
     });
 
-    linkedStore.createObject("Employee", "emp-1", { name: "Carol" });
-    linkedStore.createObject("Department", "dep-1", { title: "Engineering" });
-    linkedLinks.createLink("Employee", "emp-1", "manages", "Department", "dep-1");
+    linkedStore.createObject(ONTOLOGY_RID, "Employee", "emp-1", { name: "Carol" });
+    linkedStore.createObject(ONTOLOGY_RID, "Department", "dep-1", { title: "Engineering" });
+    linkedLinks.createLink(ONTOLOGY_RID, "Employee", "emp-1", "manages", "Department", "dep-1");
 
     const res = await linkedApp.inject({
       method: "GET",

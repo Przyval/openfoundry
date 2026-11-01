@@ -35,26 +35,26 @@ beforeEach(async () => {
     linkStore,
   });
 
-  store.createObject("Employee", "e1", {
+  store.createObject(ONTOLOGY_RID, "Employee", "e1", {
     name: "Ada Lovelace",
     department: "Engineering",
     salary: 120000,
     skills: ["math", "logic"],
   });
-  store.createObject("Employee", "e2", {
+  store.createObject(ONTOLOGY_RID, "Employee", "e2", {
     name: "Grace Hopper",
     department: "Engineering",
     salary: 140000,
     skills: ["compilers"],
   });
-  store.createObject("Employee", "e3", {
+  store.createObject(ONTOLOGY_RID, "Employee", "e3", {
     name: "Katherine Johnson",
     department: "Research",
     salary: 130000,
     skills: [],
   });
-  store.createObject("Department", "Engineering", { name: "Engineering" });
-  linkStore.createLink("Employee", "e1", "worksIn", "Department", "Engineering");
+  store.createObject(ONTOLOGY_RID, "Department", "Engineering", { name: "Engineering" });
+  linkStore.createLink(ONTOLOGY_RID, "Employee", "e1", "worksIn", "Department", "Engineering");
 });
 
 describe("v1 object reads", () => {

@@ -151,9 +151,9 @@ function rowToStoredObject(row: ObjectRow, objectType: string): StoredObject {
  * PostgreSQL-backed object store.
  *
  * Objects in the schema reference `object_type_rid` (the RID of the object
- * type row in `object_types`).  This store accepts the objectType's
- * `apiName` at the API level and resolves the RID internally, matching the
- * interface of the in-memory `ObjectStore`.
+ * type row in `object_types`).  This store accepts the ontology RID and the
+ * objectType's `apiName` at the API level and resolves the RID internally,
+ * matching the interface of the in-memory `ObjectStore`.
  */
 export class PgObjectStore {
   constructor(
@@ -187,21 +187,22 @@ export class PgObjectStore {
   // -----------------------------------------------------------------------
 
   async createObject(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
   ): Promise<StoredObject> {
-    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+    const objectTypeRid = await this.resolveObjectTypeRid(ontologyRid, objectType);
     const rid = generateRid("phonograph2-objects", "object").toString();
-    const orgRid = this.orgRid ?? null;
+    const insert = this.insertColumns([rid, objectTypeRid, primaryKey, JSON.stringify(properties)]);
 
     try {
       return await this.withTenant(async (client) => {
         const { rows } = await client.query<ObjectRow>({
-          text: `INSERT INTO objects (rid, object_type_rid, primary_key, properties, org_rid)
-                 VALUES ($1, $2, $3, $4, $5)
+          text: `INSERT INTO objects (${insert.columns})
+                 VALUES (${insert.placeholders})
                  RETURNING *`,
-          values: [rid, objectTypeRid, primaryKey, JSON.stringify(properties), orgRid],
+          values: insert.values,
         });
         return rowToStoredObject(rows[0], objectType);
       });
@@ -217,29 +218,34 @@ export class PgObjectStore {
   }
 
   async upsertObject(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
   ): Promise<StoredObject> {
-    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+    const objectTypeRid = await this.resolveObjectTypeRid(ontologyRid, objectType);
     const rid = generateRid("phonograph2-objects", "object").toString();
-    const orgRid = this.orgRid ?? null;
+    const insert = this.insertColumns([rid, objectTypeRid, primaryKey, JSON.stringify(properties)]);
 
     return this.withTenant(async (client) => {
       const { rows } = await client.query<ObjectRow>({
-        text: `INSERT INTO objects (rid, object_type_rid, primary_key, properties, org_rid)
-               VALUES ($1, $2, $3, $4, $5)
+        text: `INSERT INTO objects (${insert.columns})
+               VALUES (${insert.placeholders})
                ON CONFLICT (object_type_rid, primary_key)
                DO UPDATE SET properties = $4::jsonb, updated_at = NOW()
                RETURNING *`,
-        values: [rid, objectTypeRid, primaryKey, JSON.stringify(properties), orgRid],
+        values: insert.values,
       });
       return rowToStoredObject(rows[0], objectType);
     });
   }
 
-  async getObject(objectType: string, primaryKey: string): Promise<StoredObject> {
-    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+  async getObject(
+    ontologyRid: string,
+    objectType: string,
+    primaryKey: string,
+  ): Promise<StoredObject> {
+    const objectTypeRid = await this.resolveObjectTypeRid(ontologyRid, objectType);
 
     const { rows } = await this.pool.query<ObjectRow>({
       text: `SELECT * FROM objects
@@ -261,10 +267,11 @@ export class PgObjectStore {
    * entire object type on every page.
    */
   async listObjects(
+    ontologyRid: string,
     objectType: string,
     options: ListOptions = {},
   ): Promise<ListResult> {
-    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+    const objectTypeRid = await this.resolveObjectTypeRid(ontologyRid, objectType);
     const pageSize = options.pageSize ?? 100;
     const offset = options.pageToken
       ? decodePageToken(options.pageToken as PageToken).offset
@@ -305,20 +312,9 @@ export class PgObjectStore {
    * Scoped by ontology because `object_types` is unique on
    * `(ontology_rid, api_name)`: two ontologies may each declare `Employee`
    * with different properties, and an unscoped lookup would answer with
-   * whichever row the database happened to yield first.
-   *
-   * Known divergence: this lookup keys on the requested ontology, but
-   * `resolveObjectTypeRid` - which every data read goes through - still
-   * resolves the object type with no ontology predicate. Where two ontologies
-   * declare a same-named object type, a `select` that one of them legitimately
-   * declares can therefore answer 404 PropertiesNotFound while the rows that
-   * would have been served belong to the other. It is not closed here because
-   * closing it means carrying an ontology through all nine data methods of the
-   * store interface, of this store and of the in-memory `ObjectStore`, across
-   * seventeen call sites - and the in-memory store is ontology-blind by
-   * design, `Map<objectType, Map<primaryKey, StoredObject>>` persisted to disk
-   * in that shape, so it would need re-keying and an on-disk migration. That
-   * is architecture work, filed separately.
+   * whichever row the database happened to yield first. `resolveObjectTypeRid`
+   * is keyed the same way, so the declaration a request is checked against and
+   * the rows it is served always belong to the same ontology.
    */
   async propertyNames(
     ontologyRid: string,
@@ -365,11 +361,12 @@ export class PgObjectStore {
    * the result rather than an error.
    */
   async getObjectsByKeys(
+    ontologyRid: string,
     objectType: string,
     primaryKeys: string[],
   ): Promise<StoredObject[]> {
     if (primaryKeys.length === 0) return [];
-    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+    const objectTypeRid = await this.resolveObjectTypeRid(ontologyRid, objectType);
 
     const { rows } = await this.pool.query<ObjectRow>({
       text: `SELECT * FROM objects
@@ -393,8 +390,8 @@ export class PgObjectStore {
    * tiebreaker, because `created_at` alone collides for rows written in the
    * same instant and would leave paging offsets unstable.
    */
-  async allObjects(objectType: string): Promise<StoredObject[]> {
-    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+  async allObjects(ontologyRid: string, objectType: string): Promise<StoredObject[]> {
+    const objectTypeRid = await this.resolveObjectTypeRid(ontologyRid, objectType);
 
     const { rows } = await this.pool.query<ObjectRow>({
       text: `SELECT * FROM objects
@@ -407,11 +404,12 @@ export class PgObjectStore {
   }
 
   async updateObject(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
   ): Promise<StoredObject> {
-    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+    const objectTypeRid = await this.resolveObjectTypeRid(ontologyRid, objectType);
 
     const { rows } = await this.pool.query<ObjectRow>({
       text: `UPDATE objects
@@ -427,8 +425,12 @@ export class PgObjectStore {
     return rowToStoredObject(rows[0], objectType);
   }
 
-  async deleteObject(objectType: string, primaryKey: string): Promise<void> {
-    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+  async deleteObject(
+    ontologyRid: string,
+    objectType: string,
+    primaryKey: string,
+  ): Promise<void> {
+    const objectTypeRid = await this.resolveObjectTypeRid(ontologyRid, objectType);
 
     const result = await this.pool.query({
       text: `DELETE FROM objects
@@ -442,13 +444,14 @@ export class PgObjectStore {
   }
 
   async queryObjects(
+    ontologyRid: string,
     objectType: string,
     filter: Filter | undefined,
     pageSize = 100,
     offset = 0,
     orderBy?: OrderByClause[],
   ): Promise<{ items: StoredObject[]; total: number }> {
-    const objectTypeRid = await this.resolveObjectTypeRid(objectType);
+    const objectTypeRid = await this.resolveObjectTypeRid(ontologyRid, objectType);
 
     let whereClause = "object_type_rid = $1";
     const values: unknown[] = [objectTypeRid];
@@ -503,12 +506,49 @@ export class PgObjectStore {
   // -----------------------------------------------------------------------
 
   /**
-   * Resolve an object type apiName to its RID in the object_types table.
+   * The columns and values of an `objects` insert.
+   *
+   * `org_rid` is named only when this store was given an organization. With
+   * none, the column is left to its schema default ('org:default' in
+   * `db/migrations`) - an explicit NULL would override that default and fail
+   * its NOT NULL constraint - and a schema without the column
+   * (`scripts/migrate.sql`) accepts the insert as well.
    */
-  private async resolveObjectTypeRid(apiName: string): Promise<string> {
+  private insertColumns(base: [string, string, string, string]): {
+    columns: string;
+    placeholders: string;
+    values: unknown[];
+  } {
+    const columns = ["rid", "object_type_rid", "primary_key", "properties"];
+    const values: unknown[] = [...base];
+    if (this.orgRid) {
+      columns.push("org_rid");
+      values.push(this.orgRid);
+    }
+    return {
+      columns: columns.join(", "),
+      placeholders: values.map((_, i) => `$${i + 1}`).join(", "),
+      values,
+    };
+  }
+
+  /**
+   * Resolve an object type's apiName, within one ontology, to the RID of its
+   * `object_types` row.
+   *
+   * `object_types` is unique on `(ontology_rid, api_name)`, not on `api_name`:
+   * two ontologies may each declare `Employee`, and their objects hang off two
+   * different rows. Matching on the name alone would serve one ontology's
+   * objects through the other's path, while the declaration lookups above,
+   * which are keyed by the ontology, judged the request against the right one.
+   */
+  private async resolveObjectTypeRid(
+    ontologyRid: string,
+    apiName: string,
+  ): Promise<string> {
     const { rows } = await this.pool.query<{ rid: string }>({
-      text: `SELECT rid FROM object_types WHERE api_name = $1 LIMIT 1`,
-      values: [apiName],
+      text: `SELECT rid FROM object_types WHERE ontology_rid = $1 AND api_name = $2`,
+      values: [ontologyRid, apiName],
     });
     if (rows.length === 0) {
       throw notFound("ObjectType", apiName);

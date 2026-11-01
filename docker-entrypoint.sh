@@ -21,6 +21,17 @@ for arg in "$@"; do
   esac
 done
 
+# An object-store.json from before objects were stored per ontology records no
+# ontology, so svc-objects moves it aside at startup and serves none of it.
+# Checked before the services start, since by then the file is gone; such a
+# store is re-seeded rather than left with its ontology but no objects.
+UNSCOPED_OBJECTS=false
+if [ -s /tmp/openfoundry-data/object-store.json ] && ! python3 -c \
+    'import json,sys; sys.exit(json.load(open(sys.argv[1])).get("formatVersion") != 2)' \
+    /tmp/openfoundry-data/object-store.json 2>/dev/null; then
+  UNSCOPED_OBJECTS=true
+fi
+
 # Start backend services using pnpm
 echo ""
 echo "-> Starting backend services..."
@@ -69,8 +80,8 @@ fi
 
 # Seed data
 echo ""
-if [ "$RESEED" = true ]; then
-  echo "-> --reseed flag set, clearing persisted data..."
+if [ "$RESEED" = true ] || [ "$UNSCOPED_OBJECTS" = true ]; then
+  echo "-> Re-seeding (--reseed, or objects stored before per-ontology storage); clearing persisted data..."
   rm -f /tmp/openfoundry-data/ontology-store.json
   rm -f /tmp/openfoundry-data/object-store.json
   rm -f /tmp/openfoundry-data/link-store.json
