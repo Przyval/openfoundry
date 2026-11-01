@@ -530,6 +530,10 @@ Menjalankan `bash scripts/demo/seed-healthcare.sh` di atas data pest control tid
 Urutan itu diverifikasi langsung: setelah ketiga berkas dihapus dan layanan distart ulang, `seed-healthcare.sh` membuat ontologi `healthcare` sendiri alih-alih menumpang yang lama.
 `--industry all` sengaja menyemai keempatnya ke dalam satu ontologi.
 
+Objek dan link disimpan per ontologi, jadi dua ontologi boleh sama-sama punya object type `Employee` tanpa saling melihat datanya.
+`object-store.json` atau `link-store.json` dari versi sebelumnya tidak mencatat ontologi pemiliknya, sehingga svc-objects menyisihkannya utuh menjadi `*.unscoped-<ms>` saat start dan mulai kosong.
+`start.sh` mendeteksi `object-store.json` lama itu sebelum menyalakan layanan dan menyemai ulang dengan sendirinya.
+
 Keempat skrip itu juga **mengabaikan `ORG_RID`**.
 Hanya `scripts/seed-common.sh` yang membacanya, dan tak satu pun dari keempat skrip demo memakai berkas itu.
 Jadi `ORG_RID=<org> bash scripts/demo/seed-healthcare.sh` menyemai persis sama seperti tanpa `ORG_RID`.

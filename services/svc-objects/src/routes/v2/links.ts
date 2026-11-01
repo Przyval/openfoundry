@@ -134,7 +134,7 @@ export async function linkRoutes(
       // property of the linked object is only meaningful over the whole set,
       // and cutting the page first would also under-fill it whenever a link
       // points at an object that has since been deleted.
-      const allLinks = linkStore.getAllLinks(objectType, primaryKey, linkType);
+      const allLinks = linkStore.getAllLinks(ontologyRid, objectType, primaryKey, linkType);
       const snapshotSize = resolveSnapshotSize(
         snapshot,
         cursor.snapshotSize,
@@ -162,9 +162,11 @@ export async function linkRoutes(
 
       const batches = await Promise.all(
         [...keysByType].map(async ([targetObjectType, keys]) => {
-          const resolved = await objectStore.getObjectsByKeys(targetObjectType, [
-            ...keys,
-          ]);
+          const resolved = await objectStore.getObjectsByKeys(
+            ontologyRid,
+            targetObjectType,
+            [...keys],
+          );
           return [targetObjectType, resolved] as const;
         }),
       );
@@ -220,9 +222,10 @@ export async function linkRoutes(
       preHandler: requirePermission("objects:write"),
     },
     async (request, reply) => {
-      const { objectType, primaryKey, linkType } = request.params;
+      const { ontologyRid, objectType, primaryKey, linkType } = request.params;
       const { targetObjectType, targetPrimaryKey } = request.body;
       const link = linkStore.createLink(
+        ontologyRid,
         objectType,
         primaryKey,
         linkType,
@@ -240,8 +243,9 @@ export async function linkRoutes(
       preHandler: requirePermission("objects:delete"),
     },
     async (request, reply) => {
-      const { objectType, primaryKey, linkType, targetPrimaryKey } = request.params;
-      linkStore.deleteLink(objectType, primaryKey, linkType, targetPrimaryKey);
+      const { ontologyRid, objectType, primaryKey, linkType, targetPrimaryKey } =
+        request.params;
+      linkStore.deleteLink(ontologyRid, objectType, primaryKey, linkType, targetPrimaryKey);
       return reply.status(204).send();
     },
   );

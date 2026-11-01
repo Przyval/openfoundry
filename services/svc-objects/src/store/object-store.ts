@@ -7,8 +7,10 @@ import {
   decodePageToken,
   type PageToken,
 } from "@openfoundry/pagination";
-import { writeFileSync, readFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
-import { dirname } from "node:path";
+import {
+  readOntologyScopedFile,
+  writeOntologyScopedFile,
+} from "./ontology-scoped-file.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,46 +64,65 @@ export interface ObjectTypeSchemaSource {
 }
 
 /**
- * The object-store surface the v2 object routes depend on.
+ * The object-store surface the object routes depend on.
  *
  * Both the in-memory `ObjectStore` and the Postgres-backed `PgObjectStore`
  * satisfy it. Every method may answer synchronously or with a promise, so a
  * handler that awaits its result is correct against either backend - which is
  * what keeps a Postgres deployment from silently serving the unresolved
  * promise instead of the object.
+ *
+ * Every data method takes the ontology first. An object type's API name is
+ * unique only within one ontology, so two ontologies may each declare an
+ * `Employee`; their objects are distinct data, and the ontology in the request
+ * path is what says which of them is meant - the same ontology the
+ * declaration lookups (`propertyNames`, `linkTargetObjectType`) are keyed by.
  */
 export interface ObjectReadWriteStore {
-  allObjects(objectType: string): StoredObject[] | Promise<StoredObject[]>;
+  allObjects(
+    ontologyRid: string,
+    objectType: string,
+  ): StoredObject[] | Promise<StoredObject[]>;
   listObjects(
+    ontologyRid: string,
     objectType: string,
     options?: ListOptions,
   ): ListResult | Promise<ListResult>;
   getObjectsByKeys(
+    ontologyRid: string,
     objectType: string,
     primaryKeys: string[],
   ): StoredObject[] | Promise<StoredObject[]>;
   propertyNames?: ObjectTypeSchemaSource["propertyNames"];
   linkTargetObjectType?: ObjectTypeSchemaSource["linkTargetObjectType"];
   getObject(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
   ): StoredObject | Promise<StoredObject>;
   createObject(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
   ): StoredObject | Promise<StoredObject>;
   upsertObject?(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
   ): StoredObject | Promise<StoredObject>;
   updateObject(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
   ): StoredObject | Promise<StoredObject>;
-  deleteObject(objectType: string, primaryKey: string): void | Promise<void>;
+  deleteObject(
+    ontologyRid: string,
+    objectType: string,
+    primaryKey: string,
+  ): void | Promise<void>;
 }
 
 export interface AggregationResult {
@@ -265,12 +286,17 @@ export function evaluateAggregation(
 // ObjectStore
 // ---------------------------------------------------------------------------
 
+/** One ontology's objects: Map<objectType, Map<primaryKey, StoredObject>>. */
+type OntologyObjects = Map<string, Map<string, StoredObject>>;
+
 /**
- * In-memory object store. Objects are organized by objectType, then by primaryKey.
+ * In-memory object store. Objects are organized by ontology, then by object
+ * type, then by primary key, so two ontologies that declare a same-named
+ * object type hold separate objects under it.
  */
 export class ObjectStore {
-  /** Map<objectType, Map<primaryKey, StoredObject>> */
-  private readonly objects = new Map<string, Map<string, StoredObject>>();
+  /** Map<ontologyRid, Map<objectType, Map<primaryKey, StoredObject>>> */
+  private readonly objects = new Map<string, OntologyObjects>();
   private readonly DATA_FILE: string | null;
 
   /**
@@ -290,54 +316,61 @@ export class ObjectStore {
 
   private saveToDisk(): void {
     if (this.DATA_FILE === null) return;
-    try {
-      const dir = dirname(this.DATA_FILE);
-      mkdirSync(dir, { recursive: true });
-
-      const plain: Record<string, Record<string, StoredObject>> = {};
-      for (const [objectType, typeMap] of this.objects) {
-        plain[objectType] = Object.fromEntries(typeMap);
+    const plain: Record<string, Record<string, Record<string, StoredObject>>> = {};
+    for (const [ontologyRid, types] of this.objects) {
+      const byType: Record<string, Record<string, StoredObject>> = {};
+      for (const [objectType, typeMap] of types) {
+        byType[objectType] = Object.fromEntries(typeMap);
       }
-
-      const tmpFile = this.DATA_FILE + ".tmp";
-      writeFileSync(tmpFile, JSON.stringify(plain, null, 2), "utf-8");
-      renameSync(tmpFile, this.DATA_FILE);
-    } catch {
-      // Best-effort persistence — don't crash the service
+      plain[ontologyRid] = byType;
     }
+    writeOntologyScopedFile(this.DATA_FILE, plain);
   }
 
   private loadFromDisk(): void {
     if (this.DATA_FILE === null) return;
-    try {
-      if (!existsSync(this.DATA_FILE)) return;
-
-      const raw = readFileSync(this.DATA_FILE, "utf-8");
-      const plain = JSON.parse(raw) as Record<string, Record<string, StoredObject>>;
-
-      for (const [objectType, entries] of Object.entries(plain)) {
-        this.objects.set(objectType, new Map(Object.entries(entries)));
+    const plain = readOntologyScopedFile<Record<string, Record<string, StoredObject>>>(
+      this.DATA_FILE,
+      "object-store",
+    );
+    for (const [ontologyRid, byType] of Object.entries(plain)) {
+      const types: OntologyObjects = new Map();
+      for (const [objectType, entries] of Object.entries(byType)) {
+        types.set(objectType, new Map(Object.entries(entries)));
       }
-    } catch {
-      // If file is missing or corrupt, start with empty store
+      this.objects.set(ontologyRid, types);
     }
   }
 
-  private getTypeMap(objectType: string): Map<string, StoredObject> {
-    let map = this.objects.get(objectType);
+  /** The objects of one type in one ontology, if any were ever stored. */
+  private findTypeMap(
+    ontologyRid: string,
+    objectType: string,
+  ): Map<string, StoredObject> | undefined {
+    return this.objects.get(ontologyRid)?.get(objectType);
+  }
+
+  private getTypeMap(ontologyRid: string, objectType: string): Map<string, StoredObject> {
+    let types = this.objects.get(ontologyRid);
+    if (!types) {
+      types = new Map();
+      this.objects.set(ontologyRid, types);
+    }
+    let map = types.get(objectType);
     if (!map) {
       map = new Map();
-      this.objects.set(objectType, map);
+      types.set(objectType, map);
     }
     return map;
   }
 
   createObject(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
   ): StoredObject {
-    const typeMap = this.getTypeMap(objectType);
+    const typeMap = this.getTypeMap(ontologyRid, objectType);
     if (typeMap.has(primaryKey)) {
       throw conflict(
         `${objectType}:${primaryKey}`,
@@ -361,24 +394,23 @@ export class ObjectStore {
   }
 
   upsertObject(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
   ): StoredObject {
-    const typeMap = this.getTypeMap(objectType);
-    const existing = typeMap.get(primaryKey);
+    const existing = this.findTypeMap(ontologyRid, objectType)?.get(primaryKey);
     if (existing) {
       existing.properties = { ...existing.properties, ...properties };
       existing.updatedAt = new Date().toISOString();
       this.saveToDisk();
       return existing;
     }
-    return this.createObject(objectType, primaryKey, properties);
+    return this.createObject(ontologyRid, objectType, primaryKey, properties);
   }
 
-  getObject(objectType: string, primaryKey: string): StoredObject {
-    const typeMap = this.objects.get(objectType);
-    const obj = typeMap?.get(primaryKey);
+  getObject(ontologyRid: string, objectType: string, primaryKey: string): StoredObject {
+    const obj = this.findTypeMap(ontologyRid, objectType)?.get(primaryKey);
     if (!obj) {
       throw notFound("Object", `${objectType}:${primaryKey}`);
     }
@@ -386,23 +418,24 @@ export class ObjectStore {
   }
 
   updateObject(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
   ): StoredObject {
-    const obj = this.getObject(objectType, primaryKey);
+    const obj = this.getObject(ontologyRid, objectType, primaryKey);
     const updated: StoredObject = {
       ...obj,
       properties: { ...obj.properties, ...properties },
       updatedAt: new Date().toISOString(),
     };
-    this.getTypeMap(objectType).set(primaryKey, updated);
+    this.getTypeMap(ontologyRid, objectType).set(primaryKey, updated);
     this.saveToDisk();
     return updated;
   }
 
-  deleteObject(objectType: string, primaryKey: string): void {
-    const typeMap = this.objects.get(objectType);
+  deleteObject(ontologyRid: string, objectType: string, primaryKey: string): void {
+    const typeMap = this.findTypeMap(ontologyRid, objectType);
     if (!typeMap?.has(primaryKey)) {
       throw notFound("Object", `${objectType}:${primaryKey}`);
     }
@@ -410,9 +443,12 @@ export class ObjectStore {
     this.saveToDisk();
   }
 
-  listObjects(objectType: string, options: ListOptions = {}): ListResult {
-    const typeMap = this.objects.get(objectType);
-    const allObjects = typeMap ? Array.from(typeMap.values()) : [];
+  listObjects(
+    ontologyRid: string,
+    objectType: string,
+    options: ListOptions = {},
+  ): ListResult {
+    const allObjects = this.allObjects(ontologyRid, objectType);
     const totalCount = allObjects.length;
     const pageSize = options.pageSize ?? 100;
 
@@ -437,11 +473,8 @@ export class ObjectStore {
   /**
    * Returns all objects of a given type that match the filter.
    */
-  queryObjects(objectType: string, filter?: Filter): StoredObject[] {
-    const typeMap = this.objects.get(objectType);
-    if (!typeMap) return [];
-
-    const all = Array.from(typeMap.values());
+  queryObjects(ontologyRid: string, objectType: string, filter?: Filter): StoredObject[] {
+    const all = this.allObjects(ontologyRid, objectType);
     if (!filter) return all;
     return all.filter((obj) => evaluateFilter(obj, filter));
   }
@@ -449,16 +482,20 @@ export class ObjectStore {
   /**
    * Returns all objects of a given type (for use in ObjectSet resolution).
    */
-  allObjects(objectType: string): StoredObject[] {
-    const typeMap = this.objects.get(objectType);
+  allObjects(ontologyRid: string, objectType: string): StoredObject[] {
+    const typeMap = this.findTypeMap(ontologyRid, objectType);
     return typeMap ? Array.from(typeMap.values()) : [];
   }
 
   /**
    * Gets objects by explicit primary keys.
    */
-  getObjectsByKeys(objectType: string, primaryKeys: string[]): StoredObject[] {
-    const typeMap = this.objects.get(objectType);
+  getObjectsByKeys(
+    ontologyRid: string,
+    objectType: string,
+    primaryKeys: string[],
+  ): StoredObject[] {
+    const typeMap = this.findTypeMap(ontologyRid, objectType);
     if (!typeMap) return [];
     return primaryKeys
       .map((pk) => typeMap.get(pk))

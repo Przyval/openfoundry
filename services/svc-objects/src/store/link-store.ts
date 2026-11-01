@@ -1,6 +1,8 @@
 import { notFound } from "@openfoundry/errors";
-import { writeFileSync, readFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
-import { dirname } from "node:path";
+import {
+  readOntologyScopedFile,
+  writeOntologyScopedFile,
+} from "./ontology-scoped-file.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,11 +23,16 @@ export interface StoredLink {
 
 /**
  * In-memory link storage.
- * Links are stored by a composite key: sourceObjectType:sourcePrimaryKey:linkType.
+ *
+ * Links are kept per ontology, then by a composite key
+ * `sourceObjectType:sourcePrimaryKey:linkType`. The ontology is part of the
+ * address for the same reason it is for objects: two ontologies may each
+ * declare an object type of the same name, and a link between one ontology's
+ * objects says nothing about the other's.
  */
 export class LinkStore {
-  /** Map<compositeKey, StoredLink[]> */
-  private readonly links = new Map<string, StoredLink[]>();
+  /** Map<ontologyRid, Map<compositeKey, StoredLink[]>> */
+  private readonly links = new Map<string, Map<string, StoredLink[]>>();
   private readonly DATA_FILE: string | null;
 
   /**
@@ -45,33 +52,21 @@ export class LinkStore {
 
   private saveToDisk(): void {
     if (this.DATA_FILE === null) return;
-    try {
-      const dir = dirname(this.DATA_FILE);
-      mkdirSync(dir, { recursive: true });
-
-      const plain: Record<string, StoredLink[]> = Object.fromEntries(this.links);
-
-      const tmpFile = this.DATA_FILE + ".tmp";
-      writeFileSync(tmpFile, JSON.stringify(plain, null, 2), "utf-8");
-      renameSync(tmpFile, this.DATA_FILE);
-    } catch {
-      // Best-effort persistence — don't crash the service
+    const plain: Record<string, Record<string, StoredLink[]>> = {};
+    for (const [ontologyRid, byKey] of this.links) {
+      plain[ontologyRid] = Object.fromEntries(byKey);
     }
+    writeOntologyScopedFile(this.DATA_FILE, plain);
   }
 
   private loadFromDisk(): void {
     if (this.DATA_FILE === null) return;
-    try {
-      if (!existsSync(this.DATA_FILE)) return;
-
-      const raw = readFileSync(this.DATA_FILE, "utf-8");
-      const plain = JSON.parse(raw) as Record<string, StoredLink[]>;
-
-      for (const [key, links] of Object.entries(plain)) {
-        this.links.set(key, links);
-      }
-    } catch {
-      // If file is missing or corrupt, start with empty store
+    const plain = readOntologyScopedFile<Record<string, StoredLink[]>>(
+      this.DATA_FILE,
+      "link-store",
+    );
+    for (const [ontologyRid, byKey] of Object.entries(plain)) {
+      this.links.set(ontologyRid, new Map(Object.entries(byKey)));
     }
   }
 
@@ -79,15 +74,31 @@ export class LinkStore {
     return `${objectType}:${primaryKey}:${linkType}`;
   }
 
+  /** The links of one source object and link type in one ontology. */
+  private find(
+    ontologyRid: string,
+    objectType: string,
+    primaryKey: string,
+    linkType: string,
+  ): StoredLink[] | undefined {
+    return this.links.get(ontologyRid)?.get(this.key(objectType, primaryKey, linkType));
+  }
+
   createLink(
+    ontologyRid: string,
     sourceObjectType: string,
     sourcePrimaryKey: string,
     linkType: string,
     targetObjectType: string,
     targetPrimaryKey: string,
   ): StoredLink {
+    let byKey = this.links.get(ontologyRid);
+    if (!byKey) {
+      byKey = new Map();
+      this.links.set(ontologyRid, byKey);
+    }
     const k = this.key(sourceObjectType, sourcePrimaryKey, linkType);
-    const existing = this.links.get(k) ?? [];
+    const existing = byKey.get(k) ?? [];
 
     // Check for duplicate
     const duplicate = existing.find(
@@ -109,20 +120,20 @@ export class LinkStore {
     };
 
     existing.push(link);
-    this.links.set(k, existing);
+    byKey.set(k, existing);
     this.saveToDisk();
     return link;
   }
 
   getLinks(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     linkType: string,
     pageSize = 100,
     pageToken?: string,
   ): { data: StoredLink[]; nextPageToken?: string; totalCount: number } {
-    const k = this.key(objectType, primaryKey, linkType);
-    const all = this.links.get(k) ?? [];
+    const all = this.find(ontologyRid, objectType, primaryKey, linkType) ?? [];
     const totalCount = all.length;
 
     let offset = 0;
@@ -150,22 +161,25 @@ export class LinkStore {
    * than {@link getLinks}' pre-paginated slice.
    */
   getAllLinks(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     linkType: string,
   ): StoredLink[] {
-    return this.links.get(this.key(objectType, primaryKey, linkType)) ?? [];
+    return this.find(ontologyRid, objectType, primaryKey, linkType) ?? [];
   }
 
   deleteLink(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     linkType: string,
     targetPrimaryKey: string,
   ): void {
+    const byKey = this.links.get(ontologyRid);
     const k = this.key(objectType, primaryKey, linkType);
-    const existing = this.links.get(k);
-    if (!existing) {
+    const existing = byKey?.get(k);
+    if (!byKey || !existing) {
       throw notFound("Link", `${objectType}:${primaryKey}:${linkType}:${targetPrimaryKey}`);
     }
 
@@ -176,7 +190,7 @@ export class LinkStore {
 
     existing.splice(idx, 1);
     if (existing.length === 0) {
-      this.links.delete(k);
+      byKey.delete(k);
     }
     this.saveToDisk();
   }
@@ -186,12 +200,12 @@ export class LinkStore {
    * Useful for SEARCH_AROUND ObjectSet resolution.
    */
   getLinkedObjects(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     linkType: string,
   ): Array<{ targetObjectType: string; targetPrimaryKey: string }> {
-    const k = this.key(objectType, primaryKey, linkType);
-    const all = this.links.get(k) ?? [];
+    const all = this.find(ontologyRid, objectType, primaryKey, linkType) ?? [];
     return all.map((l) => ({
       targetObjectType: l.targetObjectType,
       targetPrimaryKey: l.targetPrimaryKey,

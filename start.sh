@@ -100,6 +100,17 @@ for port in 8080 8081 8082 8083 8084 8085 8087 8088 8092 3000; do
 done
 sleep 1
 
+# An object-store.json from before objects were stored per ontology records no
+# ontology, so svc-objects moves it aside at startup and serves none of it.
+# Checked before the services start, since by then the file is gone; such a
+# store is re-seeded rather than left with its ontology but no objects.
+UNSCOPED_OBJECTS=false
+if [ -s /tmp/openfoundry-data/object-store.json ] && ! python3 -c \
+    'import json,sys; sys.exit(json.load(open(sys.argv[1])).get("formatVersion") != 2)' \
+    /tmp/openfoundry-data/object-store.json 2>/dev/null; then
+  UNSCOPED_OBJECTS=true
+fi
+
 # Start backend services using pnpm (resolves workspace deps correctly)
 echo "→ Starting backend services..."
 SERVICES=(svc-ontology svc-objects svc-multipass svc-admin svc-actions svc-datasets svc-functions svc-aip svc-sentinel svc-gateway)
@@ -168,7 +179,10 @@ seed_industry() {
 
 # --- Seed data ---
 echo ""
-if [ "$RESEED" = true ] || [ "$INDUSTRY_CHANGED" = true ]; then
+if [ "$RESEED" = true ] || [ "$INDUSTRY_CHANGED" = true ] || [ "$UNSCOPED_OBJECTS" = true ]; then
+  if [ "$UNSCOPED_OBJECTS" = true ]; then
+    echo "→ Objects were stored before per-ontology storage, re-seeding..."
+  fi
   echo "→ Clearing persisted data..."
   rm -f /tmp/openfoundry-data/ontology-store.json
   rm -f /tmp/openfoundry-data/object-store.json
