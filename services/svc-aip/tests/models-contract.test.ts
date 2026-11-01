@@ -951,16 +951,19 @@ for (const source of SCHEMA_SOURCES) {
       expect(promote.statusCode).toBe(404);
       expect(promote.json().errorName).toBe("ModelVersionNotFound");
 
+      // Sorted on this side, not with ORDER BY: Postgres orders text by the
+      // database collation, which differs from JS string order on glibc.
+      const byRid = (x: { rid: string }, y: { rid: string }) => (x.rid < y.rid ? -1 : 1);
       const { rows } = await admin.query(
-        "SELECT rid, org_rid FROM ml_resources UNION ALL SELECT rid, org_rid FROM ml_model_versions ORDER BY rid",
+        "SELECT rid, org_rid FROM ml_resources UNION ALL SELECT rid, org_rid FROM ml_model_versions",
       );
-      expect(rows).toEqual(
+      expect(rows.sort(byRid)).toEqual(
         [
           { rid: model.rid, org_rid: "org:a" },
           { rid: version.rid, org_rid: "org:a" },
           { rid: studio.rid, org_rid: "org:a" },
           { rid: own.rid, org_rid: "org:b" },
-        ].sort((x, y) => (x.rid < y.rid ? -1 : 1)),
+        ].sort(byRid),
       );
     });
 
