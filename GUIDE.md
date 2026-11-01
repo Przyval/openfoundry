@@ -816,7 +816,7 @@ Semuanya nyata pada `master` saat panduan ini ditulis.
 
 13. Keempat skrip di `scripts/demo/` memakai ulang ontologi pertama yang ada dan mengabaikan `ORG_RID`. Gunakan `start.sh --industry` untuk berganti industri.
 14. `docker-compose.yml` memakai kata sandi Postgres yang berbeda antara service basis data dan `DATABASE_URL` aplikasinya.
-15. `scripts/migrate.sql` (dimuat Compose saat init) dan `db/migrations/*.sql` (diterapkan `pnpm db:migrate`) sudah berbeda: hanya yang kedua menambahkan `org_rid` dan RLS.
+15. `scripts/migrate.sql` (dimuat Compose saat init) dan `db/migrations/*.sql` (diterapkan `pnpm db:migrate`) sudah berbeda: hanya yang kedua menambahkan `org_rid` dan RLS, kecuali pada tabel model (`ml_resources`, `ml_model_versions`) yang identik di keduanya.
 16. Isolasi RLS belum terbukti ujung ke ujung. Kebijakan di `db/migrations/009_multi_tenancy.sql` membaca setelan sesi `app.org_rid`, sedangkan `services/svc-objects/src/store/pg-object-store.ts` menyetel `app.current_org_rid`.
 17. `.env.example` dan `deploy/docker/Dockerfile.console` menyetel `VITE_API_BASE_URL`, sementara konsol membaca `VITE_API_URL`.
 18. `pnpm db:seed` menunjuk ke `scripts/seed.js`, yang tidak ada di repositori.
