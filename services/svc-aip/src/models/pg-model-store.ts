@@ -14,11 +14,14 @@ import type {
  * The Postgres model store, over the tables in `db/migrations/012_models.sql`
  * (mirrored in `scripts/migrate.sql`).
  *
- * The column lists are exported so `tests/models-pg-schema.test.ts` can assert
- * both schema sources declare every column named here - a store naming a
- * column no schema has fails only at runtime, with `42703`.
+ * Both tables are tenant-scoped by row-level security. A store built with an
+ * `orgRid` runs every statement in a transaction that sets `app.org_rid`, so
+ * it reads and writes only that organization's rows; the column itself is
+ * filled from the same setting by the schema. Without one, statements run
+ * with no tenant context, which only a role that bypasses row-level security
+ * can use.
  */
-export const RESOURCE_COLUMNS = [
+const RESOURCE_COLUMNS = [
   "rid",
   "resource_type",
   "display_name",
@@ -26,7 +29,7 @@ export const RESOURCE_COLUMNS = [
   "created_time",
 ] as const;
 
-export const VERSION_COLUMNS = [
+const VERSION_COLUMNS = [
   "rid",
   "model_rid",
   "branch",
@@ -39,7 +42,7 @@ export const VERSION_COLUMNS = [
 ] as const;
 
 /** The unique constraint that makes a display name single-use per folder. */
-export const RESOURCE_NAME_CONSTRAINT = "ml_resources_folder_name_key";
+const RESOURCE_NAME_CONSTRAINT = "ml_resources_folder_name_key";
 
 interface ResourceRow {
   rid: string;
@@ -61,18 +64,38 @@ interface VersionRow {
   created_time: Date;
 }
 
-/** The subset of `pg.Pool` this store calls, so a test can record its SQL. */
-export type Queryable = Pick<pg.Pool, "query">;
-
 const RESOURCE_SELECT = `SELECT ${RESOURCE_COLUMNS.join(", ")} FROM ml_resources`;
 const VERSION_SELECT = `SELECT ${VERSION_COLUMNS.join(", ")} FROM ml_model_versions`;
 
 export class PgModelStore implements ModelStore {
-  constructor(private readonly pool: Queryable) {}
+  constructor(
+    private readonly pool: pg.Pool,
+    private readonly orgRid?: string,
+  ) {}
+
+  private async query<R extends pg.QueryResultRow>(
+    config: pg.QueryConfig,
+  ): Promise<pg.QueryResult<R>> {
+    if (!this.orgRid) return this.pool.query<R>(config);
+
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('app.org_rid', $1, true)", [this.orgRid]);
+      const result = await client.query<R>(config);
+      await client.query("COMMIT");
+      return result;
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
 
   async createResource(record: ModelResourceRecord): Promise<ModelResourceRecord> {
     try {
-      const { rows } = await this.pool.query<ResourceRow>({
+      const { rows } = await this.query<ResourceRow>({
         text: `INSERT INTO ml_resources (${RESOURCE_COLUMNS.join(", ")})
                VALUES ($1, $2, $3, $4, $5)
                RETURNING ${RESOURCE_COLUMNS.join(", ")}`,
@@ -98,7 +121,7 @@ export class PgModelStore implements ModelStore {
     rid: string,
     resourceType: ModelResourceType,
   ): Promise<ModelResourceRecord | undefined> {
-    const { rows } = await this.pool.query<ResourceRow>({
+    const { rows } = await this.query<ResourceRow>({
       text: `${RESOURCE_SELECT} WHERE rid = $1 AND resource_type = $2`,
       values: [rid, resourceType],
     });
@@ -106,7 +129,7 @@ export class PgModelStore implements ModelStore {
   }
 
   async createVersion(record: ModelVersionRecord): Promise<ModelVersionRecord> {
-    const { rows } = await this.pool.query<VersionRow>({
+    const { rows } = await this.query<VersionRow>({
       text: `INSERT INTO ml_model_versions (${VERSION_COLUMNS.join(", ")})
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              RETURNING ${VERSION_COLUMNS.join(", ")}`,
@@ -126,7 +149,7 @@ export class PgModelStore implements ModelStore {
   }
 
   async getVersion(versionRid: string): Promise<ModelVersionRecord | undefined> {
-    const { rows } = await this.pool.query<VersionRow>({
+    const { rows } = await this.query<VersionRow>({
       text: `${VERSION_SELECT} WHERE rid = $1`,
       values: [versionRid],
     });
@@ -139,7 +162,7 @@ export class PgModelStore implements ModelStore {
     offset: number,
     limit: number,
   ): Promise<ModelVersionRecord[]> {
-    const { rows } = await this.pool.query<VersionRow>({
+    const { rows } = await this.query<VersionRow>({
       text: `${VERSION_SELECT}
              WHERE model_rid = $1 AND branch = $2
              ORDER BY seq

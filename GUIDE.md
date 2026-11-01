@@ -680,6 +680,8 @@ Versi baru selalu masuk ke branch `master`; `promoteVersion` bisa menaruh salina
 Nama tampilan hanya boleh dipakai sekali per folder, lintas model dan Model Studio, dan bentrokan dijawab 409 `ResourceNameAlreadyExists`.
 `parentFolderRid` harus berupa RID folder (`ri.compass.<instance>.folder.<id>`), tetapi keberadaan foldernya belum diperiksa.
 `condaRequirements` disimpan dan dikembalikan apa adanya, tidak pernah di-solve.
+Di Postgres kedua tabel itu membawa `org_rid` dengan row-level security, seperti tabel tenant lain, dan nama tampilan hanya unik di dalam satu organisasi.
+svc-aip belum menerima konteks organisasi dari gateway, jadi semua model saat ini masuk ke `org:default`.
 
 **24 dari 32 operasi bagian ini sengaja tidak disajikan** dan menjawab 404, karena masing-masing butuh subsistem yang tidak ada:
 

@@ -9,8 +9,12 @@
  *     MODELS_TEST_DATABASE_URL=postgres://openfoundry@localhost:5432/openfoundry \
  *       pnpm --filter @openfoundry/svc-aip test
  *
- * The Postgres run creates the tables from `db/migrations/012_models.sql` and
- * truncates them between cases, so point it at a scratch database.
+ * The Postgres run executes once per schema source - `scripts/migrate.sql`,
+ * which Docker Compose loads, and `db/migrations/`, which `pnpm db:migrate`
+ * applies - each built from scratch in its own Postgres schema, so a column or
+ * constraint the store needs that either source lacks fails here rather than
+ * in production. It drops and recreates those schemas and a test role, so
+ * point it at a scratch database.
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
@@ -60,24 +64,73 @@ const memoryBackend: BackendUnderTest = {
   async teardown() {},
 };
 
-let pool: pg.Pool | undefined;
+/** A role that, unlike the suite's own login, is subject to row-level security. */
+const TENANT_ROLE = "ml_models_tenant_test";
 
-const postgresBackend: BackendUnderTest = {
-  name: "postgres",
-  enabled: PG_URL !== "",
-  async setup() {
-    pool = new pg.Pool({ connectionString: PG_URL });
-    await pool.query(readFileSync(path.join(REPO_ROOT, "db/migrations/012_models.sql"), "utf8"));
+interface SchemaSource {
+  name: string;
+  schema: string;
+  files: string[];
+}
+
+const SCHEMA_SOURCES: SchemaSource[] = [
+  { name: "scripts/migrate.sql", schema: "ml_test_compose", files: ["scripts/migrate.sql"] },
+  {
+    name: "db/migrations",
+    schema: "ml_test_migrations",
+    files: ["db/migrations/001_initial.sql", "db/migrations/012_models.sql"],
   },
-  async fresh() {
-    await pool?.query("TRUNCATE ml_model_versions, ml_resources");
-    return new PgModelStore(pool as pg.Pool);
-  },
-  async teardown() {
-    await pool?.end();
-    pool = undefined;
-  },
-};
+];
+
+/** Builds `source` from nothing in its own schema and opens a pool onto it. */
+async function buildSchema(source: SchemaSource): Promise<pg.Pool> {
+  const admin = new pg.Client({ connectionString: PG_URL });
+  await admin.connect();
+  try {
+    await admin.query(`CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS citext`);
+    await admin.query(`DROP SCHEMA IF EXISTS ${source.schema} CASCADE; CREATE SCHEMA ${source.schema}`);
+    await admin.query(`SET search_path TO ${source.schema}, public`);
+    for (const file of source.files) {
+      await admin.query(readFileSync(path.join(REPO_ROOT, file), "utf8"));
+    }
+  } finally {
+    await admin.end();
+  }
+  return new pg.Pool({
+    connectionString: PG_URL,
+    options: `-c search_path=${source.schema},public`,
+  });
+}
+
+async function dropSchema(source: SchemaSource): Promise<void> {
+  const admin = new pg.Client({ connectionString: PG_URL });
+  await admin.connect();
+  try {
+    await admin.query(`DROP SCHEMA IF EXISTS ${source.schema} CASCADE`);
+  } finally {
+    await admin.end();
+  }
+}
+
+function postgresBackend(source: SchemaSource): BackendUnderTest {
+  let pool: pg.Pool | undefined;
+  return {
+    name: `postgres, ${source.name}`,
+    enabled: PG_URL !== "",
+    async setup() {
+      pool = await buildSchema(source);
+    },
+    async fresh() {
+      await pool?.query("TRUNCATE ml_model_versions, ml_resources");
+      return new PgModelStore(pool as pg.Pool);
+    },
+    async teardown() {
+      await pool?.end();
+      pool = undefined;
+      await dropSchema(source);
+    },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -163,7 +216,7 @@ const UNSERVED: [method: "GET" | "POST" | "PUT", path: string][] = [
 // The contract
 // ---------------------------------------------------------------------------
 
-for (const backend of [memoryBackend, postgresBackend]) {
+for (const backend of [memoryBackend, ...SCHEMA_SOURCES.map(postgresBackend)]) {
   describe.skipIf(!backend.enabled)(`models v2 (${backend.name})`, () => {
     let app: FastifyInstance;
 
@@ -703,6 +756,8 @@ for (const backend of [memoryBackend, postgresBackend]) {
           errorName: "ModelVersionNotFound",
           parameters: { modelVersionRid: "ri.models.main.model-version.missing" },
         });
+        // The source version is looked up by RID alone, never on this model.
+        expect(noVersion.json().parameters).not.toHaveProperty("modelRid");
 
         for (const body of [{}, { sourceModelVersionRid: 3 }, { sourceModelVersionRid: version.rid, branch: "" }]) {
           const res = await call("POST", `/api/v2/models/${modelRid}/promoteVersion`, body);
@@ -805,6 +860,137 @@ for (const backend of [memoryBackend, postgresBackend]) {
         const res = await call(method, url, method === "GET" ? undefined : {});
         expect(res.statusCode, `${method} ${url}`).toBe(404);
       }
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Tenant isolation (Postgres only: the in-memory store serves one tenant)
+// ---------------------------------------------------------------------------
+
+for (const source of SCHEMA_SOURCES) {
+  describe.skipIf(PG_URL === "")(`models v2 tenant isolation (postgres, ${source.name})`, () => {
+    let admin: pg.Pool;
+    let tenantPool: pg.Pool;
+    const apps: FastifyInstance[] = [];
+
+    beforeAll(async () => {
+      admin = await buildSchema(source);
+      await admin.query(`
+        DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${TENANT_ROLE}') THEN
+            CREATE ROLE ${TENANT_ROLE} NOLOGIN;
+          END IF;
+        END $$;
+        GRANT ${TENANT_ROLE} TO CURRENT_USER;
+        GRANT USAGE ON SCHEMA ${source.schema} TO ${TENANT_ROLE};
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ${source.schema} TO ${TENANT_ROLE};
+        GRANT USAGE ON ALL SEQUENCES IN SCHEMA ${source.schema} TO ${TENANT_ROLE};
+        INSERT INTO organizations (rid, display_name) VALUES ('org:a', 'A'), ('org:b', 'B')
+          ON CONFLICT (rid) DO NOTHING;
+      `);
+      tenantPool = new pg.Pool({
+        connectionString: PG_URL,
+        options: `-c search_path=${source.schema},public -c role=${TENANT_ROLE}`,
+      });
+    });
+
+    afterAll(async () => {
+      await Promise.all(apps.map((app) => app.close()));
+      await tenantPool?.end();
+      await admin?.end();
+      await dropSchema(source);
+      const client = new pg.Client({ connectionString: PG_URL });
+      await client.connect();
+      await client.query(`DROP ROLE IF EXISTS ${TENANT_ROLE}`).finally(() => client.end());
+    });
+
+    beforeEach(async () => {
+      await admin.query("TRUNCATE ml_model_versions, ml_resources");
+    });
+
+    async function appFor(orgRid?: string): Promise<FastifyInstance> {
+      const app = await createServer({
+        config: TEST_CONFIG,
+        llmClient: new MockLlmClient(),
+        conversationStore: new ConversationStore(),
+        embeddingStore: new EmbeddingStore(),
+        modelStore: new PgModelStore(tenantPool, orgRid),
+      });
+      apps.push(app);
+      return app;
+    }
+
+    function call(app: FastifyInstance, method: "GET" | "POST", url: string, payload?: object) {
+      return app.inject({
+        method,
+        url: `${url}${url.includes("?") ? "&" : "?"}preview=true`,
+        ...(payload === undefined ? {} : { payload }),
+      });
+    }
+
+    it("serves each organization only its own models, versions and studios", async () => {
+      const a = await appFor("org:a");
+      const b = await appFor("org:b");
+
+      const model = (await call(a, "POST", "/api/v2/models", { name: "churn", parentFolderRid: FOLDER })).json();
+      const version = (await call(a, "POST", `/api/v2/models/${model.rid}/versions`, versionBody())).json();
+      const studio = (
+        await call(a, "POST", "/api/v2/models/modelStudios", { name: "s", parentFolderRid: FOLDER })
+      ).json();
+
+      expect((await call(a, "GET", `/api/v2/models/${model.rid}`)).statusCode).toBe(200);
+      expect((await call(b, "GET", `/api/v2/models/${model.rid}`)).statusCode).toBe(404);
+      expect((await call(b, "GET", `/api/v2/models/${model.rid}/versions`)).statusCode).toBe(404);
+      expect((await call(b, "GET", `/api/v2/models/modelStudios/${studio.rid}`)).statusCode).toBe(404);
+
+      const own = (await call(b, "POST", "/api/v2/models", { name: "mine", parentFolderRid: FOLDER })).json();
+      const promote = await call(b, "POST", `/api/v2/models/${own.rid}/promoteVersion`, {
+        sourceModelVersionRid: version.rid,
+      });
+      expect(promote.statusCode).toBe(404);
+      expect(promote.json().errorName).toBe("ModelVersionNotFound");
+
+      const { rows } = await admin.query(
+        "SELECT rid, org_rid FROM ml_resources UNION ALL SELECT rid, org_rid FROM ml_model_versions ORDER BY rid",
+      );
+      expect(rows).toEqual(
+        [
+          { rid: model.rid, org_rid: "org:a" },
+          { rid: version.rid, org_rid: "org:a" },
+          { rid: studio.rid, org_rid: "org:a" },
+          { rid: own.rid, org_rid: "org:b" },
+        ].sort((x, y) => (x.rid < y.rid ? -1 : 1)),
+      );
+    });
+
+    it("makes a display name single-use per folder within an organization, not across them", async () => {
+      const a = await appFor("org:a");
+      const b = await appFor("org:b");
+      const body = { name: "churn", parentFolderRid: FOLDER };
+
+      expect((await call(a, "POST", "/api/v2/models", body)).statusCode).toBe(200);
+      expect((await call(b, "POST", "/api/v2/models", body)).statusCode).toBe(200);
+      const clash = await call(a, "POST", "/api/v2/models/modelStudios", body);
+      expect(clash.statusCode).toBe(409);
+      expect(clash.json().errorName).toBe("ResourceNameAlreadyExists");
+    });
+
+    it("gives a store with no organization nothing to read and nowhere to write", async () => {
+      const a = await appFor("org:a");
+      const model = (await call(a, "POST", "/api/v2/models", { name: "churn", parentFolderRid: FOLDER })).json();
+
+      const unscoped = new PgModelStore(tenantPool);
+      expect(await unscoped.getResource(model.rid, "MODEL")).toBeUndefined();
+      await expect(
+        unscoped.createResource({
+          rid: "ri.models.main.model.unscoped",
+          resourceType: "MODEL",
+          displayName: "x",
+          parentFolderRid: FOLDER,
+          createdTime: new Date().toISOString(),
+        }),
+      ).rejects.toMatchObject({ code: "42501" });
     });
   });
 }

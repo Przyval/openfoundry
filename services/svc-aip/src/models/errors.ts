@@ -32,14 +32,16 @@ export function modelNotFound(modelRid: string): OpenFoundryApiError {
 }
 
 export function modelVersionNotFound(
-  modelRid: string,
   modelVersionRid: string,
+  modelRid?: string,
 ): OpenFoundryApiError {
   return foundryError(
     ErrorCode.NOT_FOUND,
     "ModelVersionNotFound",
-    `Model version ${modelVersionRid} not found on model ${modelRid}`,
-    { modelRid, modelVersionRid },
+    modelRid === undefined
+      ? `Model version not found: ${modelVersionRid}`
+      : `Model version ${modelVersionRid} not found on model ${modelRid}`,
+    modelRid === undefined ? { modelVersionRid } : { modelRid, modelVersionRid },
   );
 }
 

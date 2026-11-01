@@ -157,7 +157,7 @@ Tenant isolation is a separate, *mandatory* layer in Foundry (Organizations) and
 
 ## Front-end to service sharp edges
 
-The console must not send `Content-Type: application/json` on a request with no body: Fastify rejects it with `FST_ERR_CTP_EMPTY_JSON_BODY`, which the gateway reports as a 500.
+The console must not send `Content-Type: application/json` on a request with no body: Fastify rejects it with `FST_ERR_CTP_EMPTY_JSON_BODY`, which the gateway reports as a 400 `InvalidRequest` (it passes through any 4xx Fastify request error - malformed JSON, 413, 415 - rather than masking it as a 500).
 Several pages still pair a bodyless `fetch` with that header.
 
 Services serialize identifiers as `rid` while the console reads Foundry's `id`.

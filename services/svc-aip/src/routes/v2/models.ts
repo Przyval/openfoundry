@@ -122,7 +122,7 @@ export async function modelRoutes(
     const sourceRid = requireString(body.sourceModelVersionRid, "sourceModelVersionRid");
     const branch = optionalBranch(body.branch, "branch");
     const source = await store.getVersion(sourceRid);
-    if (!source) throw modelVersionNotFound(modelRid, sourceRid);
+    if (!source) throw modelVersionNotFound(sourceRid);
 
     const promoted = await store.createVersion({
       rid: generateRid("models", "model-version").toString(),
@@ -179,7 +179,7 @@ export async function modelRoutes(
     const { modelRid, modelVersionRid } = request.params;
     const version = await store.getVersion(modelVersionRid);
     if (!version || version.modelRid !== modelRid) {
-      throw modelVersionNotFound(modelRid, modelVersionRid);
+      throw modelVersionNotFound(modelVersionRid, modelRid);
     }
     return toModelVersion(version);
   });
