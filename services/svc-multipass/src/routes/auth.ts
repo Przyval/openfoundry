@@ -1,60 +1,16 @@
 import type { FastifyInstance } from "fastify";
-import { scrypt, randomBytes, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
 import { invalidArgument } from "@openfoundry/errors";
 import {
   createToken,
   buildTokenInput,
-  importSigningKey,
-  type ImportedKey,
   isOpenSignupEnabled,
   OPEN_SIGNUP_ENV_VAR,
 } from "@openfoundry/auth-tokens";
 import { generateRid } from "@openfoundry/rid";
-import { type CryptoKey } from "jose";
-import { warnIfHalfConfigured, type MultipassConfig } from "../config.js";
-
-const scryptAsync = promisify(scrypt);
-
-// ---------------------------------------------------------------------------
-// Password hashing (scrypt — Node.js built-in, no external dependency)
-// ---------------------------------------------------------------------------
-
-async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString("hex");
-  const derived = (await scryptAsync(password, salt, 64)) as Buffer;
-  return `${salt}:${derived.toString("hex")}`;
-}
-
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const [salt, key] = hash.split(":");
-  if (!salt || !key) return false;
-  try {
-    const derived = (await scryptAsync(password, salt, 64)) as Buffer;
-    const keyBuffer = Buffer.from(key, "hex");
-    if (derived.length !== keyBuffer.length) return false;
-    return timingSafeEqual(derived, keyBuffer);
-  } catch {
-    return false;
-  }
-}
-
-/** Key type compatible with jose v5/v6. */
-type SigningKey = ImportedKey | CryptoKey | Uint8Array;
-
-// ---------------------------------------------------------------------------
-// Default dev users — only available when NODE_ENV !== "production"
-// In production, users are created via signup or bootstrap-admin.sh
-// ---------------------------------------------------------------------------
-
-const DEV_USERS: Record<string, { password: string; roles: string[]; displayName: string }> =
-  process.env.NODE_ENV === "production"
-    ? {}
-    : {
-        admin: { password: "admin123", roles: ["ADMIN"], displayName: "Admin User" },
-        developer: { password: "dev123", roles: ["EDITOR"], displayName: "Dev User" },
-        analyst: { password: "analyst123", roles: ["VIEWER"], displayName: "Analyst User" },
-      };
+import type { MultipassConfig } from "../config.js";
+import type { SigningKey } from "../keys.js";
+import { hashPassword } from "../passwords.js";
+import { authenticate, type UserDirectory } from "../store/user-store.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,32 +27,20 @@ interface LoginBody {
 
 export interface AuthRoutesOptions {
   config: MultipassConfig;
-  privateKey?: SigningKey;
-  publicKey?: SigningKey;
+  users: UserDirectory;
+  privateKey: SigningKey;
 }
 
 export async function authRoutes(
   app: FastifyInstance,
   options: AuthRoutesOptions,
 ): Promise<void> {
-  const { config } = options;
-
-  // Import or generate keys (same logic as oauth.ts)
-  let privateKey: SigningKey;
-
-  if (options.privateKey) {
-    privateKey = options.privateKey;
-  } else if (config.jwtPrivateKey && config.jwtPublicKey) {
-    privateKey = await importSigningKey(config.jwtPrivateKey);
-  } else {
-    warnIfHalfConfigured(app, config);
-    const { generateKeyPair } = await import("jose");
-    const keyPair = await generateKeyPair("ES256");
-    privateKey = keyPair.privateKey;
-    app.log.warn("Auth routes: using ephemeral keys (shared with OAuth if started together).");
-  }
+  const { config, users, privateKey } = options;
 
   // -- Login endpoint -------------------------------------------------------
+  // A direct username/password login for the console's development form. It
+  // checks the same user directory as the /authorize sign-in page; browsers
+  // in production sign in through that page instead.
   app.post<{ Body: LoginBody }>("/multipass/api/auth/login", async (request, reply) => {
     const { username, password } = request.body ?? {};
 
@@ -104,8 +48,8 @@ export async function authRoutes(
       throw invalidArgument("username", "is required");
     }
 
-    const user = DEV_USERS[username];
-    if (!user || user.password !== password) {
+    const user = await authenticate(users, username, password ?? "");
+    if (!user) {
       return reply.status(401).send({
         errorCode: "UNAUTHORIZED",
         errorName: "InvalidCredentials",
@@ -122,10 +66,10 @@ export async function authRoutes(
 
     const tokenInput = buildTokenInput(
       {
-        sub: username,
+        sub: user.username,
         sid: sessionId,
         jti: rid.toString(),
-        org: "default-org",
+        org: user.orgRid ?? "default-org",
         svc: "multipass",
         iss: "openfoundry-multipass",
         aud: "openfoundry-api",
@@ -133,7 +77,7 @@ export async function authRoutes(
         // Signed into the token so the gateway can hand downstream services a
         // role set they can trust. A role that only travels in this response
         // body is a role the client could have invented.
-        roles: user.roles.join(" "),
+        ...(user.roles.length > 0 ? { roles: user.roles.join(" ") } : {}),
       },
       config.tokenExpirySeconds,
     );
@@ -144,7 +88,7 @@ export async function authRoutes(
       accessToken,
       expiresIn: config.tokenExpirySeconds,
       roles: user.roles,
-      username,
+      username: user.username,
       displayName: user.displayName,
     });
   });
@@ -182,8 +126,7 @@ export async function authRoutes(
       throw invalidArgument("password", "must be at least 8 characters");
     }
 
-    // Check if username already exists (in-memory dev users + future DB check)
-    if (DEV_USERS[username]) {
+    if (await users.findByUsername(username)) {
       return reply.status(409).send({
         errorCode: "CONFLICT",
         errorName: "UserAlreadyExists",
@@ -281,7 +224,7 @@ export async function authRoutes(
       );
 
       const username = payload.sub ?? "unknown";
-      const user = DEV_USERS[username];
+      const user = await users.findByUsername(username);
 
       return reply.status(200).send({
         id: username,

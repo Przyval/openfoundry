@@ -1,10 +1,16 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
+import { createPool } from "@openfoundry/db";
 import { OpenFoundryApiError } from "@openfoundry/errors";
 import { type MultipassConfig, loadConfig } from "./config.js";
+import { resolveSigningKeys, type SigningKey } from "./keys.js";
 import { healthRoutes } from "./routes/health.js";
 import { oauthRoutes, type OAuthRoutesOptions } from "./routes/oauth.js";
 import { authRoutes, type AuthRoutesOptions } from "./routes/auth.js";
+import { createClientStore, parseDeclaredClients, type ClientStore } from "./store/client-store.js";
+import { PgUserStore } from "./store/pg-user-store.js";
+import type { TokenStore } from "./store/token-store.js";
+import { createUserDirectory, type UserDirectory } from "./store/user-store.js";
 
 // ---------------------------------------------------------------------------
 // Server factory
@@ -13,8 +19,19 @@ import { authRoutes, type AuthRoutesOptions } from "./routes/auth.js";
 export interface CreateServerOptions {
   /** Override the config (useful for tests). */
   config?: MultipassConfig;
-  /** Override OAuth route options (useful for tests to inject keys/stores). */
-  oauthOptions?: Partial<OAuthRoutesOptions>;
+  /** Override OAuth stores and keys (useful for tests). */
+  oauthOptions?: {
+    tokenStore?: TokenStore;
+    clientStore?: ClientStore;
+    privateKey?: SigningKey;
+    publicKey?: SigningKey;
+  };
+  /**
+   * Override the user directory (useful for tests). By default it is built
+   * from the config: the development accounts outside production, and the
+   * `users` table when DATABASE_URL is set.
+   */
+  users?: UserDirectory;
 }
 
 /**
@@ -25,7 +42,8 @@ export interface CreateServerOptions {
  * 2. X-Request-Id middleware
  * 3. Structured JSON error handler
  * 4. Health-check routes
- * 5. OAuth2 routes
+ * 5. OAuth2 routes, including the /authorize sign-in page
+ * 6. Password login and account routes
  */
 export async function createServer(
   options: CreateServerOptions = {},
@@ -57,28 +75,14 @@ export async function createServer(
     exposedHeaders: ["X-Request-Id"],
   });
 
-  // -- Form body parser (OAuth2 token endpoint requires application/x-www-form-urlencoded) --
+  // -- Form body parser (the OAuth2 token endpoint and the sign-in form post
+  // application/x-www-form-urlencoded). URLSearchParams decodes `+` as a
+  // space and keeps any `=` inside a value, as HTML forms require.
   app.addContentTypeParser(
     "application/x-www-form-urlencoded",
-    function (_request, payload, done) {
-      let body = "";
-      payload.on("data", (chunk: Buffer) => {
-        body += chunk.toString();
-      });
-      payload.on("end", () => {
-        try {
-          const parsed: Record<string, string> = {};
-          for (const pair of body.split("&")) {
-            const [key, value] = pair.split("=");
-            if (key) {
-              parsed[decodeURIComponent(key)] = decodeURIComponent(value ?? "");
-            }
-          }
-          done(null, parsed);
-        } catch (err) {
-          done(err as Error, undefined);
-        }
-      });
+    { parseAs: "string" },
+    function (_request, body, done) {
+      done(null, Object.fromEntries(new URLSearchParams(body as string)));
     },
   );
 
@@ -128,12 +132,51 @@ export async function createServer(
   });
 
   // -- Routes -------------------------------------------------------------
+  const overrides = options.oauthOptions ?? {};
+  const keys =
+    overrides.privateKey && overrides.publicKey
+      ? { privateKey: overrides.privateKey, publicKey: overrides.publicKey }
+      : await resolveSigningKeys(config, app.log);
+
+  // Parsed before anything listens, so a malformed OAUTH_CLIENTS stops the
+  // service rather than leaving a client nobody can sign in through.
+  const clientStore =
+    overrides.clientStore ??
+    createClientStore({
+      nodeEnv: config.nodeEnv,
+      declared: parseDeclaredClients(config.oauthClients),
+    });
+
+  let users = options.users;
+  if (!users) {
+    let persistent: UserDirectory | undefined;
+    if (config.databaseUrl) {
+      const pool = createPool({ connectionString: config.databaseUrl, maxConnections: 5 });
+      app.addHook("onClose", async () => {
+        await pool.end();
+      });
+      persistent = new PgUserStore(pool);
+    } else if (config.nodeEnv === "production") {
+      app.log.warn(
+        "DATABASE_URL is not set, so there are no user accounts: nobody can sign in.",
+      );
+    }
+    users = await createUserDirectory({ nodeEnv: config.nodeEnv, persistent });
+  }
+
   await app.register(healthRoutes);
   await app.register(oauthRoutes, {
     config,
-    ...options.oauthOptions,
-  } as OAuthRoutesOptions);
-  await app.register(authRoutes, { config } as AuthRoutesOptions);
+    tokenStore: overrides.tokenStore,
+    clientStore,
+    users,
+    ...keys,
+  } satisfies OAuthRoutesOptions);
+  await app.register(authRoutes, {
+    config,
+    users,
+    privateKey: keys.privateKey,
+  } satisfies AuthRoutesOptions);
 
   return app;
 }

@@ -7,7 +7,7 @@ import {
   NavbarGroup,
   NavbarHeading,
 } from "@blueprintjs/core";
-import { useNavigate, useRoutes } from "react-router-dom";
+import { useLocation, useNavigate, useRoutes } from "react-router-dom";
 import { ErrorBoundary, NetworkStatusBanner } from "@openfoundry/ui-components";
 import GlobalSearch from "./components/GlobalSearch";
 import Sidebar from "./components/Sidebar";
@@ -17,6 +17,7 @@ import routes from "./routes";
 function AppShell() {
   const [dark, setDark] = useState(false);
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const routeElement = useRoutes(routes);
   const { isAuthenticated, currentUser, logout } = useAuth();
 
@@ -26,6 +27,16 @@ function AppShell() {
     logout();
     navigate("/login", { replace: true });
   }, [logout, navigate]);
+
+  // The login screen stands alone: the navigation around it leads only to
+  // pages that would send a signed-out visitor straight back here.
+  if (pathname === "/login") {
+    return (
+      <div className={dark ? "bp5-dark" : undefined}>
+        <ErrorBoundary>{routeElement}</ErrorBoundary>
+      </div>
+    );
+  }
 
   return (
     <div className={`app-shell ${dark ? "bp5-dark" : ""}`}>

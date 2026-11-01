@@ -243,8 +243,8 @@ services:
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       TOKEN_EXPIRY_SECONDS: ${TOKEN_EXPIRY_SECONDS:-3600}
-      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-openfoundry-console}
-      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
+      # The only clients anyone can sign in through; see deploy/.env.production.
+      OAUTH_CLIENTS: ${OAUTH_CLIENTS:-}
     depends_on:
       postgres:
         condition: service_healthy

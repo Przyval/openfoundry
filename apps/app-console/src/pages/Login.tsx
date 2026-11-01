@@ -14,7 +14,7 @@ import { useAuth } from "../context/AuthContext";
 const IS_DEV = import.meta.env.DEV;
 
 export default function Login() {
-  const { login, loginWithOAuth } = useAuth();
+  const { login, loginWithOAuth, isAuthenticated, oauthError } = useAuth();
   const navigate = useNavigate();
 
   const [username, setUsername] = useState("");
@@ -22,6 +22,11 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const usernameRef = useRef<HTMLInputElement>(null);
+
+  // Signed in - by the form below, or by the OAuth redirect landing here.
+  useEffect(() => {
+    if (isAuthenticated) navigate("/", { replace: true });
+  }, [isAuthenticated, navigate]);
 
   // Focus username field on mount
   useEffect(() => {
@@ -35,14 +40,13 @@ export default function Login() {
       setSubmitting(true);
       try {
         await login(username, password);
-        navigate("/", { replace: true });
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setSubmitting(false);
       }
     },
-    [login, username, password, navigate],
+    [login, username, password],
   );
 
   const handleOAuthLogin = useCallback(async () => {
@@ -69,9 +73,9 @@ export default function Login() {
           OpenFoundry Login
         </H3>
 
-        {error && (
+        {(error ?? oauthError) && (
           <Callout intent="danger" icon="error" style={{ marginBottom: 16 }} aria-live="polite" role="alert">
-            {error}
+            {error ?? oauthError}
           </Callout>
         )}
 

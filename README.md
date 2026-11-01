@@ -275,7 +275,8 @@ would have gone.
 POST   /api/v2/auth/token                              Get access token (OAuth2)
 GET    /api/v2/auth/me                                 Get current user
 POST   /multipass/api/oauth2/token                     OAuth2 token endpoint
-GET    /multipass/api/oauth2/authorize                  OAuth2 PKCE authorize
+GET    /multipass/api/oauth2/authorize                 OAuth2 authorize: sign-in page
+POST   /multipass/api/oauth2/authorize                 Sign-in form submission (redirects with a code)
 ```
 
 ---

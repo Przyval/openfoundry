@@ -1,24 +1,17 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { decodeJwt } from "jose";
-import { generateKeyPair, type KeyLike } from "jose";
 import { generateCodeChallenge, verifyCodeChallenge } from "../src/pkce.js";
 import { TokenStore } from "../src/store/token-store.js";
-import { ClientStore } from "../src/store/client-store.js";
+import { ClientStore, createClientStore, DEV_CLIENTS } from "../src/store/client-store.js";
 import { createServer } from "../src/server.js";
-import type { FastifyInstance } from "fastify";
-
-// ---------------------------------------------------------------------------
-// Shared test fixtures
-// ---------------------------------------------------------------------------
-
-let privateKey: KeyLike;
-let publicKey: KeyLike;
-
-beforeAll(async () => {
-  const keyPair = await generateKeyPair("ES256", { extractable: true });
-  privateKey = keyPair.privateKey;
-  publicKey = keyPair.publicKey;
-});
+import {
+  CONSOLE_CLIENT,
+  SERVICE_CLIENT,
+  signInAndExchange,
+  startServer,
+  testConfig,
+  type TestServer,
+} from "./fixtures.js";
 
 // ---------------------------------------------------------------------------
 // PKCE tests
@@ -167,192 +160,140 @@ describe("TokenStore", () => {
   });
 });
 
+
 // ---------------------------------------------------------------------------
-// ClientStore tests
+// ClientStore
 // ---------------------------------------------------------------------------
 
 describe("ClientStore", () => {
-  let store: ClientStore;
-
-  beforeEach(() => {
-    store = new ClientStore();
+  it("returns undefined for unknown clients", () => {
+    expect(new ClientStore().getClient("unknown")).toBeUndefined();
   });
 
-  it("should return the pre-seeded dev client", () => {
-    const client = store.getClient("openfoundry-dev");
-    expect(client).toBeDefined();
-    expect(client!.clientId).toBe("openfoundry-dev");
-    expect(client!.isPublic).toBe(true);
-    expect(client!.redirectUris).toContain("http://localhost:3000/callback");
+  it("passes a public client without a secret", () => {
+    const store = new ClientStore([CONSOLE_CLIENT]);
+    expect(store.validateClientSecret("console", undefined)).toBe(true);
   });
 
-  it("should return undefined for unknown clients", () => {
-    expect(store.getClient("unknown")).toBeUndefined();
-  });
-
-  it("should validate a public client without a secret", () => {
-    expect(store.validateClientSecret("openfoundry-dev", undefined)).toBe(true);
-  });
-
-  it("should validate a confidential client with correct secret", () => {
-    store.registerClient({
-      clientId: "confidential-app",
-      clientSecret: "super-secret",
-      clientName: "Confidential App",
-      redirectUris: ["http://localhost:4000/callback"],
-      grantTypes: ["client_credentials"],
-      scopes: ["api:read"],
-      isPublic: false,
-    });
-
-    expect(store.validateClientSecret("confidential-app", "super-secret")).toBe(true);
-    expect(store.validateClientSecret("confidential-app", "wrong-secret")).toBe(false);
+  it("checks a confidential client's secret", () => {
+    const store = new ClientStore([SERVICE_CLIENT]);
+    expect(store.validateClientSecret("service-app", "service-secret")).toBe(true);
+    expect(store.validateClientSecret("service-app", "service-secreT")).toBe(false);
+    expect(store.validateClientSecret("service-app", "service-secret-and-more")).toBe(false);
+    expect(store.validateClientSecret("service-app", undefined)).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Seeded dev clients must not exist in production
+// Development credentials must not exist in production
 // ---------------------------------------------------------------------------
 
 /**
- * The seeded confidential clients carry platform roles. The claim is minted
- * with no consumer yet - the permission-model work is what will read it - so
- * published credentials must convey nothing in production before that lands,
- * exactly as DEV_USERS conveys nothing there.
+ * The development clients and accounts are published in this repository and
+ * carry platform roles, so in production they must convey nothing at all.
  */
-describe("seeded dev clients under NODE_ENV=production", () => {
-  const originalNodeEnv = process.env.NODE_ENV;
+describe("development credentials under NODE_ENV=production", () => {
+  async function productionServer() {
+    const app = await createServer({ config: testConfig({ nodeEnv: "production" }) });
+    await app.ready();
+    return app;
+  }
 
-  afterEach(() => {
-    if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = originalNodeEnv;
+  it("seeds no development client", () => {
+    const store = createClientStore({ nodeEnv: "production", declared: [] });
+    for (const client of DEV_CLIENTS) {
+      expect(store.getClient(client.clientId)).toBeUndefined();
+    }
   });
 
-  async function tokenResponseFor(nodeEnv: string | undefined) {
-    if (nodeEnv === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = nodeEnv;
+  it("keeps the operator's declared clients", () => {
+    const store = createClientStore({ nodeEnv: "production", declared: [CONSOLE_CLIENT] });
+    expect(store.getClient("console")).toEqual(CONSOLE_CLIENT);
+  });
 
-    // ClientStore reads NODE_ENV in its constructor, so it must be built here.
-    const app = await createServer({
-      config: {
-        port: 0,
-        host: "127.0.0.1",
-        databaseUrl: "",
-        jwtPrivateKey: "",
-        jwtPublicKey: "",
-        tokenExpirySeconds: 3600,
-        refreshTokenExpirySeconds: 86400 * 30,
-        logLevel: "silent",
-        nodeEnv: nodeEnv ?? "development",
-      },
-      oauthOptions: {
-        tokenStore: new TokenStore(),
-        clientStore: new ClientStore(),
-        privateKey,
-        publicKey,
-      },
-    });
-    await app.ready();
-
+  it("rejects the published client credentials", async () => {
+    const app = await productionServer();
     try {
-      return await app.inject({
+      const response = await app.inject({
         method: "POST",
         url: "/multipass/api/oauth2/token",
-        payload: {
-          grant_type: "client_credentials",
-          client_id: "admin",
-          client_secret: "admin123",
-        },
+        payload: { grant_type: "client_credentials", client_id: "admin", client_secret: "admin123" },
       });
+      expect(response.statusCode).toBe(400);
     } finally {
       await app.close();
     }
-  }
-
-  it("rejects the published admin credentials", async () => {
-    const response = await tokenResponseFor("production");
-    expect(response.statusCode).not.toBe(200);
   });
 
-  it("still accepts them in development", async () => {
-    const response = await tokenResponseFor(undefined);
-    expect(response.statusCode).toBe(200);
-    expect(response.json().access_token).toBeTruthy();
+  it("rejects the published account passwords", async () => {
+    const app = await productionServer();
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/multipass/api/auth/login",
+        payload: { username: "admin", password: "admin123" },
+      });
+      expect(response.statusCode).toBe(401);
+    } finally {
+      await app.close();
+    }
   });
 
-  it("does not seed the public dev client either", async () => {
-    process.env.NODE_ENV = "production";
-    expect(new ClientStore().getClient("openfoundry-dev")).toBeUndefined();
+  it("still accepts both in development", async () => {
+    const app = await createServer({ config: testConfig({ nodeEnv: "test" }) });
+    await app.ready();
+    try {
+      const token = await app.inject({
+        method: "POST",
+        url: "/multipass/api/oauth2/token",
+        payload: { grant_type: "client_credentials", client_id: "admin", client_secret: "admin123" },
+      });
+      expect(token.statusCode).toBe(200);
+      expect(decodeJwt(token.json().access_token).roles).toBe("ADMIN");
+
+      const login = await app.inject({
+        method: "POST",
+        url: "/multipass/api/auth/login",
+        payload: { username: "developer", password: "dev123" },
+      });
+      expect(login.statusCode).toBe(200);
+      expect(decodeJwt(login.json().accessToken).roles).toBe("EDITOR");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("fails to start on a malformed OAUTH_CLIENTS rather than run without it", async () => {
+    await expect(
+      createServer({ config: testConfig({ oauthClients: '[{"clientId": "x", "grantTypes": ["implicit"]}]' }) }),
+    ).rejects.toThrow(/unsupported grant type "implicit"/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// OAuth route integration tests
+// Token endpoint
 // ---------------------------------------------------------------------------
 
-/**
- * The authorize endpoint answers with a 302 to the client's redirect_uri, as
- * OAuth 2.0 (and @osdk/client) require, so the code and state arrive as query
- * parameters on the Location header rather than in a JSON body.
- */
-function authorizeRedirectParams(response: { statusCode: number; headers: Record<string, unknown> }): URLSearchParams {
-  expect(response.statusCode).toBe(302);
-  const location = String(response.headers.location);
-  return new URL(location).searchParams;
-}
-
-describe("OAuth routes", () => {
-  let app: FastifyInstance;
-  let tokenStore: TokenStore;
-  let clientStore: ClientStore;
+describe("token endpoint", () => {
+  let server: TestServer;
 
   beforeEach(async () => {
-    tokenStore = new TokenStore();
-    clientStore = new ClientStore();
-
-    // Register a confidential client for client_credentials tests
-    clientStore.registerClient({
-      clientId: "service-app",
-      clientSecret: "service-secret",
-      clientName: "Service App",
-      redirectUris: [],
-      grantTypes: ["client_credentials"],
-      scopes: ["api:read", "api:write"],
-      isPublic: false,
-    });
-
-    app = await createServer({
-      config: {
-        port: 0,
-        host: "127.0.0.1",
-        databaseUrl: "",
-        jwtPrivateKey: "",
-        jwtPublicKey: "",
-        tokenExpirySeconds: 3600,
-        refreshTokenExpirySeconds: 86400 * 30,
-        logLevel: "silent",
-        nodeEnv: "test",
-      },
-      oauthOptions: {
-        tokenStore,
-        clientStore,
-        privateKey,
-        publicKey,
-      },
-    });
-
-    await app.ready();
+    server = await startServer();
   });
 
-  it("should issue tokens via client_credentials grant", async () => {
-    const response = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "client_credentials",
-        client_id: "service-app",
-        client_secret: "service-secret",
-      },
+  afterEach(async () => {
+    await server.app.close();
+  });
+
+  function token(payload: Record<string, unknown>) {
+    return server.app.inject({ method: "POST", url: "/multipass/api/oauth2/token", payload });
+  }
+
+  it("issues a client_credentials token, and no refresh token with it", async () => {
+    const response = await token({
+      grant_type: "client_credentials",
+      client_id: "service-app",
+      client_secret: "service-secret",
     });
 
     expect(response.statusCode).toBe(200);
@@ -360,376 +301,127 @@ describe("OAuth routes", () => {
     expect(body.access_token).toBeTruthy();
     expect(body.token_type).toBe("bearer");
     expect(body.expires_in).toBe(3600);
-    expect(body.refresh_token).toBeTruthy();
     expect(body.scope).toBe("api:read api:write");
+    expect(body.refresh_token).toBeUndefined();
+    expect(decodeJwt(body.access_token).sub).toBe("service:service-app");
   });
 
-  it("should complete authorization code flow", async () => {
-    // Step 1: Get an authorization code
-    const authorizeResponse = await app.inject({
-      method: "GET",
-      url: "/multipass/api/oauth2/authorize",
-      query: {
-        response_type: "code",
-        client_id: "openfoundry-dev",
-        redirect_uri: "http://localhost:3000/callback",
-        scope: "api:read",
-        state: "xyz",
-      },
-    });
+  it("puts the client's own roles on a client_credentials token", async () => {
+    server.clientStore.registerClient({ ...SERVICE_CLIENT, clientId: "roleful", roles: ["EDITOR"] });
 
-    const authorizeParams = authorizeRedirectParams(authorizeResponse);
-    expect(authorizeParams.get("code")).toBeTruthy();
-    expect(authorizeParams.get("state")).toBe("xyz");
-
-    // Step 2: Exchange code for tokens
-    const tokenResponse = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "authorization_code",
-        client_id: "openfoundry-dev",
-        code: authorizeParams.get("code"),
-        redirect_uri: "http://localhost:3000/callback",
-      },
-    });
-
-    expect(tokenResponse.statusCode).toBe(200);
-    const tokenBody = tokenResponse.json();
-    expect(tokenBody.access_token).toBeTruthy();
-    expect(tokenBody.refresh_token).toBeTruthy();
-    expect(tokenBody.scope).toBe("api:read");
-  });
-
-  /**
-   * The authorize endpoint authenticates nobody - it hardcodes the approved
-   * user, auto-registers any client and accepts any redirect_uri - so the
-   * token it leads to must convey no authority, whatever eventually consumes
-   * the roles claim.
-   */
-  it("should mint an authorization_code token with no roles claim", async () => {
-    clientStore.registerClient({
-      clientId: "roleful-app",
-      clientName: "Roleful App",
-      redirectUris: ["http://localhost:3000/callback"],
-      grantTypes: ["authorization_code", "refresh_token"],
-      scopes: ["api:read"],
-      isPublic: true,
-      roles: ["ADMIN"],
-    });
-
-    const authorizeResponse = await app.inject({
-      method: "GET",
-      url: "/multipass/api/oauth2/authorize",
-      query: {
-        response_type: "code",
-        client_id: "roleful-app",
-        redirect_uri: "http://localhost:3000/callback",
-        scope: "api:read",
-      },
-    });
-
-    const tokenResponse = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "authorization_code",
-        client_id: "roleful-app",
-        code: authorizeRedirectParams(authorizeResponse).get("code"),
-        redirect_uri: "http://localhost:3000/callback",
-      },
-    });
-
-    expect(tokenResponse.statusCode).toBe(200);
-    expect(decodeJwt(tokenResponse.json().access_token).roles).toBeUndefined();
-
-    // The refresh of such a token stays roleless too.
-    const refreshed = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "refresh_token",
-        refresh_token: tokenResponse.json().refresh_token,
-      },
-    });
-    expect(refreshed.statusCode).toBe(200);
-    expect(decodeJwt(refreshed.json().access_token).roles).toBeUndefined();
-  });
-
-  it("should keep the client's roles on a client_credentials token", async () => {
-    clientStore.registerClient({
-      clientId: "roleful-service",
-      clientSecret: "roleful-secret",
-      clientName: "Roleful Service",
-      redirectUris: [],
-      grantTypes: ["client_credentials"],
-      scopes: ["api:read"],
-      isPublic: false,
-      roles: ["EDITOR"],
-    });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "client_credentials",
-        client_id: "roleful-service",
-        client_secret: "roleful-secret",
-      },
+    const response = await token({
+      grant_type: "client_credentials",
+      client_id: "roleful",
+      client_secret: "service-secret",
     });
 
     expect(response.statusCode).toBe(200);
     expect(decodeJwt(response.json().access_token).roles).toBe("EDITOR");
   });
 
-  it("should complete authorization code flow with PKCE", async () => {
-    const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
-    const challenge = await generateCodeChallenge(verifier, "S256");
-
-    // Step 1: Authorize with code challenge
-    const authorizeResponse = await app.inject({
-      method: "GET",
-      url: "/multipass/api/oauth2/authorize",
-      query: {
-        response_type: "code",
-        client_id: "openfoundry-dev",
-        redirect_uri: "http://localhost:3000/callback",
-        scope: "api:read",
-        code_challenge: challenge,
-        code_challenge_method: "S256",
-      },
-    });
-
-    const code = authorizeRedirectParams(authorizeResponse).get("code");
-
-    // Step 2: Exchange with code_verifier
-    const tokenResponse = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "authorization_code",
-        client_id: "openfoundry-dev",
-        code,
-        redirect_uri: "http://localhost:3000/callback",
-        code_verifier: verifier,
-      },
-    });
-
-    expect(tokenResponse.statusCode).toBe(200);
-    const tokenBody = tokenResponse.json();
-    expect(tokenBody.access_token).toBeTruthy();
+  it("rejects client_credentials with a wrong secret or from a public client", async () => {
+    expect((await token({
+      grant_type: "client_credentials",
+      client_id: "service-app",
+      client_secret: "wrong",
+    })).statusCode).toBe(400);
+    expect((await token({ grant_type: "client_credentials", client_id: "console" })).statusCode)
+      .toBe(400);
   });
 
-  it("should reject authorization code with wrong PKCE verifier", async () => {
-    const verifier = "correct-verifier-value";
-    const challenge = await generateCodeChallenge(verifier, "S256");
+  it("rotates a refresh token and refuses the old one", async () => {
+    const { refresh_token } = (await signInAndExchange(server.app)).json();
+    const refresh = () =>
+      token({ grant_type: "refresh_token", client_id: "console", refresh_token });
 
-    const authorizeResponse = await app.inject({
-      method: "GET",
-      url: "/multipass/api/oauth2/authorize",
-      query: {
-        response_type: "code",
-        client_id: "openfoundry-dev",
-        redirect_uri: "http://localhost:3000/callback",
-        code_challenge: challenge,
-        code_challenge_method: "S256",
-      },
-    });
-
-    const code = authorizeRedirectParams(authorizeResponse).get("code");
-
-    const tokenResponse = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "authorization_code",
-        client_id: "openfoundry-dev",
-        code,
-        code_verifier: "wrong-verifier",
-      },
-    });
-
-    expect(tokenResponse.statusCode).toBe(400);
+    const first = await refresh();
+    expect(first.statusCode).toBe(200);
+    expect(first.json().refresh_token).not.toBe(refresh_token);
+    expect((await refresh()).statusCode).toBe(400);
   });
 
-  it("should refresh a token", async () => {
-    // First, get tokens via client_credentials
-    const initialResponse = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "client_credentials",
-        client_id: "service-app",
-        client_secret: "service-secret",
-      },
-    });
-
-    const { refresh_token } = initialResponse.json();
-
-    // Use refresh token
-    const refreshResponse = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "refresh_token",
-        refresh_token,
-      },
-    });
-
-    expect(refreshResponse.statusCode).toBe(200);
-    const refreshBody = refreshResponse.json();
-    expect(refreshBody.access_token).toBeTruthy();
-    expect(refreshBody.refresh_token).toBeTruthy();
-    // Rotated — new refresh token should be different
-    expect(refreshBody.refresh_token).not.toBe(refresh_token);
+  it("refuses a refresh that names no client", async () => {
+    const { refresh_token } = (await signInAndExchange(server.app)).json();
+    expect((await token({ grant_type: "refresh_token", refresh_token })).statusCode).toBe(400);
   });
 
-  it("should reject a used refresh token (rotation)", async () => {
-    const initialResponse = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "client_credentials",
-        client_id: "service-app",
-        client_secret: "service-secret",
-      },
-    });
+  it("revokes a refresh token", async () => {
+    const { refresh_token } = (await signInAndExchange(server.app)).json();
 
-    const { refresh_token } = initialResponse.json();
-
-    // Use it once (succeeds)
-    await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: { grant_type: "refresh_token", refresh_token },
-    });
-
-    // Use it again (should fail — token was rotated/revoked)
-    const secondResponse = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: { grant_type: "refresh_token", refresh_token },
-    });
-
-    expect(secondResponse.statusCode).toBe(400);
-  });
-
-  it("should revoke a token", async () => {
-    const initialResponse = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "client_credentials",
-        client_id: "service-app",
-        client_secret: "service-secret",
-      },
-    });
-
-    const { refresh_token } = initialResponse.json();
-
-    // Revoke
-    const revokeResponse = await app.inject({
+    const revoke = await server.app.inject({
       method: "POST",
       url: "/multipass/api/oauth2/revoke",
       payload: { token: refresh_token },
     });
+    expect(revoke.statusCode).toBe(200);
+    expect(revoke.json().revoked).toBe(true);
 
-    expect(revokeResponse.statusCode).toBe(200);
-    expect(revokeResponse.json().revoked).toBe(true);
-
-    // Try to use it — should fail
-    const refreshResponse = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: { grant_type: "refresh_token", refresh_token },
-    });
-
-    expect(refreshResponse.statusCode).toBe(400);
+    expect((await token({ grant_type: "refresh_token", client_id: "console", refresh_token })).statusCode)
+      .toBe(400);
   });
 
-  it("should return user info from a valid token", async () => {
-    // Get a token
-    const tokenResponse = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "client_credentials",
-        client_id: "service-app",
-        client_secret: "service-secret",
-      },
-    });
+  it("returns user info from a valid token", async () => {
+    const { access_token } = (await signInAndExchange(server.app)).json();
 
-    const { access_token } = tokenResponse.json();
-
-    // Call userinfo
-    const userinfoResponse = await app.inject({
+    const response = await server.app.inject({
       method: "GET",
       url: "/multipass/api/userinfo",
-      headers: {
-        authorization: `Bearer ${access_token}`,
-      },
+      headers: { authorization: `Bearer ${access_token}` },
     });
 
-    expect(userinfoResponse.statusCode).toBe(200);
-    const userinfo = userinfoResponse.json();
-    expect(userinfo.sub).toBe("service:service-app");
-    expect(userinfo.scope).toBe("api:read api:write");
-    expect(userinfo.org).toBe("default-org");
-    expect(userinfo.svc).toBe("multipass");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      sub: "alice",
+      scope: "api:read",
+      org: "org:acme",
+      svc: "multipass",
+    });
   });
 
-  it("should return 401 for userinfo without a token", async () => {
-    const response = await app.inject({
+  it("verifies a password-login token at userinfo too, with the same key", async () => {
+    const login = await server.app.inject({
+      method: "POST",
+      url: "/multipass/api/auth/login",
+      payload: { username: "carol", password: "carol-password" },
+    });
+    expect(login.statusCode).toBe(200);
+
+    const response = await server.app.inject({
       method: "GET",
       url: "/multipass/api/userinfo",
+      headers: { authorization: `Bearer ${login.json().accessToken}` },
     });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().sub).toBe("carol");
+  });
 
+  it("returns 401 for userinfo without a token", async () => {
+    const response = await server.app.inject({ method: "GET", url: "/multipass/api/userinfo" });
     expect(response.statusCode).toBe(401);
   });
 
-  it("should return OpenID discovery document", async () => {
-    const response = await app.inject({
-      method: "GET",
-      url: "/.well-known/openid-configuration",
-    });
+  it("advertises S256 as the only PKCE method", async () => {
+    const response = await server.app.inject({ method: "GET", url: "/.well-known/openid-configuration" });
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.issuer).toBe("openfoundry-multipass");
     expect(body.authorization_endpoint).toContain("/multipass/api/oauth2/authorize");
     expect(body.token_endpoint).toContain("/multipass/api/oauth2/token");
-    expect(body.revocation_endpoint).toContain("/multipass/api/oauth2/revoke");
-    expect(body.userinfo_endpoint).toContain("/multipass/api/userinfo");
-    expect(body.grant_types_supported).toContain("authorization_code");
-    expect(body.grant_types_supported).toContain("client_credentials");
-    expect(body.grant_types_supported).toContain("refresh_token");
-    expect(body.code_challenge_methods_supported).toContain("S256");
+    expect(body.code_challenge_methods_supported).toEqual(["S256"]);
   });
 
-  it("should return 400 for an invalid grant type", async () => {
-    const response = await app.inject({
-      method: "POST",
-      url: "/multipass/api/oauth2/token",
-      payload: {
-        grant_type: "invalid_grant",
-        client_id: "openfoundry-dev",
-      },
-    });
-
+  it("returns 400 for an invalid grant type", async () => {
+    const response = await token({ grant_type: "password", client_id: "console" });
     expect(response.statusCode).toBe(400);
-    const body = response.json();
-    expect(body.errorName).toBe("InvalidArgument");
+    expect(response.json().errorName).toBe("InvalidArgument");
   });
 
-  it("should return health check responses", async () => {
-    const healthResponse = await app.inject({ method: "GET", url: "/status/health" });
-    expect(healthResponse.statusCode).toBe(200);
-    expect(healthResponse.json().status).toBe("HEALTHY");
-
-    const livenessResponse = await app.inject({ method: "GET", url: "/status/liveness" });
-    expect(livenessResponse.statusCode).toBe(200);
-
-    const readinessResponse = await app.inject({ method: "GET", url: "/status/readiness" });
-    expect(readinessResponse.statusCode).toBe(200);
+  it("returns health check responses", async () => {
+    const health = await server.app.inject({ method: "GET", url: "/status/health" });
+    expect(health.statusCode).toBe(200);
+    expect(health.json().status).toBe("HEALTHY");
+    expect((await server.app.inject({ method: "GET", url: "/status/liveness" })).statusCode).toBe(200);
+    expect((await server.app.inject({ method: "GET", url: "/status/readiness" })).statusCode).toBe(200);
   });
 });

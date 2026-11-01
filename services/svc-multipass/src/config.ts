@@ -30,6 +30,12 @@ export interface MultipassConfig {
 
   /** Node environment. */
   readonly nodeEnv: string;
+
+  /**
+   * OAuth clients declared by the operator, as a JSON array (OAUTH_CLIENTS).
+   * See `parseDeclaredClients` in ./store/client-store.ts.
+   */
+  readonly oauthClients: string;
 }
 
 /**
@@ -65,6 +71,7 @@ export function loadConfig(): MultipassConfig {
     refreshTokenExpirySeconds: envInt("REFRESH_TOKEN_EXPIRY_SECONDS", 86400 * 30),
     logLevel: env("LOG_LEVEL", "info"),
     nodeEnv: env("NODE_ENV", "development"),
+    oauthClients: env("OAUTH_CLIENTS", ""),
   };
 }
 
