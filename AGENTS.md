@@ -157,7 +157,7 @@ Tenant isolation is a separate, *mandatory* layer in Foundry (Organizations) and
 
 ## Front-end to service sharp edges
 
-The console must not send `Content-Type: application/json` on a request with no body: Fastify rejects it with `FST_ERR_CTP_EMPTY_JSON_BODY`, which the gateway reports as a 500.
+The console must not send `Content-Type: application/json` on a request with no body: Fastify rejects it with `FST_ERR_CTP_EMPTY_JSON_BODY`, which the gateway reports as a 400 `InvalidRequest` (it passes through any 4xx Fastify request error - malformed JSON, 413, 415 - rather than masking it as a 500).
 Several pages still pair a bodyless `fetch` with that header.
 
 Services serialize identifiers as `rid` while the console reads Foundry's `id`.
@@ -170,7 +170,7 @@ The audit route, `GET /admin/groups/:groupRid/members` and all three `groupMembe
 `app.css` declares `@layer blueprint, app`, but `main.tsx` imports Blueprint's stylesheets unlayered, and unlayered rules beat every layer no matter how specific the selector.
 A rule that has to override Blueprint therefore has to sit outside `@layer app`; the navbar override at the end of `app.css` is the worked example.
 
-`scripts/migrate.sql` (what Docker Compose loads at init) and `db/migrations/*.sql` (what `pnpm db:migrate` applies) have drifted: only the latter adds `org_rid` and row-level security.
+`scripts/migrate.sql` (what Docker Compose loads at init) and `db/migrations/*.sql` (what `pnpm db:migrate` applies) have drifted: only the latter adds `org_rid` and row-level security, except for the models tables, which `services/svc-aip/tests/models-pg-schema.test.ts` holds byte-identical in both.
 Code written against one schema fails against the other - `PgObjectStore` inserts `org_rid`, which the Compose database has no column for.
 A Pg store can also name a column no schema has at all and nothing catches it: `PgFileStore.putFile` set `updated_at` for months against a `dataset_files` table without that column, so every overwrite failed with `42703` while the in-memory suite stayed green.
 `services/svc-datasets/tests/pg-file-write-time.test.ts` is the pattern for guarding that - assert the SQL, then assert both schema sources carry what it names.

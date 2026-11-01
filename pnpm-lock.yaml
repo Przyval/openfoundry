@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@openfoundry/db':
+        specifier: workspace:*
+        version: link:packages/db
       '@osdk/foundry':
         specifier: ^2.56.0
         version: 2.56.0
@@ -768,6 +771,9 @@ importers:
       '@openfoundry/errors':
         specifier: workspace:*
         version: link:../../packages/errors
+      '@openfoundry/pagination':
+        specifier: workspace:*
+        version: link:../../packages/pagination
       '@openfoundry/rid':
         specifier: workspace:*
         version: link:../../packages/rid

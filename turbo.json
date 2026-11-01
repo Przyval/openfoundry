@@ -13,7 +13,8 @@
     },
     "test": {
       "dependsOn": ["build"],
-      "inputs": ["src/**", "tests/**"]
+      "inputs": ["src/**", "tests/**"],
+      "env": ["MODELS_TEST_DATABASE_URL"]
     },
     "typecheck": {
       "dependsOn": ["^build"]

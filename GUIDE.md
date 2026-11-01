@@ -660,6 +660,40 @@ GET  /status/alerts                          Kesehatan sistem alert
 POST /status/alerts/heartbeat                Heartbeat cron alert
 ```
 
+### Model (ML)
+
+Bagian `models` Foundry disajikan oleh svc-aip lewat gateway, di memori maupun di Postgres (tabel `ml_resources` dan `ml_model_versions`).
+Semua operasinya berstatus preview di Foundry, jadi setiap panggilan wajib membawa `?preview=true`; tanpa itu jawabannya 400 `ApiFeaturePreviewUsageOnly`, sama seperti Foundry.
+
+```
+POST /api/v2/models                                     Buat model (name, parentFolderRid)
+GET  /api/v2/models/:modelRid                           Ambil model
+POST /api/v2/models/:modelRid/versions                  Buat versi model
+GET  /api/v2/models/:modelRid/versions                  List versi (branch, pageSize, pageToken)
+GET  /api/v2/models/:modelRid/versions/:versionRid      Ambil satu versi
+POST /api/v2/models/:modelRid/promoteVersion            Salin versi ke model ini (sourceModelVersionRid, branch)
+POST /api/v2/models/modelStudios                        Buat Model Studio
+GET  /api/v2/models/modelStudios/:studioRid             Ambil Model Studio
+```
+
+Versi baru selalu masuk ke branch `master`; `promoteVersion` bisa menaruh salinannya di branch lain, dan `branch` pada listing memilih branch yang dibaca.
+Nama tampilan hanya boleh dipakai sekali per folder, lintas model dan Model Studio, dan bentrokan dijawab 409 `ResourceNameAlreadyExists`.
+`parentFolderRid` harus berupa RID folder (`ri.compass.<instance>.folder.<id>`), tetapi keberadaan foldernya belum diperiksa.
+`condaRequirements` disimpan dan dikembalikan apa adanya, tidak pernah di-solve.
+Di Postgres kedua tabel itu membawa `org_rid` dengan row-level security, seperti tabel tenant lain, dan nama tampilan hanya unik di dalam satu organisasi.
+svc-aip belum menerima konteks organisasi dari gateway, jadi semua model saat ini masuk ke `org:default`.
+
+**24 dari 32 operasi bagian ini sengaja tidak disajikan** dan menjawab 404, karena masing-masing butuh subsistem yang tidak ada:
+
+| Operasi | Alasan |
+|---------|--------|
+| Live deployment (7 operasi, termasuk `transformJson`) | Tidak ada runtime yang bisa memuat model dan menjawab inferensi; status `ACTIVE`/`isReady` hanya bisa dikarang |
+| Model function (3 operasi) | `functionRid` dan `functionVersion` menunjuk Function yang menjalankan model, yang butuh runtime yang sama |
+| Experiment (6 operasi) | Experiment ditulis oleh pustaka pelatihan saat model dilatih; API tidak punya operasi untuk membuatnya |
+| Trainer Model Studio (2 operasi) | Tidak ada algoritma pelatihan untuk didaftarkan |
+| Config version Model Studio (4 operasi) | Setiap config version wajib menunjuk trainer, dan trainer tidak ada |
+| `launch` dan listing run Model Studio | Run adalah build pelatihan; `buildRid` dan `jobRid` akan menunjuk build yang tidak pernah ada |
+
 ### API v1
 
 ```
@@ -782,7 +816,7 @@ Semuanya nyata pada `master` saat panduan ini ditulis.
 
 13. Keempat skrip di `scripts/demo/` memakai ulang ontologi pertama yang ada dan mengabaikan `ORG_RID`. Gunakan `start.sh --industry` untuk berganti industri.
 14. `docker-compose.yml` memakai kata sandi Postgres yang berbeda antara service basis data dan `DATABASE_URL` aplikasinya.
-15. `scripts/migrate.sql` (dimuat Compose saat init) dan `db/migrations/*.sql` (diterapkan `pnpm db:migrate`) sudah berbeda: hanya yang kedua menambahkan `org_rid` dan RLS.
+15. `scripts/migrate.sql` (dimuat Compose saat init) dan `db/migrations/*.sql` (diterapkan `pnpm db:migrate`) sudah berbeda: hanya yang kedua menambahkan `org_rid` dan RLS, kecuali pada tabel model (`ml_resources`, `ml_model_versions`) yang identik di keduanya.
 16. Isolasi RLS belum terbukti ujung ke ujung. Kebijakan di `db/migrations/009_multi_tenancy.sql` membaca setelan sesi `app.org_rid`, sedangkan `services/svc-objects/src/store/pg-object-store.ts` menyetel `app.current_org_rid`.
 17. `.env.example` dan `deploy/docker/Dockerfile.console` menyetel `VITE_API_BASE_URL`, sementara konsol membaca `VITE_API_URL`.
 18. `pnpm db:seed` menunjuk ke `scripts/seed.js`, yang tidak ada di repositori.
