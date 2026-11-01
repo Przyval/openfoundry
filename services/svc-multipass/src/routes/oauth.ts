@@ -241,7 +241,7 @@ export async function oauthRoutes(
     }
 
     const claims = await userClaims(authCode.userId);
-    return issueTokens(authCode.userId, authCode.scope, client, claims, reply);
+    return issueTokens(authCode.userId, authCode.scope, client, claims, reply, true);
   }
 
   async function handleClientCredentialsGrant(
@@ -262,7 +262,7 @@ export async function oauthRoutes(
     return issueTokens(`service:${client.clientId}`, scope, client, {
       roles: client.roles && client.roles.length > 0 ? client.roles.join(" ") : undefined,
       org: DEFAULT_ORG,
-    }, reply);
+    }, reply, false);
   }
 
   async function handleRefreshTokenGrant(
@@ -287,7 +287,7 @@ export async function oauthRoutes(
     tokenStore.revokeRefreshToken(body.refresh_token);
 
     const claims = await userClaims(stored.userId);
-    return issueTokens(stored.userId, stored.scope, client, claims, reply);
+    return issueTokens(stored.userId, stored.scope, client, claims, reply, true);
   }
 
   async function issueTokens(
@@ -296,6 +296,7 @@ export async function oauthRoutes(
     client: OAuthClient,
     claims: SubjectClaims,
     reply: FastifyReply,
+    forUser: boolean,
   ): Promise<TokenResponse> {
     const rid = generateRid("multipass", "token");
     const sessionId = crypto.randomUUID();
@@ -327,11 +328,11 @@ export async function oauthRoutes(
       scope,
     };
 
-    // Only a client allowed the refresh_token grant gets one. A
-    // client_credentials client re-authenticates instead (RFC 6749 section
-    // 4.4.3), so a leaked refresh token is never a second, secret-free way to
-    // act as it.
-    if (client.grantTypes.includes("refresh_token")) {
+    // Only a user's sign-in, by a client allowed the refresh_token grant, gets
+    // one. A client_credentials client re-authenticates instead (RFC 6749
+    // section 4.4.3) whatever grants it declares, so a leaked refresh token is
+    // never a second, secret-free way to act as it.
+    if (forUser && client.grantTypes.includes("refresh_token")) {
       const refreshTokenValue = randomBytes(32).toString("base64url");
       tokenStore.storeRefreshToken({
         token: refreshTokenValue,

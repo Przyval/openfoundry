@@ -138,6 +138,19 @@ docker compose -f deploy/docker-compose.yml exec svc-multipass \
   node services/svc-multipass/dist/cli/users.js create --username <username> --roles ADMIN
 ```
 
+Deployment yang basis datanya dibuat sebelum versi ini harus menerapkan `db/migrations/011_user_platform_roles.sql` dulu, sebelum svc-multipass diperbarui.
+Tanpa kolom `users.platform_roles` dari migrasi itu, setiap login dan setiap perintah CLI akun gagal dengan galat 42703 (kolom tidak ada).
+Migrasi itu idempoten, jadi aman dijalankan ulang:
+
+```bash
+# Dari checkout repositori
+pnpm db:migrate    # atau: psql "$DATABASE_URL" -f db/migrations/011_user_platform_roles.sql
+
+# Deployment Docker di deploy/, yang memasang db/migrations di /docker-entrypoint-initdb.d
+docker compose -f deploy/docker-compose.yml exec postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /docker-entrypoint-initdb.d/011_user_platform_roles.sql'
+```
+
 Kata sandi ditanyakan dua kali tanpa ditampilkan, atau dibaca dari `OPENFOUNDRY_USER_PASSWORD` bila variabel itu diisi; ia tidak pernah diberikan sebagai argumen.
 Perintah yang sama juga mengelola akun berikutnya: `create`, `set-password`, dan `set-roles` (peran: ADMIN, EDITOR, VIEWER, SERVICE_ACCOUNT).
 Pengguna yang dibuat dari halaman Users di konsol belum punya kata sandi dan baru bisa masuk setelah `set-password`.

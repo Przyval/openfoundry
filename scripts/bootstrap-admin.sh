@@ -20,6 +20,14 @@
 #   docker compose -f deploy/docker-compose.yml exec svc-multipass \
 #     node services/svc-multipass/dist/cli/users.js create --username <name> --roles ADMIN
 #
+# A database created before svc-multipass stored platform roles lacks the
+# `users.platform_roles` column, and every sign-in and every command here then
+# fails with 42703. Apply the migration first - it is idempotent:
+#   pnpm db:migrate    (or: psql "$DATABASE_URL" -f db/migrations/011_user_platform_roles.sql)
+# or, for the Docker deployment in deploy/:
+#   docker compose -f deploy/docker-compose.yml exec postgres sh -c \
+#     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /docker-entrypoint-initdb.d/011_user_platform_roles.sql'
+#
 # Environment:
 #   DATABASE_URL - the deployment's database (also read from .env)
 # ============================================================================

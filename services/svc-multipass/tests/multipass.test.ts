@@ -306,6 +306,24 @@ describe("token endpoint", () => {
     expect(decodeJwt(body.access_token).sub).toBe("service:service-app");
   });
 
+  it("gives no refresh token to client_credentials even when the client declares that grant", async () => {
+    server.clientStore.registerClient({
+      ...SERVICE_CLIENT,
+      clientId: "sync",
+      grantTypes: ["client_credentials", "refresh_token"],
+    });
+
+    const response = await token({
+      grant_type: "client_credentials",
+      client_id: "sync",
+      client_secret: "service-secret",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().access_token).toBeTruthy();
+    expect(response.json().refresh_token).toBeUndefined();
+  });
+
   it("puts the client's own roles on a client_credentials token", async () => {
     server.clientStore.registerClient({ ...SERVICE_CLIENT, clientId: "roleful", roles: ["EDITOR"] });
 

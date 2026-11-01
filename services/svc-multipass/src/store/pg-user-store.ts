@@ -13,8 +13,9 @@ import type { UserDirectory, UserRecord } from "./user-store.js";
  * Login is pre-tenant: the username is all there is to look the row up by.
  * The `users` row-level-security policy (db/migrations/009_multi_tenancy.sql)
  * hides rows of other organizations from a connection that has not set
- * `app.org_rid`, so this store needs a role that is not subject to it, as the
- * deployment's owning role is.
+ * `app.org_rid`, and rejects writes from it. The table is `FORCE ROW LEVEL
+ * SECURITY`, so even its owner is subject to that; this store needs a superuser
+ * or a `BYPASSRLS` role, as deploy/ connects with.
  */
 
 interface UserRow {

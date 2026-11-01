@@ -1,8 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import type pg from "pg";
+import pg from "pg";
+import { PGlite } from "@electric-sql/pglite";
+import { createPgConfig } from "@electric-sql/pglite/node-postgres";
+import { citext } from "@electric-sql/pglite/contrib/citext";
+import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
+import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
+import { vector } from "@electric-sql/pglite-pgvector";
 import { parseDeclaredClients } from "../src/store/client-store.js";
 import {
   authenticate,
@@ -11,7 +17,7 @@ import {
   InMemoryUserDirectory,
   isValidUsername,
 } from "../src/store/user-store.js";
-import { PgUserStore } from "../src/store/pg-user-store.js";
+import { PgUserStore, UserAlreadyExistsError } from "../src/store/pg-user-store.js";
 import { user } from "./fixtures.js";
 
 // ---------------------------------------------------------------------------
@@ -147,79 +153,94 @@ describe("createUserDirectory", () => {
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
-/** Records every statement and answers with canned rows. */
-class FakePool {
-  readonly statements: { text: string; values?: unknown[] }[] = [];
-
-  constructor(private readonly rows: Record<string, unknown>[]) {}
-
-  async query(config: { text: string; values?: unknown[] }) {
-    this.statements.push(config);
-    return { rows: this.rows, rowCount: this.rows.length };
-  }
+/** What docker-entrypoint-initdb.d and `pnpm db:migrate` apply, in their order. */
+function migrationFiles(): string[] {
+  const dir = path.join(REPO_ROOT, "db/migrations");
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+    .map((f) => path.join(dir, f));
 }
 
-const ROW = {
-  username: "alice",
-  display_name: "Alice A.",
-  password_hash: "salt:key",
-  platform_roles: ["EDITOR"],
-  org_rid: "org:acme",
-  is_active: true,
-};
+const SCHEMAS: [string, () => string[]][] = [
+  ["db/migrations", migrationFiles],
+  ["scripts/migrate.sql", () => [path.join(REPO_ROOT, "scripts/migrate.sql")]],
+];
 
-describe("PgUserStore", () => {
-  it("maps a users row to a record", async () => {
-    const pool = new FakePool([ROW]);
-    const record = await new PgUserStore(pool as unknown as pg.Pool).findByUsername("alice");
+describe.each(SCHEMAS)("PgUserStore on a database built from %s", (_name, files) => {
+  let db: PGlite;
+  let pool: pg.Pool;
+  let store: PgUserStore;
 
-    expect(record).toEqual({
+  beforeAll(async () => {
+    db = await PGlite.create({ extensions: { citext, pgcrypto, pg_trgm, vector } });
+    for (const file of files()) await db.exec(readFileSync(file, "utf8"));
+    pool = new pg.Pool(createPgConfig(db));
+    store = new PgUserStore(pool);
+  }, 60_000);
+
+  afterAll(async () => {
+    await pool?.end();
+    await db?.close();
+  });
+
+  it("creates a user and finds it by username", async () => {
+    await pool.query("INSERT INTO organizations (rid, display_name) VALUES ('org:acme', 'Acme')");
+    const created = await store.createUser({
+      username: "alice",
+      displayName: "Alice A.",
+      passwordHash: "salt:key",
+      roles: ["EDITOR"],
+      orgRid: "org:acme",
+    });
+    const expected = {
       username: "alice",
       displayName: "Alice A.",
       passwordHash: "salt:key",
       roles: ["EDITOR"],
       orgRid: "org:acme",
       active: true,
-    });
-    expect(pool.statements[0]!.values).toEqual(["alice"]);
+    };
+
+    expect(created).toEqual(expected);
+    expect(await store.findByUsername("alice")).toEqual(expected);
+    expect(await store.findByUsername("nobody")).toBeUndefined();
   });
 
-  it("names only columns that both schema sources give the users table", async () => {
-    const pool = new FakePool([ROW]);
-    const store = new PgUserStore(pool as unknown as pg.Pool);
-    await store.findByUsername("alice");
+  it("refuses a second user with the same username", async () => {
+    const bob = { username: "bob", displayName: "Bob", passwordHash: "s:k", roles: [], orgRid: null };
+    expect((await store.createUser(bob)).roles).toEqual([]);
+    await expect(store.createUser(bob)).rejects.toBeInstanceOf(UserAlreadyExistsError);
+  });
+
+  it("sets a password and roles on an existing user only", async () => {
     await store.createUser({
-      username: "alice",
-      displayName: "Alice",
-      passwordHash: "salt:key",
-      roles: ["EDITOR"],
-      orgRid: null,
+      username: "carol", displayName: "Carol", passwordHash: "old:hash", roles: [], orgRid: null,
     });
-    await store.setPassword("alice", "salt:key2");
-    await store.setRoles("alice", ["VIEWER"]);
 
-    const columns = [
-      "rid", "username", "display_name", "password_hash", "platform_roles", "org_rid", "is_active",
-    ];
-    const sql = pool.statements.map((s) => s.text).join("\n");
-    for (const column of columns) expect(sql).toContain(column);
+    expect(await store.setPassword("carol", "new:hash")).toBe(true);
+    expect(await store.setRoles("carol", ["ADMIN", "VIEWER"])).toBe(true);
+    expect(await store.findByUsername("carol")).toMatchObject({
+      passwordHash: "new:hash",
+      roles: ["ADMIN", "VIEWER"],
+    });
 
-    const migrations = readdirSync(path.join(REPO_ROOT, "db/migrations"))
-      .filter((f) => f.endsWith(".sql"))
-      .map((f) => readFileSync(path.join(REPO_ROOT, "db/migrations", f), "utf8"))
-      .join("\n");
-    const composeSchema = readFileSync(path.join(REPO_ROOT, "scripts/migrate.sql"), "utf8");
+    expect(await store.setPassword("nobody", "x:y")).toBe(false);
+    expect(await store.setRoles("nobody", ["ADMIN"])).toBe(false);
+  });
 
-    for (const [name, schema] of [["db/migrations", migrations], ["scripts/migrate.sql", composeSchema]]) {
-      const usersTable = schema.slice(schema.search(/CREATE TABLE (IF NOT EXISTS )?users \(/));
-      const declared = usersTable.slice(0, usersTable.indexOf(");"));
-      for (const column of columns) {
-        const added = new RegExp(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${column}\\b`).test(schema);
-        expect(
-          new RegExp(`^\\s+${column}\\s`, "m").test(declared) || added,
-          `${name} gives users no ${column} column`,
-        ).toBe(true);
-      }
-    }
+  it("reads a user another service created without a password or roles", async () => {
+    await pool.query(
+      "INSERT INTO users (rid, username, display_name) VALUES ('ri.user.dave', 'dave', NULL)",
+    );
+
+    expect(await store.findByUsername("dave")).toEqual({
+      username: "dave",
+      displayName: "dave",
+      passwordHash: null,
+      roles: [],
+      orgRid: null,
+      active: true,
+    });
   });
 });

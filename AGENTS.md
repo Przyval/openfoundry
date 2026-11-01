@@ -169,7 +169,7 @@ A rule that has to override Blueprint therefore has to sit outside `@layer app`;
 `scripts/migrate.sql` (what Docker Compose loads at init) and `db/migrations/*.sql` (what `pnpm db:migrate` applies) have drifted: only the latter adds `org_rid` and row-level security.
 Code written against one schema fails against the other - `PgObjectStore` inserts `org_rid`, which the Compose database has no column for.
 A Pg store can also name a column no schema has at all and nothing catches it: `PgFileStore.putFile` set `updated_at` for months against a `dataset_files` table without that column, so every overwrite failed with `42703` while the in-memory suite stayed green.
-`services/svc-datasets/tests/pg-file-write-time.test.ts` is the pattern for guarding that - assert the SQL, then assert both schema sources carry what it names.
+Guard that by running the store against a real database built from both schema sources, not by matching the SQL text; `services/svc-multipass/tests/clients-and-users.test.ts` does it with PGlite (`@electric-sql/pglite` plus `@electric-sql/pglite-pgvector`) and a `pg.Pool` from `createPgConfig`.
 
 ## Secrets
 
