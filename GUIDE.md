@@ -460,6 +460,10 @@ Konsol belum punya UI untuk menambah effect, jadi monitor buatan konsol tidak me
 Monitor yang punya effect dibuat lewat API, dan `scripts/seed-kelava-alerts.sh` adalah contoh yang bisa dijalankan.
 Scheduler svc-sentinel berjalan tiap 60 detik.
 
+Monitor membaca objek dari satu ontologi: yang disebut di field `ontologyRid`-nya, atau kalau kosong, satu-satunya ontologi yang mendeklarasikan `objectType`-nya.
+Kalau tidak ada atau lebih dari satu ontologi yang mendeklarasikan tipe itu, evaluasinya gagal dengan pesan galat alih-alih diam-diam melaporkan tidak ada pelanggaran.
+Pipeline yang membaca object type mengikuti aturan yang sama lewat `ontologyRid` pada definisinya.
+
 ### Webhooks (`/webhooks`)
 
 Daftar webhook beserta riwayat pengiriman terakhirnya, dan tombol untuk menjeda atau mengaktifkan kembali sebuah webhook (ACTIVE / PAUSED).
