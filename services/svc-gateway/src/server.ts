@@ -78,7 +78,10 @@ export async function createServer(
 
   // -- Helmet (security headers) ------------------------------------------
   await app.register(helmet, {
-    contentSecurityPolicy: false, // API-only, no HTML to protect
+    // Off here: the only HTML behind the gateway, svc-multipass's sign-in
+    // page, sends its own stricter policy, which a gateway default would
+    // either duplicate or contradict.
+    contentSecurityPolicy: false,
     hsts: {
       maxAge: 63_072_000, // 2 years
       includeSubDomains: true,

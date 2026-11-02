@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- The platform roles a sign-in carries; see db/migrations/011_user_platform_roles.sql.
+-- Added separately so a database created before the column existed gains it too.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS platform_roles TEXT[] NOT NULL DEFAULT '{}';
+
 CREATE INDEX IF NOT EXISTS idx_users_org_rid ON users (org_rid);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email) WHERE email IS NOT NULL;
 

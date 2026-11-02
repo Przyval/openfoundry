@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
+    "@openfoundry/db": "workspace:*",
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3.3.0",

@@ -22,6 +22,8 @@ import {
 import {
   clearStoredSession,
   restoreSession,
+  takeOAuthCallback,
+  userFromAccessToken,
   type AuthUser,
   type StoredToken,
 } from "../lib/session";
@@ -47,6 +49,8 @@ export interface AuthContextValue {
   logout: () => void;
   /** The underlying TokenManager instance. */
   tokenManager: TokenManager;
+  /** Why the last OAuth sign-in did not complete, or null. */
+  oauthError: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +98,7 @@ export function useAuth(): AuthContextValue {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [oauthError, setOauthError] = useState<string | null>(null);
 
   const tokenManager = useMemo(
     () =>
@@ -166,6 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // ---- Start OAuth PKCE flow ----
   const loginWithOAuth = useCallback(async () => {
+    setOauthError(null);
     const { url, codeVerifier } = await createAuthorizationUrl(oauthOptions);
     if (codeVerifier) {
       sessionStorage.setItem(PKCE_VERIFIER_KEY, codeVerifier);
@@ -173,11 +179,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = url;
   }, []);
 
-  // ---- Handle OAuth callback (code in URL) ----
+  // ---- Handle OAuth callback (code or error in URL) ----
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get("code");
-    if (!code) return;
+    const callback = takeOAuthCallback();
+    if (!callback) return;
+    if ("error" in callback) {
+      sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+      setOauthError(
+        callback.error === "access_denied"
+          ? "Sign-in was cancelled."
+          : `Sign-in failed: ${callback.errorDescription ?? callback.error}`,
+      );
+      return;
+    }
 
     const codeVerifier = sessionStorage.getItem(PKCE_VERIFIER_KEY) ?? undefined;
     sessionStorage.removeItem(PKCE_VERIFIER_KEY);
@@ -186,24 +200,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const tokenResponse = await exchangeCodeForToken(
           oauthOptions,
-          code,
+          callback.code,
           codeVerifier,
         );
         tokenManager.setToken(tokenResponse);
 
-        const user: AuthUser = {
-          username: "oauth-user",
-          token: tokenResponse.accessToken,
-          roles: [],
-        };
+        const user = userFromAccessToken(tokenResponse.accessToken);
 
+        setOauthError(null);
         setCurrentUser(user);
         localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(user));
-
-        // Clean the URL
-        window.history.replaceState({}, "", window.location.pathname);
       } catch (err) {
         console.error("OAuth callback failed:", err);
+        setOauthError("Sign-in could not be completed. Please try again.");
       }
     })();
   }, [tokenManager]);
@@ -212,6 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     tokenManager.clear();
     setCurrentUser(null);
+    setOauthError(null);
     clearStoredSession();
   }, [tokenManager]);
 
@@ -224,8 +234,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginWithOAuth,
       logout,
       tokenManager,
+      oauthError,
     }),
-    [currentUser, loading, login, loginWithOAuth, logout, tokenManager],
+    [currentUser, loading, login, loginWithOAuth, logout, tokenManager, oauthError],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

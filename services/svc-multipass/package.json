@@ -9,7 +9,8 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "users": "node dist/cli/users.js"
   },
   "dependencies": {
     "@openfoundry/auth-tokens": "workspace:*",
@@ -17,12 +18,18 @@
     "@openfoundry/rid": "workspace:*",
     "fastify": "^5.3.0",
     "@fastify/cors": "^11.0.0",
-    "jose": "^6.0.0"
+    "jose": "^6.0.0",
+    "@openfoundry/db": "workspace:*",
+    "@openfoundry/permissions": "workspace:*",
+    "pg": "^8.13.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
     "tsx": "^4.0.0",
     "typescript": "~5.5.4",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.0",
+    "@types/pg": "^8.11.0",
+    "@electric-sql/pglite": "0.5.14",
+    "@electric-sql/pglite-pgvector": "0.0.15"
   }
 }

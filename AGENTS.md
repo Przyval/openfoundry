@@ -111,13 +111,9 @@ Downstream services read identity from `X-User-Id` / `X-User-Roles` (`packages/p
 `services/svc-gateway/src/proxy.ts` always drops those headers on the way in, and sets none of its own, so downstream permission checks see no caller at all.
 That is deliberate: asserting roles there would make enforcement effective whatever `ENFORCE_PERMISSIONS` says, and enforcement is to be switched on deliberately - which is why it is off in `deploy/`.
 Minting the identity belongs to the work that unifies the guarded routes onto one permission model, where the role vocabulary is decided.
-svc-multipass does mint an optional `roles` claim - on the dev password login and on `client_credentials` against a seeded client, both only outside `NODE_ENV=production` - but nothing consumes it yet.
-The authorization_code and refresh grants mint no roles at all: `/multipass/api/oauth2/authorize` authenticates nobody (it hardcodes the approved user, auto-registers any `client_id` and accepts any `redirect_uri`), and the refresh grant checks only the refresh token value, with no client authentication.
-
-Two limits are known and accepted, not oversights.
-`/authorize` is exempt from gateway auth and authenticates nobody, so anyone who can reach the gateway can mint a token that passes validation - a roleless one, so it grants authentication and not authorization; closing it needs a real login flow, which is separate work.
-And `NODE_ENV=production` seeds no OAuth client (`ClientStore`) and there is no registration endpoint, so `client_credentials` cannot work there at all: only a pre-minted `OPENFOUNDRY_TOKEN` authenticates a script against a production deployment.
-That is the deliberate price of not shipping this public repository's published credentials into production.
+svc-multipass does mint an optional `roles` claim - the signed-in user's `users.platform_roles`, or a `client_credentials` client's own `roles` - but nothing consumes it yet.
+`/multipass/api/oauth2/authorize` serves a sign-in page (`services/svc-multipass/src/routes/authorize.ts`) and issues a code only after a password check; the client registry is closed, redirect URIs match exactly, and public clients must use PKCE S256.
+The only clients are the dev seeds outside production plus whatever the operator declares in `OAUTH_CLIENTS` (`parseDeclaredClients` in `src/store/client-store.ts`), and accounts are created with `services/svc-multipass/src/cli/users.ts` - there is no HTTP path to either, by design.
 
 `SKIP_AUTH_PREFIXES` does not exempt `/metrics`, so with `AUTH_PUBLIC_KEY` set a Prometheus scrape gets 401 - a deliberate posture; nothing in `deploy/` scrapes it and the container healthcheck uses `/status/health`.
 
@@ -138,7 +134,7 @@ Running a second one therefore merges another industry's object types into the f
 Without `DATABASE_URL` every service uses its in-memory or `/tmp/openfoundry-data` store; that is the mode the demo is built for, and the only mode in which svc-admin's user and group routes work.
 `/tmp/openfoundry-data` is a fixed path with no env override, so two checkouts running at once share and overwrite it.
 
-Dev login is `admin` / `admin123` (see `DEV_USERS` in `services/svc-multipass/src/routes/auth.ts`); the `admin` / `admin123` and `developer` / `dev123` pairs also work as OAuth client credentials.
+Dev login is `admin` / `admin123` (see `DEV_USERS` in `services/svc-multipass/src/store/user-store.ts`); the `admin` / `admin123` and `developer` / `dev123` pairs also work as OAuth client credentials.
 
 ## Identity and permissions
 
@@ -173,7 +169,7 @@ A rule that has to override Blueprint therefore has to sit outside `@layer app`;
 `scripts/migrate.sql` (what Docker Compose loads at init) and `db/migrations/*.sql` (what `pnpm db:migrate` applies) have drifted: only the latter adds `org_rid` and row-level security, except for the models tables, which `services/svc-aip/tests/models-pg-schema.test.ts` holds byte-identical in both.
 Code written against one schema fails against the other - `PgObjectStore` inserts `org_rid`, which the Compose database has no column for.
 A Pg store can also name a column no schema has at all and nothing catches it: `PgFileStore.putFile` set `updated_at` for months against a `dataset_files` table without that column, so every overwrite failed with `42703` while the in-memory suite stayed green.
-`services/svc-datasets/tests/pg-file-write-time.test.ts` is the pattern for guarding that - assert the SQL, then assert both schema sources carry what it names.
+Guard that by running the store against a real database built from both schema sources, not by matching the SQL text; `services/svc-multipass/tests/clients-and-users.test.ts` does it with PGlite (`@electric-sql/pglite` plus `@electric-sql/pglite-pgvector`) and a `pg.Pool` from `createPgConfig`.
 
 ## Secrets
 

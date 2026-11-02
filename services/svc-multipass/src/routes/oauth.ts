@@ -1,22 +1,19 @@
+import { randomBytes } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { type CryptoKey } from "jose";
 import {
   createToken,
   buildTokenInput,
   validateToken,
-  importSigningKey,
-  type ImportedKey,
-  importVerificationKey,
 } from "@openfoundry/auth-tokens";
 import { invalidArgument } from "@openfoundry/errors";
 import { generateRid } from "@openfoundry/rid";
-import { warnIfHalfConfigured, type MultipassConfig } from "../config.js";
+import type { MultipassConfig } from "../config.js";
+import type { SigningKey } from "../keys.js";
 import { verifyCodeChallenge } from "../pkce.js";
 import { TokenStore } from "../store/token-store.js";
-import { ClientStore } from "../store/client-store.js";
-
-/** Key type compatible with jose v5 (KeyLike) and v6 (CryptoKey). */
-type SigningKey = ImportedKey | CryptoKey | Uint8Array;
+import type { ClientStore, OAuthClient } from "../store/client-store.js";
+import type { UserDirectory } from "../store/user-store.js";
+import { registerAuthorizeRoutes } from "./authorize.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,20 +38,20 @@ interface TokenResponse {
   scope: string;
 }
 
-interface AuthorizeQuery {
-  response_type: string;
-  client_id: string;
-  redirect_uri?: string;
-  scope?: string;
-  state?: string;
-  code_challenge?: string;
-  code_challenge_method?: "S256" | "plain";
-}
-
 interface RevokeRequest {
   token: string;
   token_type_hint?: "refresh_token" | "access_token";
 }
+
+/** What a token says about its subject beyond the subject's name. */
+interface SubjectClaims {
+  /** Space-separated platform roles, or undefined for none. */
+  roles?: string;
+  org: string;
+}
+
+/** The `org` claim of a subject that belongs to no organization. */
+const DEFAULT_ORG = "default-org";
 
 // ---------------------------------------------------------------------------
 // Plugin
@@ -63,42 +60,24 @@ interface RevokeRequest {
 export interface OAuthRoutesOptions {
   config: MultipassConfig;
   tokenStore?: TokenStore;
-  clientStore?: ClientStore;
-  privateKey?: SigningKey;
-  publicKey?: SigningKey;
+  clientStore: ClientStore;
+  users: UserDirectory;
+  privateKey: SigningKey;
+  publicKey: SigningKey;
 }
 
 export async function oauthRoutes(
   app: FastifyInstance,
   options: OAuthRoutesOptions,
 ): Promise<void> {
-  const { config } = options;
+  const { config, clientStore, users, privateKey, publicKey } = options;
   const tokenStore = options.tokenStore ?? new TokenStore();
-  const clientStore = options.clientStore ?? new ClientStore();
 
-  // Import keys — allow pre-imported keys for testing
-  let privateKey: SigningKey;
-  let publicKey: SigningKey;
-
-  if (options.privateKey && options.publicKey) {
-    privateKey = options.privateKey;
-    publicKey = options.publicKey;
-  } else if (config.jwtPrivateKey && config.jwtPublicKey) {
-    privateKey = await importSigningKey(config.jwtPrivateKey);
-    publicKey = await importVerificationKey(config.jwtPublicKey);
-  } else {
-    warnIfHalfConfigured(app, config);
-    // Auto-generate ephemeral dev keys when none are provided
-    const { generateKeyPair } = await import("jose");
-    const keyPair = await generateKeyPair("ES256");
-    privateKey = keyPair.privateKey;
-    publicKey = keyPair.publicKey;
-    app.log.warn("No JWT keys configured — generated ephemeral ES256 key pair. Do NOT use in production.");
-  }
+  registerAuthorizeRoutes(app, { clientStore, tokenStore, users });
 
   // -- Token endpoint -------------------------------------------------------
   app.post<{ Body: TokenRequest }>("/multipass/api/oauth2/token", async (request, reply) => {
-    const body = request.body as TokenRequest;
+    const body = (request.body ?? {}) as TokenRequest;
     const grantType = body.grant_type;
 
     if (!grantType) {
@@ -128,85 +107,6 @@ export async function oauthRoutes(
     // Per RFC 7009, revoke always returns 200 regardless of whether the token existed
     tokenStore.revokeRefreshToken(body.token);
     return reply.status(200).send({ revoked: true });
-  });
-
-  // -- Authorize endpoint ---------------------------------------------------
-  app.get<{ Querystring: AuthorizeQuery }>("/multipass/api/oauth2/authorize", async (request, reply) => {
-    const query = request.query as AuthorizeQuery;
-
-    if (query.response_type !== "code") {
-      throw invalidArgument("response_type", "must be 'code'");
-    }
-
-    if (!query.client_id) {
-      throw invalidArgument("client_id", "is required");
-    }
-
-    // Auto-register unknown clients in dev mode for @osdk/client compatibility.
-    // The OSDK creates dynamic client IDs that won't be pre-registered.
-    let client = clientStore.getClient(query.client_id);
-    if (!client) {
-      client = {
-        clientId: query.client_id,
-        clientName: `Auto-registered: ${query.client_id}`,
-        isPublic: true,
-        redirectUris: query.redirect_uri ? [query.redirect_uri] : ["http://localhost:8080/auth/callback"],
-        grantTypes: ["authorization_code", "refresh_token"],
-        scopes: ["api:read", "api:write"],
-      };
-      clientStore.registerClient(client);
-    }
-
-    // Validate redirect URI — accept the provided redirect_uri if the client
-    // was just auto-registered (it will already be in the list).
-    const redirectUri = query.redirect_uri ?? client.redirectUris[0];
-    if (!redirectUri) {
-      throw invalidArgument("redirect_uri", "redirect_uri is required");
-    }
-
-    // For existing clients, allow any redirect_uri that is registered.
-    // For auto-registered clients the URI is already in the list.
-    // In dev mode, dynamically accept any redirect_uri for convenience.
-    if (!client.redirectUris.includes(redirectUri)) {
-      // Re-register the client with the additional redirect URI
-      clientStore.registerClient({
-        ...client,
-        redirectUris: [...client.redirectUris, redirectUri],
-      });
-    }
-
-    const scope = query.scope ?? client.scopes.join(" ");
-
-    // In dev mode, auto-approve as the default admin user.
-    const userId = "admin";
-
-    // Generate authorization code
-    const code = crypto.randomUUID();
-
-    tokenStore.storeAuthCode({
-      code,
-      clientId: query.client_id,
-      userId,
-      redirectUri,
-      scope,
-      // No roles claim. Roles belong to the authenticated user, and this flow
-      // authenticates nobody: the user above is hardcoded, any client_id is
-      // auto-registered and any redirect_uri accepted. Reading a fake user's
-      // roles would hand an anonymous caller whatever that name implies, so
-      // this issues none until there is a real user to read.
-      codeChallenge: query.code_challenge,
-      codeChallengeMethod: query.code_challenge_method,
-    });
-
-    // Build redirect URL with code (and optional state) as query parameters.
-    // The @osdk/client expects a 302 redirect, not a JSON response.
-    const redirectUrl = new URL(redirectUri);
-    redirectUrl.searchParams.set("code", code);
-    if (query.state) {
-      redirectUrl.searchParams.set("state", query.state);
-    }
-
-    return reply.status(302).redirect(redirectUrl.toString());
   });
 
   // -- UserInfo endpoint ----------------------------------------------------
@@ -253,7 +153,7 @@ export async function oauthRoutes(
       id_token_signing_alg_values_supported: ["ES256"],
       scopes_supported: ["api:read", "api:write", "api:ontologies-read", "api:ontologies-write", "api:datasets-read", "api:datasets-write"],
       token_endpoint_auth_methods_supported: ["client_secret_post", "none"],
-      code_challenge_methods_supported: ["S256", "plain"],
+      code_challenge_methods_supported: ["S256"],
     });
   });
 
@@ -261,14 +161,12 @@ export async function oauthRoutes(
   // Grant handlers
   // -------------------------------------------------------------------------
 
-  async function handleAuthorizationCodeGrant(
-    body: TokenRequest,
-    reply: FastifyReply,
-  ): Promise<TokenResponse> {
-    if (!body.code) {
-      throw invalidArgument("code", "is required for authorization_code grant");
-    }
-
+  /**
+   * The client named by `client_id`, authenticated when it is confidential.
+   * A public client has no secret to check; what binds its requests is PKCE
+   * at the code exchange and the client binding of its refresh tokens.
+   */
+  function authenticatedClient(body: TokenRequest): OAuthClient {
     const clientId = body.client_id;
     if (!clientId) {
       throw invalidArgument("client_id", "is required");
@@ -279,12 +177,40 @@ export async function oauthRoutes(
       throw invalidArgument("client_id", "unknown client");
     }
 
-    // Only validate client_secret for confidential clients.
-    // Public clients (PKCE flow used by @osdk/client) do not send a secret.
-    if (!client.isPublic) {
-      if (!clientStore.validateClientSecret(clientId, body.client_secret)) {
-        throw invalidArgument("client_secret", "invalid client credentials");
-      }
+    if (!client.isPublic && !clientStore.validateClientSecret(clientId, body.client_secret)) {
+      throw invalidArgument("client_secret", "invalid client credentials");
+    }
+
+    return client;
+  }
+
+  /**
+   * The claims for a user, read now rather than remembered: a user disabled
+   * or demoted since they logged in gets no token, or a token with their
+   * current roles, on the next exchange or refresh.
+   */
+  async function userClaims(username: string): Promise<SubjectClaims> {
+    const user = await users.findByUsername(username);
+    if (!user || !user.active) {
+      throw invalidArgument("grant", "the user is unknown or disabled");
+    }
+    return {
+      roles: user.roles.length > 0 ? user.roles.join(" ") : undefined,
+      org: user.orgRid ?? DEFAULT_ORG,
+    };
+  }
+
+  async function handleAuthorizationCodeGrant(
+    body: TokenRequest,
+    reply: FastifyReply,
+  ): Promise<TokenResponse> {
+    if (!body.code) {
+      throw invalidArgument("code", "is required for authorization_code grant");
+    }
+
+    const client = authenticatedClient(body);
+    if (!client.grantTypes.includes("authorization_code")) {
+      throw invalidArgument("grant_type", "client is not authorized for the authorization_code grant");
     }
 
     const authCode = tokenStore.consumeAuthCode(body.code);
@@ -292,7 +218,7 @@ export async function oauthRoutes(
       throw invalidArgument("code", "invalid, expired, or already consumed authorization code");
     }
 
-    if (authCode.clientId !== clientId) {
+    if (authCode.clientId !== client.clientId) {
       throw invalidArgument("client_id", "code was issued to a different client");
     }
 
@@ -300,53 +226,43 @@ export async function oauthRoutes(
       throw invalidArgument("redirect_uri", "does not match the authorization request");
     }
 
-    // PKCE verification
+    // PKCE verification. /authorize demands a challenge from every public
+    // client, so a public client's code always carries one.
     if (authCode.codeChallenge) {
       if (!body.code_verifier) {
         throw invalidArgument("code_verifier", "is required when PKCE was used in authorization");
       }
 
-      const method = authCode.codeChallengeMethod ?? "plain";
+      const method = authCode.codeChallengeMethod ?? "S256";
       const valid = await verifyCodeChallenge(body.code_verifier, authCode.codeChallenge, method);
       if (!valid) {
         throw invalidArgument("code_verifier", "PKCE verification failed");
       }
     }
 
-    return issueTokens(authCode.userId, authCode.scope, clientId, reply);
+    const claims = await userClaims(authCode.userId);
+    return issueTokens(authCode.userId, authCode.scope, client, claims, reply, true);
   }
 
   async function handleClientCredentialsGrant(
     body: TokenRequest,
     reply: FastifyReply,
   ): Promise<TokenResponse> {
-    const clientId = body.client_id;
-    if (!clientId) {
+    if (!body.client_id) {
       throw invalidArgument("client_id", "is required for client_credentials grant");
     }
 
-    const client = clientStore.getClient(clientId);
-    if (!client) {
-      throw invalidArgument("client_id", "unknown client");
-    }
-
-    if (!client.grantTypes.includes("client_credentials")) {
+    const client = authenticatedClient(body);
+    if (client.isPublic || !client.grantTypes.includes("client_credentials")) {
       throw invalidArgument("grant_type", "client is not authorized for client_credentials grant");
-    }
-
-    if (!clientStore.validateClientSecret(clientId, body.client_secret)) {
-      throw invalidArgument("client_secret", "invalid client credentials");
     }
 
     const scope = body.scope ?? client.scopes.join(" ");
 
-    return issueTokens(
-      `service:${clientId}`,
-      scope,
-      clientId,
-      reply,
-      client.roles?.join(" "),
-    );
+    return issueTokens(`service:${client.clientId}`, scope, client, {
+      roles: client.roles && client.roles.length > 0 ? client.roles.join(" ") : undefined,
+      org: DEFAULT_ORG,
+    }, reply, false);
   }
 
   async function handleRefreshTokenGrant(
@@ -357,36 +273,40 @@ export async function oauthRoutes(
       throw invalidArgument("refresh_token", "is required for refresh_token grant");
     }
 
+    const client = authenticatedClient(body);
+
     const stored = tokenStore.getRefreshToken(body.refresh_token);
-    if (!stored) {
+    if (!stored || stored.clientId !== client.clientId) {
+      // A refresh token is bound to the client it was issued to (RFC 6749
+      // section 6). Reporting a foreign one exactly like an unknown one says
+      // nothing about which tokens exist.
       throw invalidArgument("refresh_token", "invalid, expired, or revoked refresh token");
     }
 
     // Revoke the old refresh token (rotation)
     tokenStore.revokeRefreshToken(body.refresh_token);
 
-    // No roles: this grant authenticates no client, it checks only the refresh
-    // token value, so replaying roles would hand whoever holds that value a
-    // roled token on every rotation.
-    return issueTokens(stored.userId, stored.scope, stored.clientId, reply);
+    const claims = await userClaims(stored.userId);
+    return issueTokens(stored.userId, stored.scope, client, claims, reply, true);
   }
 
   async function issueTokens(
-    userId: string,
+    subject: string,
     scope: string,
-    clientId: string,
+    client: OAuthClient,
+    claims: SubjectClaims,
     reply: FastifyReply,
-    roles?: string,
+    forUser: boolean,
   ): Promise<TokenResponse> {
     const rid = generateRid("multipass", "token");
     const sessionId = crypto.randomUUID();
 
     const tokenInput = buildTokenInput(
       {
-        sub: userId,
+        sub: subject,
         sid: sessionId,
         jti: rid.toString(),
-        org: "default-org",
+        org: claims.org,
         svc: "multipass",
         iss: "openfoundry-multipass",
         aud: "openfoundry-api",
@@ -394,33 +314,36 @@ export async function oauthRoutes(
         // Minted, but with no consumer yet: the gateway asserts no identity
         // downstream. The permission-model work that unifies the guarded
         // routes is what will read this claim.
-        ...(roles ? { roles } : {}),
+        ...(claims.roles ? { roles: claims.roles } : {}),
       },
       config.tokenExpirySeconds,
     );
 
     const accessToken = await createToken(tokenInput, privateKey);
 
-    // Issue refresh token
-    const refreshTokenValue = crypto.randomUUID();
-    const refreshExpiresAt = Math.floor(Date.now() / 1000) + config.refreshTokenExpirySeconds;
-
-    tokenStore.storeRefreshToken({
-      token: refreshTokenValue,
-      clientId,
-      userId,
-      scope,
-      expiresAt: refreshExpiresAt,
-      revoked: false,
-    });
-
     const response: TokenResponse = {
       access_token: accessToken,
       token_type: "bearer",
       expires_in: config.tokenExpirySeconds,
-      refresh_token: refreshTokenValue,
       scope,
     };
+
+    // Only a user's sign-in, by a client allowed the refresh_token grant, gets
+    // one. A client_credentials client re-authenticates instead (RFC 6749
+    // section 4.4.3) whatever grants it declares, so a leaked refresh token is
+    // never a second, secret-free way to act as it.
+    if (forUser && client.grantTypes.includes("refresh_token")) {
+      const refreshTokenValue = randomBytes(32).toString("base64url");
+      tokenStore.storeRefreshToken({
+        token: refreshTokenValue,
+        clientId: client.clientId,
+        userId: subject,
+        scope,
+        expiresAt: Math.floor(Date.now() / 1000) + config.refreshTokenExpirySeconds,
+        revoked: false,
+      });
+      response.refresh_token = refreshTokenValue;
+    }
 
     return reply.status(200).send(response);
   }

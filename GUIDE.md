@@ -91,11 +91,26 @@ Jadi baris status "Service status" tidak pernah menyebut svc-sentinel, hidup mau
 ### Mode pengembangan
 
 Buka konsol, lalu isi form "Developer login form".
-Tiga akun pengembangan didefinisikan pada konstanta `DEV_USERS` di `services/svc-multipass/src/routes/auth.ts`, masing-masing dengan peran ADMIN, EDITOR, dan VIEWER.
+Tiga akun pengembangan didefinisikan pada konstanta `DEV_USERS` di `services/svc-multipass/src/store/user-store.ts`, masing-masing dengan peran ADMIN, EDITOR, dan VIEWER.
 Baca nilainya langsung dari berkas itu; panduan ini sengaja tidak menyalin kredensial ke dalam repositori publik.
 
 Ketiga akun itu hanya ada selama `NODE_ENV` bukan `production`.
-Begitu `NODE_ENV=production`, `DEV_USERS` menjadi kosong dan form itu tidak bisa dipakai lagi.
+Begitu `NODE_ENV=production`, `DEV_USERS` tidak dimuat, dan build produksi konsol memang tidak menampilkan form itu.
+
+### Login produksi
+
+Di produksi, tombol **Login with OAuth** di konsol membuka halaman masuk milik svc-multipass di `/multipass/api/oauth2/authorize`.
+Halaman itu memeriksa username dan kata sandi terhadap tabel `users`, lalu mengembalikan browser ke konsol dengan kode otorisasi.
+Token yang dihasilkan bernama sesuai username dan membawa peran platform akun itu (`users.platform_roles`).
+
+Syaratnya ada tiga:
+
+1. svc-multipass punya `DATABASE_URL`, karena akun disimpan di database.
+2. Konsol terdaftar sebagai client di `OAUTH_CLIENTS` dengan redirect URI yang persis sama dengan asal konsol ditambah `/login`; contohnya ada di `deploy/.env.production`.
+3. Ada akun yang bisa dipakai masuk (lihat "Membuat admin pertama di produksi").
+
+Client yang tidak terdaftar, atau redirect URI yang tidak terdaftar persis, ditolak di halaman itu sendiri tanpa diarahkan ke mana pun.
+Client publik seperti konsol wajib memakai PKCE S256.
 
 ### Token OAuth2
 
@@ -105,37 +120,42 @@ curl -X POST http://localhost:8080/multipass/api/oauth2/token \
 ```
 
 Kredensial yang salah dijawab 400.
-Respons berhasil memuat `access_token` berupa JWT ES256 dengan klaim `sub`, `org`, dan `scope`.
+Respons berhasil memuat `access_token` berupa JWT ES256 dengan klaim `sub`, `org`, dan `scope`, ditambah `roles` bila client itu diberi peran.
+
+Di produksi, client untuk skrip dan layanan dideklarasikan di `OAUTH_CLIENTS` sebagai entri dengan `clientSecret` (dan bila perlu `roles`); tidak ada endpoint untuk mendaftarkannya.
 
 ### Membuat admin pertama di produksi
 
-`scripts/bootstrap-admin.sh` memanggil `POST /api/v2/auth/signup`.
-Endpoint itu **tertutup secara default** dan menjawab 403 dengan nama galat `OpenSignupDisabled`.
-
-Perhatikan letak variabelnya - ini sumber kebingungan yang paling sering:
+Akun dibuat langsung di database dengan CLI akun milik svc-multipass, bukan lewat endpoint HTTP.
+Siapa pun yang menjalankannya harus sudah memegang kredensial database, dan itulah tujuannya.
 
 ```bash
-# SALAH: variabel hanya diberikan ke skripnya, bukan ke layanannya.
-# Signup tetap tertutup dan skrip berhenti dengan 403.
-OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1 bash scripts/bootstrap-admin.sh --username ...
+# Dari checkout repositori, dengan DATABASE_URL di lingkungan atau di .env
+bash scripts/bootstrap-admin.sh --username <username> --display-name "Nama Lengkap"
+
+# Atau di dalam kontainer deployment Docker, tempat DATABASE_URL sudah terpasang
+docker compose -f deploy/docker-compose.yml exec svc-multipass \
+  node services/svc-multipass/dist/cli/users.js create --username <username> --roles ADMIN
 ```
 
-`OPENFOUNDRY_ALLOW_OPEN_SIGNUP` dibaca oleh **svc-multipass dan gateway saat keduanya start**, bukan oleh skripnya.
-Jadi nyalakan variabel itu di lingkungan kedua layanan tersebut, start ulang keduanya, lalu jalankan skripnya:
+Deployment yang basis datanya dibuat sebelum versi ini harus menerapkan `db/migrations/011_user_platform_roles.sql` dulu, sebelum svc-multipass diperbarui.
+Tanpa kolom `users.platform_roles` dari migrasi itu, setiap login dan setiap perintah CLI akun gagal dengan galat 42703 (kolom tidak ada).
+Migrasi itu idempoten, jadi aman dijalankan ulang:
 
 ```bash
-# Nyalakan pada kedua layanan, lalu start ulang keduanya.
-OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1 pnpm --filter @openfoundry/svc-multipass run dev &
-OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1 pnpm --filter @openfoundry/svc-gateway   run dev &
+# Dari checkout repositori
+pnpm db:migrate    # atau: psql "$DATABASE_URL" -f db/migrations/011_user_platform_roles.sql
 
-bash scripts/bootstrap-admin.sh \
-  --username <username> \
-  --password <password-aman> \
-  --org "Nama Perusahaan"
+# Deployment Docker di deploy/, yang memasang db/migrations di /docker-entrypoint-initdb.d
+docker compose -f deploy/docker-compose.yml exec postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /docker-entrypoint-initdb.d/011_user_platform_roles.sql'
 ```
 
-Skrip mencetak `Org RID` yang dibuat.
-Selama switch itu menyala, siapa pun yang bisa menjangkau gateway dapat menerbitkan token API yang sah, jadi matikan lagi dan start ulang kedua layanan begitu admin pertama jadi.
+Kata sandi ditanyakan dua kali tanpa ditampilkan, atau dibaca dari `OPENFOUNDRY_USER_PASSWORD` bila variabel itu diisi; ia tidak pernah diberikan sebagai argumen.
+Perintah yang sama juga mengelola akun berikutnya: `create`, `set-password`, dan `set-roles` (peran: ADMIN, EDITOR, VIEWER, SERVICE_ACCOUNT).
+Pengguna yang dibuat dari halaman Users di konsol belum punya kata sandi dan baru bisa masuk setelah `set-password`.
+
+`POST /api/v2/auth/signup` (tertutup secara default, dibuka dengan `OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1` pada svc-multipass dan gateway) tidak menyimpan pengguna, jadi tidak menghasilkan akun yang bisa dipakai masuk.
 
 ### Menyalakan penegakan token di gateway
 
@@ -143,7 +163,7 @@ Gateway hanya memvalidasi Bearer token kalau `AUTH_PUBLIC_KEY` diisi; selama kos
 Kuncinya harus PEM yang sepasang dengan `JWT_PRIVATE_KEY` milik svc-multipass - daftar lengkap variabelnya beserta cara membuat pasangan kunci ada di `.env.example` (dan `deploy/.env.production` untuk deployment Docker).
 
 Begitu penegakan menyala, semua pemanggil non-browser (skrip penyemai, `scripts/sync-kelava.sh`, integration test) ikut butuh kredensial: isi `OPENFOUNDRY_TOKEN`, atau `OPENFOUNDRY_CLIENT_ID`/`OPENFOUNDRY_CLIENT_SECRET` yang akan ditukar jadi token otomatis.
-Di `NODE_ENV=production` tidak ada OAuth client yang di-seed, jadi di sana hanya `OPENFOUNDRY_TOKEN` yang bisa dipakai.
+Di `NODE_ENV=production` tidak ada OAuth client yang di-seed, jadi pasangan id/secret itu harus milik client yang Anda deklarasikan di `OAUTH_CLIENTS`.
 Jangan pernah menulis nilai kredensial ke dalam skrip atau dokumen: repositori ini publik.
 
 ### Apa yang belum ditegakkan
@@ -531,7 +551,7 @@ docker compose up --build -d
 pnpm db:migrate
 
 # 3. Buat admin pertama (lihat "Membuat admin pertama di produksi")
-bash scripts/bootstrap-admin.sh --username <username> --org "Nama Client"
+bash scripts/bootstrap-admin.sh --username <username>
 
 # 4. Semai data industri
 bash scripts/demo/seed-pest-control.sh
@@ -587,6 +607,8 @@ POST /api/v2/auth/signup              Daftar user baru + buat org
                                        diset pada svc-multipass DAN gateway)
 POST /multipass/api/auth/login        Login mode pengembangan
 POST /multipass/api/oauth2/token      Token OAuth2
+GET  /multipass/api/oauth2/authorize  Halaman masuk produksi (lihat "Login produksi")
+POST /multipass/api/oauth2/authorize  Kirim form masuk, dialihkan dengan kode otorisasi
 GET  /multipass/api/auth/me           Info user saat ini
 GET  /api/v2/admin/users/getCurrent   Info user (kompatibel SDK Palantir)
 ```

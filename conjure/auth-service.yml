@@ -128,8 +128,10 @@ services:
         http: GET /multipass/api/oauth2/authorize
         docs: |
           OAuth2 authorization endpoint.
-          Supports PKCE with S256 and plain code challenge methods.
-          In the mock implementation this returns the authorization code directly.
+          Serves an HTML sign-in page; the code is issued only after a POST of the
+          form passes a password check, as a redirect to the client's exactly
+          registered redirect_uri. Only registered clients are accepted, and
+          public clients must use PKCE with S256 - plain is rejected.
         args:
           response_type:
             type: string

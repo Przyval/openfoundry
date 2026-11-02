@@ -1,110 +1,72 @@
 #!/bin/bash
 # ============================================================================
-# bootstrap-admin.sh — Create the first admin user in production
+# bootstrap-admin.sh - Create the first administrator of a deployment
 #
-# In production, dev users (admin/admin123) are disabled. This script creates
-# the first admin user + organization via the signup endpoint.
+# In production the development accounts (admin/admin123, ...) do not exist,
+# so nobody can sign in until an account is created. This creates one with
+# the ADMIN role directly in the `users` table, through svc-multipass's
+# account CLI (services/svc-multipass/src/cli/users.ts). It needs the database
+# credentials - which is the point: no HTTP endpoint can create an admin.
 #
-# The signup endpoint is OFF by default. Set OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1 on
-# both svc-multipass and the gateway before running this script, and unset it
-# again afterwards - while it is on, anyone who can reach the gateway can mint
-# a valid API token.
+# The password is prompted for (twice, unechoed), or read from
+# OPENFOUNDRY_USER_PASSWORD when that is set. It is never an argument.
 #
 # Usage:
-#   bash scripts/bootstrap-admin.sh
-#   bash scripts/bootstrap-admin.sh --username myuser --password mypass --org "My Company"
+#   DATABASE_URL=postgresql://... bash scripts/bootstrap-admin.sh --username <name>
+#   bash scripts/bootstrap-admin.sh --username <name> --display-name "Full Name"
+#
+# Against the Docker deployment in deploy/, run the same CLI inside the
+# svc-multipass container instead, where DATABASE_URL is already set:
+#   docker compose -f deploy/docker-compose.yml exec svc-multipass \
+#     node services/svc-multipass/dist/cli/users.js create --username <name> --roles ADMIN
+#
+# A database created before svc-multipass stored platform roles lacks the
+# `users.platform_roles` column, and every sign-in and every command here then
+# fails with 42703. Apply the migration first - it is idempotent:
+#   pnpm db:migrate    (or: psql "$DATABASE_URL" -f db/migrations/011_user_platform_roles.sql)
+# or, for the Docker deployment in deploy/:
+#   docker compose -f deploy/docker-compose.yml exec postgres sh -c \
+#     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /docker-entrypoint-initdb.d/011_user_platform_roles.sql'
 #
 # Environment:
-#   GATEWAY_URL — Gateway base URL (default: http://localhost:8080)
-#   OPENFOUNDRY_ALLOW_OPEN_SIGNUP — must be enabled on the services for signup
-#                                   to be reachable (see note above)
+#   DATABASE_URL - the deployment's database (also read from .env)
 # ============================================================================
 
 set -euo pipefail
 
-GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [ -z "${DATABASE_URL:-}" ] && [ -f "$ROOT/.env" ]; then
+  DATABASE_URL="$(grep -E '^DATABASE_URL=' "$ROOT/.env" | tail -1 | cut -d= -f2- || true)"
+  export DATABASE_URL
+fi
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "Error: DATABASE_URL is not set. Accounts are stored in the database." >&2
+  exit 1
+fi
+
 USERNAME=""
-PASSWORD=""
-ORG_NAME=""
-
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-# ---------------------------------------------------------------------------
-# Parse arguments
-# ---------------------------------------------------------------------------
+DISPLAY_NAME=""
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --username) USERNAME="$2"; shift 2 ;;
-    --password) PASSWORD="$2"; shift 2 ;;
-    --org)      ORG_NAME="$2"; shift 2 ;;
-    *) echo "Unknown option: $1"; exit 1 ;;
+    --username)     USERNAME="$2"; shift 2 ;;
+    --display-name) DISPLAY_NAME="$2"; shift 2 ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
-# ---------------------------------------------------------------------------
-# Interactive prompts if not provided
-# ---------------------------------------------------------------------------
 if [ -z "$USERNAME" ]; then
   read -rp "Admin username: " USERNAME
 fi
-if [ -z "$PASSWORD" ]; then
-  read -rsp "Admin password (min 8 chars): " PASSWORD
-  echo
-fi
-if [ -z "$ORG_NAME" ]; then
-  read -rp "Organization name: " ORG_NAME
+
+ARGS=(create --username "$USERNAME" --roles ADMIN)
+if [ -n "$DISPLAY_NAME" ]; then
+  ARGS+=(--display-name "$DISPLAY_NAME")
 fi
 
-if [ ${#PASSWORD} -lt 8 ]; then
-  echo -e "${RED}Error: Password must be at least 8 characters${NC}"
-  exit 1
-fi
+cd "$ROOT"
+pnpm --silent --filter @openfoundry/svc-multipass exec tsx src/cli/users.ts "${ARGS[@]}"
 
-# ---------------------------------------------------------------------------
-# Create admin via signup endpoint
-# ---------------------------------------------------------------------------
-echo -e "${YELLOW}Creating admin user '${USERNAME}' for org '${ORG_NAME}'...${NC}"
-
-RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${GATEWAY_URL}/api/v2/auth/signup" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"username\": \"${USERNAME}\",
-    \"password\": \"${PASSWORD}\",
-    \"displayName\": \"${USERNAME}\",
-    \"orgName\": \"${ORG_NAME}\"
-  }")
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-BODY=$(echo "$RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" = "201" ]; then
-  ORG_RID=$(echo "$BODY" | grep -o '"orgRid":"[^"]*"' | cut -d'"' -f4)
-  echo -e "${GREEN}✓ Admin user created successfully${NC}"
-  echo ""
-  echo "  Username: ${USERNAME}"
-  echo "  Org RID:  ${ORG_RID}"
-  echo "  Gateway:  ${GATEWAY_URL}"
-  echo ""
-  echo -e "${YELLOW}Next: seed industry data for this org:${NC}"
-  echo "  ORG_RID=${ORG_RID} bash scripts/demo/seed-pest-control.sh"
-  echo ""
-  echo -e "${YELLOW}Then login at:${NC}"
-  echo "  http://localhost:3000"
-elif [ "$HTTP_CODE" = "403" ]; then
-  echo -e "${RED}✗ Signup is disabled${NC}"
-  echo "$BODY"
-  echo ""
-  echo -e "${YELLOW}Enable it temporarily by setting OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1${NC}"
-  echo -e "${YELLOW}on svc-multipass and the gateway, then unset it again.${NC}"
-  exit 1
-elif [ "$HTTP_CODE" = "409" ]; then
-  echo -e "${RED}✗ Username '${USERNAME}' already exists${NC}"
-  exit 1
-else
-  echo -e "${RED}✗ Signup failed (HTTP ${HTTP_CODE})${NC}"
-  echo "$BODY"
-  exit 1
-fi
+echo ""
+echo "Sign in at the console with \"Login with OAuth\"."

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { restoreSession } from "./session";
+import { restoreSession, userFromAccessToken } from "./session";
 import { LOCAL_STORAGE_TOKEN_KEY, LOCAL_STORAGE_USER_KEY } from "./authFetch";
 
 /**
@@ -111,5 +111,30 @@ describe("restoreSession", () => {
     });
 
     expect(restoreSession(NOW)).toBeNull();
+  });
+});
+
+describe("userFromAccessToken", () => {
+  function jwt(claims: Record<string, unknown>): string {
+    const encode = (v: unknown) =>
+      Buffer.from(JSON.stringify(v)).toString("base64url");
+    return `${encode({ alg: "ES256" })}.${encode(claims)}.sig`;
+  }
+
+  it("names the user the token was issued to, with their roles", () => {
+    const token = jwt({ sub: "alice", roles: "EDITOR VIEWER", note: "\u00e9\u00e8" });
+    expect(userFromAccessToken(token)).toEqual({
+      username: "alice",
+      token,
+      roles: ["EDITOR", "VIEWER"],
+    });
+  });
+
+  it("has no roles when the token carries none", () => {
+    expect(userFromAccessToken(jwt({ sub: "carol" })).roles).toEqual([]);
+  });
+
+  it("does not throw on a token it cannot read", () => {
+    expect(userFromAccessToken("not-a-jwt")).toMatchObject({ username: "unknown", roles: [] });
   });
 });

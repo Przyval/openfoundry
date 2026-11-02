@@ -17,6 +17,31 @@ export interface AuthUser {
   roles: string[];
 }
 
+/**
+ * The user an access token was issued to, read from its claims: `sub` is the
+ * username and `roles` the space-separated platform roles. The signature is
+ * not checked here - the gateway does that on every request - this only
+ * decides what the console shows.
+ */
+export function userFromAccessToken(accessToken: string): AuthUser {
+  let claims: { sub?: unknown; roles?: unknown } = {};
+  try {
+    const payload = accessToken.split(".")[1] ?? "";
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const json = new TextDecoder().decode(
+      Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
+    );
+    claims = JSON.parse(json);
+  } catch {
+    // Not a JWT we can read; show it as an anonymous session.
+  }
+  return {
+    username: typeof claims.sub === "string" ? claims.sub : "unknown",
+    token: accessToken,
+    roles: typeof claims.roles === "string" ? claims.roles.split(" ").filter(Boolean) : [],
+  };
+}
+
 /** A session worth adopting, as returned by `restoreSession`. */
 export interface RestoredSession {
   token: TokenResponse;
@@ -75,4 +100,25 @@ export function restoreSession(now: number = Date.now()): RestoredSession | null
     clearStoredSession();
     return null;
   }
+}
+
+/** What the authorization server sent back on the redirect to /login. */
+export type OAuthCallback =
+  | { code: string }
+  | { error: string; errorDescription: string | null };
+
+/**
+ * Read the OAuth callback from the current URL and strip it, synchronously,
+ * so it is handled exactly once. React StrictMode runs the callback effect
+ * twice; if the URL were cleaned only after the async code swap, both runs
+ * would swap the same single-use code and the second would fail.
+ */
+export function takeOAuthCallback(): OAuthCallback | null {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  const error = params.get("error");
+  if (!code && !error) return null;
+  window.history.replaceState({}, "", window.location.pathname);
+  if (error) return { error, errorDescription: params.get("error_description") };
+  return { code: code as string };
 }
