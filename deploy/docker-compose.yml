@@ -511,6 +511,8 @@ services:
     environment:
       <<: *service-env
       PORT: "8091"
+      ONTOLOGY_SERVICE_URL: http://svc-ontology:8081
+      OBJECTS_SERVICE_URL: http://svc-objects:8082
     depends_on:
       postgres:
         condition: service_healthy

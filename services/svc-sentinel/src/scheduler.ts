@@ -14,6 +14,7 @@ import { DataFetcher, type ThresholdQuery } from "./data-fetcher.js";
 export interface SchedulerConfig {
   intervalMs: number;
   objectsServiceUrl: string;
+  ontologyServiceUrl: string;
 }
 
 export class Scheduler {
@@ -26,7 +27,7 @@ export class Scheduler {
     private readonly effectExecutor: EffectExecutor,
     private readonly config: SchedulerConfig,
   ) {
-    this.fetcher = new DataFetcher(config.objectsServiceUrl);
+    this.fetcher = new DataFetcher(config.objectsServiceUrl, config.ontologyServiceUrl);
   }
 
   start(): void {
@@ -75,6 +76,7 @@ export class Scheduler {
         if (thresholdConfig.objectType && thresholdConfig.property && thresholdConfig.threshold !== undefined) {
           const query: ThresholdQuery = {
             objectType: thresholdConfig.objectType,
+            ontologyRid: monitor.ontologyRid,
             property: thresholdConfig.property,
             operator: (thresholdConfig.operator as ThresholdQuery["operator"]) ?? "lt",
             value: thresholdConfig.threshold,
@@ -110,6 +112,11 @@ export class Scheduler {
         console.log(`[Scheduler] Fired: ${monitor.name} → ${results.length} effects`);
       } catch (err) {
         console.error(`[Scheduler] Error evaluating monitor ${monitor.name}:`, err);
+        const execution = this.executionLog.startExecution(monitor.rid, { triggerType: "SCHEDULE" });
+        this.executionLog.failExecution(
+          execution.rid,
+          err instanceof Error ? err.message : String(err),
+        );
       }
     }
   }
