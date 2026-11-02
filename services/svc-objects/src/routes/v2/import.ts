@@ -15,7 +15,12 @@ import type { FastifyInstance } from "fastify";
 
 interface ImportRouteOptions {
   objectStore: {
-    upsertObject(objectType: string, primaryKey: string, properties: Record<string, unknown>): unknown;
+    upsertObject(
+      ontologyRid: string,
+      objectType: string,
+      primaryKey: string,
+      properties: Record<string, unknown>,
+    ): unknown;
   };
 }
 
@@ -87,6 +92,7 @@ export async function importRoutes(
   app.post<{ Params: { ontologyRid: string }; Body: ImportBody }>(
     "/ontologies/:ontologyRid/import/csv",
     async (request, reply) => {
+      const { ontologyRid } = request.params;
       const { csvContent, objectType, primaryKeyColumn } = request.body;
       const columnMapping = request.body.columnMapping ?? {};
 
@@ -142,7 +148,7 @@ export async function importRoutes(
             }
           }
 
-          await objectStore.upsertObject(objectType, pk, properties);
+          await objectStore.upsertObject(ontologyRid, objectType, pk, properties);
           result.imported++;
         } catch (err) {
           result.failed++;

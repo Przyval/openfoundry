@@ -12,11 +12,13 @@
 
 interface EmbeddingsPayload {
   texts: string[];
+  ontologyRid: string;
   sourceRid?: string;
   sourceType?: string;
 }
 
 type OnObjectUpsert = (
+  ontologyRid: string,
   objectType: string,
   primaryKey: string,
   properties: Record<string, unknown>,
@@ -60,6 +62,7 @@ export function createEmbeddingHook(aipServiceUrl: string): OnObjectUpsert {
   const embeddingsUrl = `${aipServiceUrl}/api/v2/aip/embeddings`;
 
   function onObjectUpsert(
+    ontologyRid: string,
     objectType: string,
     primaryKey: string,
     properties: Record<string, unknown>,
@@ -71,6 +74,7 @@ export function createEmbeddingHook(aipServiceUrl: string): OnObjectUpsert {
 
         const payload: EmbeddingsPayload = {
           texts: [text],
+          ontologyRid,
           sourceRid: primaryKey,
           sourceType: objectType,
         };

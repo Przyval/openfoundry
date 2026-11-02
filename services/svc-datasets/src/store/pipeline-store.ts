@@ -20,6 +20,7 @@ export interface CreatePipelineInput {
   steps: PipelineStep[];
   schedule?: PipelineSchedule;
   inputDatasets: string[];
+  ontologyRid?: string;
   outputDataset: string;
 }
 
@@ -29,6 +30,7 @@ export interface UpdatePipelineInput {
   steps?: PipelineStep[];
   schedule?: PipelineSchedule;
   inputDatasets?: string[];
+  ontologyRid?: string;
   outputDataset?: string;
   status?: PipelineStatus;
 }
@@ -228,6 +230,7 @@ export class PipelineStore {
       steps: input.steps,
       schedule: input.schedule,
       inputDatasets: input.inputDatasets,
+      ontologyRid: input.ontologyRid,
       outputDataset: input.outputDataset,
       status: "ACTIVE",
       createdAt: now,
@@ -270,6 +273,7 @@ export class PipelineStore {
     if (input.schedule !== undefined) pipeline.schedule = input.schedule;
     if (input.inputDatasets !== undefined)
       pipeline.inputDatasets = input.inputDatasets;
+    if (input.ontologyRid !== undefined) pipeline.ontologyRid = input.ontologyRid;
     if (input.outputDataset !== undefined)
       pipeline.outputDataset = input.outputDataset;
     if (input.status !== undefined) pipeline.status = input.status;

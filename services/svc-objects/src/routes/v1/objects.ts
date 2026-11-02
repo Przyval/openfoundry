@@ -223,7 +223,7 @@ export async function objectRoutesV1(
     // LIMIT/OFFSET against Postgres rather than one full read of the type per
     // page.
     if (!orderBy) {
-      const result = await store.listObjects(objectType, {
+      const result = await store.listObjects(ontologyRid, objectType, {
         pageSize,
         ...(request.query.pageToken ? { pageToken: request.query.pageToken } : {}),
       });
@@ -234,7 +234,7 @@ export async function objectRoutesV1(
       };
     }
 
-    const objects = applyOrderBy(await store.allObjects(objectType), orderBy);
+    const objects = applyOrderBy(await store.allObjects(ontologyRid, objectType), orderBy);
     const result = page(objects, cursor, pageSize);
     return {
       data: applySelect(result.data, properties).map(toV1OntologyObject),
@@ -259,7 +259,7 @@ export async function objectRoutesV1(
       properties,
     );
 
-    const object = await store.getObject(objectType, primaryKey);
+    const object = await store.getObject(ontologyRid, objectType, primaryKey);
     const [projected] = applySelect([object], properties);
     return toV1OntologyObject(projected);
   });
@@ -283,7 +283,7 @@ export async function objectRoutesV1(
     const properties = parseListParam(request.query.properties);
     const orderBy = parseOrderBy(request.query.orderBy);
 
-    const links = linkStore.getAllLinks(objectType, primaryKey, linkType);
+    const links = linkStore.getAllLinks(ontologyRid, objectType, primaryKey, linkType);
 
     // The declaration says what the far side is and what it declares, so an
     // unknown property is reported the same way whether the source object has
@@ -314,7 +314,7 @@ export async function objectRoutesV1(
     }
     const batches = await Promise.all(
       [...keysByType].map(async ([type, keys]) => {
-        return [type, await store.getObjectsByKeys(type, [...keys])] as const;
+        return [type, await store.getObjectsByKeys(ontologyRid, type, [...keys])] as const;
       }),
     );
     const byTypeAndKey = new Map<string, StoredObject>();
@@ -367,7 +367,7 @@ export async function objectRoutesV1(
         orderBy?.map((term) => term.property),
       );
 
-      let objects = await store.allObjects(objectType);
+      let objects = await store.allObjects(ontologyRid, objectType);
       if (body.query) {
         objects = objects.filter((object) =>
           matchesV1Query(object.properties, body.query!),
@@ -458,7 +458,7 @@ export async function objectRoutesV1(
         groupBy.map((grouping) => grouping.field),
       );
 
-      let objects = await store.allObjects(objectType);
+      let objects = await store.allObjects(ontologyRid, objectType);
       if (body.query) {
         objects = objects.filter((object) =>
           matchesV1Query(object.properties, body.query!),

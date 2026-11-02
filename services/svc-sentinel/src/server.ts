@@ -144,6 +144,7 @@ export async function createServer(
     {
       intervalMs: 60_000, // Check every 60 seconds
       objectsServiceUrl: process.env.OBJECTS_SERVICE_URL ?? "http://localhost:8082",
+      ontologyServiceUrl: process.env.ONTOLOGY_SERVICE_URL ?? "http://localhost:8081",
     },
   );
   scheduler.start();

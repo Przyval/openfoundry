@@ -294,7 +294,7 @@ export async function objectRoutes(
       // on the store's paged path, which is a LIMIT/OFFSET against Postgres
       // rather than one full read of the type per page.
       if (!orderBy && snapshot !== true && cursor.snapshotSize === undefined) {
-        const result = await store.listObjects(objectType, {
+        const result = await store.listObjects(ontologyRid, objectType, {
           pageSize,
           ...(query.pageToken ? { pageToken: query.pageToken } : {}),
         });
@@ -307,7 +307,7 @@ export async function objectRoutes(
         };
       }
 
-      const all = await store.allObjects(objectType);
+      const all = await store.allObjects(ontologyRid, objectType);
 
       // A snapshot listing freezes its view at the size the collection had
       // when paging began and carries that boundary forward in every token.
@@ -363,7 +363,7 @@ export async function objectRoutes(
         select,
       );
 
-      const object = await store.getObject(objectType, primaryKey);
+      const object = await store.getObject(ontologyRid, objectType, primaryKey);
       const [result] = applyExcludeRid(
         applySelectedProperties([object], select),
         excludeRid,
@@ -379,12 +379,12 @@ export async function objectRoutes(
       preHandler: requirePermission("objects:write"),
     },
     async (request, reply) => {
-      const { objectType } = request.params;
+      const { ontologyRid, objectType } = request.params;
       const { primaryKey, properties } = request.body;
       const upsert = (request.body as unknown as Record<string, unknown>).upsert === true;
       const obj = upsert && store.upsertObject
-        ? await store.upsertObject(objectType, primaryKey, properties)
-        : await store.createObject(objectType, primaryKey, properties);
+        ? await store.upsertObject(ontologyRid, objectType, primaryKey, properties)
+        : await store.createObject(ontologyRid, objectType, primaryKey, properties);
       if (pool) {
         const claims = (request as unknown as Record<string, unknown>).claims as Record<string, unknown> | undefined;
         writeAuditLog(pool, {
@@ -392,7 +392,7 @@ export async function objectRoutes(
           action: upsert ? "object.update" : "object.create",
           resourceRid: obj.rid,
           resourceType: objectType,
-          details: { primaryKey, ontologyRid: request.params.ontologyRid },
+          details: { primaryKey, ontologyRid },
           ipAddress: request.ip,
         });
       }
@@ -407,9 +407,9 @@ export async function objectRoutes(
       preHandler: requirePermission("objects:write"),
     },
     async (request) => {
-      const { objectType, primaryKey } = request.params;
+      const { ontologyRid, objectType, primaryKey } = request.params;
       const { properties } = request.body;
-      return await store.updateObject(objectType, primaryKey, properties);
+      return await store.updateObject(ontologyRid, objectType, primaryKey, properties);
     },
   );
 
@@ -420,15 +420,15 @@ export async function objectRoutes(
       preHandler: requirePermission("objects:delete"),
     },
     async (request, reply) => {
-      const { objectType, primaryKey } = request.params;
-      await store.deleteObject(objectType, primaryKey);
+      const { ontologyRid, objectType, primaryKey } = request.params;
+      await store.deleteObject(ontologyRid, objectType, primaryKey);
       if (pool) {
         const claims = (request as unknown as Record<string, unknown>).claims as Record<string, unknown> | undefined;
         writeAuditLog(pool, {
           userRid: typeof claims?.sub === "string" ? claims.sub : undefined,
           action: "object.delete",
           resourceType: objectType,
-          details: { primaryKey, ontologyRid: request.params.ontologyRid },
+          details: { primaryKey, ontologyRid },
           ipAddress: request.ip,
         });
       }
@@ -457,7 +457,7 @@ export async function objectRoutes(
     },
     async (request) => {
       rejectUnsupportedOntologyScoping(request.query);
-      const { objectType } = request.params;
+      const { ontologyRid, objectType } = request.params;
       // `executeInMemoryOnly` asks the service to fail rather than fall back to
       // heavier computation. This handler resolves the whole search from the
       // in-memory object store, so the guarantee always holds and the flag can
@@ -467,10 +467,7 @@ export async function objectRoutes(
       const select = assertStringListBody("select", request.body.select);
       const orderBy = assertOrderByClauseBody("orderBy", request.body.orderBy);
 
-      const declared = await declaredProperties(
-        request.params.ontologyRid,
-        objectType,
-      );
+      const declared = await declaredProperties(ontologyRid, objectType);
       assertPropertiesExist(objectType, declared, select);
       assertPropertiesExist(
         objectType,
@@ -479,7 +476,7 @@ export async function objectRoutes(
       );
 
       // Start with all objects of this type
-      let objects = await store.allObjects(objectType);
+      let objects = await store.allObjects(ontologyRid, objectType);
 
       // Apply where filter
       if (where) {
@@ -547,11 +544,11 @@ export async function objectRoutes(
     },
     async (request) => {
       rejectUnsupportedOntologyScoping(request.query);
-      const { objectType } = request.params;
+      const { ontologyRid, objectType } = request.params;
       const { aggregation: aggregations, where, groupBy } = request.body;
 
       // Start with all objects of this type
-      let objects = await store.allObjects(objectType);
+      let objects = await store.allObjects(ontologyRid, objectType);
 
       // Apply optional where filter
       if (where) {

@@ -20,6 +20,7 @@ export interface StoredMonitor {
   name: string;
   description?: string;
   objectType: string;
+  ontologyRid?: string;
   trigger: TriggerDef;
   effects: EffectDef[];
   status: "ACTIVE" | "PAUSED" | "ERROR";
@@ -32,6 +33,7 @@ export interface CreateMonitorInput {
   name: string;
   description?: string;
   objectType: string;
+  ontologyRid?: string;
   trigger: TriggerDef;
   effects: EffectDef[];
 }
@@ -40,6 +42,7 @@ export interface UpdateMonitorInput {
   name?: string;
   description?: string;
   objectType?: string;
+  ontologyRid?: string;
   trigger?: TriggerDef;
   effects?: EffectDef[];
   status?: "ACTIVE" | "PAUSED" | "ERROR";
@@ -67,6 +70,7 @@ export class MonitorStore {
       name: input.name,
       description: input.description,
       objectType: input.objectType,
+      ontologyRid: input.ontologyRid,
       trigger: input.trigger,
       effects: input.effects,
       status: "ACTIVE",
@@ -97,6 +101,7 @@ export class MonitorStore {
       name: input.name ?? monitor.name,
       description: input.description !== undefined ? input.description : monitor.description,
       objectType: input.objectType ?? monitor.objectType,
+      ontologyRid: input.ontologyRid ?? monitor.ontologyRid,
       trigger: input.trigger ?? monitor.trigger,
       effects: input.effects ?? monitor.effects,
       status: input.status ?? monitor.status,

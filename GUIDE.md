@@ -460,6 +460,10 @@ Konsol belum punya UI untuk menambah effect, jadi monitor buatan konsol tidak me
 Monitor yang punya effect dibuat lewat API, dan `scripts/seed-kelava-alerts.sh` adalah contoh yang bisa dijalankan.
 Scheduler svc-sentinel berjalan tiap 60 detik.
 
+Monitor membaca objek dari satu ontologi: yang disebut di field `ontologyRid`-nya, atau kalau kosong, satu-satunya ontologi yang mendeklarasikan `objectType`-nya.
+Kalau tidak ada atau lebih dari satu ontologi yang mendeklarasikan tipe itu, evaluasinya gagal dengan pesan galat alih-alih diam-diam melaporkan tidak ada pelanggaran.
+Pipeline yang membaca object type mengikuti aturan yang sama lewat `ontologyRid` pada definisinya.
+
 ### Webhooks (`/webhooks`)
 
 Daftar webhook beserta riwayat pengiriman terakhirnya, dan tombol untuk menjeda atau mengaktifkan kembali sebuah webhook (ACTIVE / PAUSED).
@@ -529,6 +533,10 @@ Menjalankan `bash scripts/demo/seed-healthcare.sh` di atas data pest control tid
 `start.sh --industry` menghapus `ontology-store.json`, `object-store.json`, dan `link-store.json` lebih dulu, lalu menyemai, sehingga hasilnya bersih.
 Urutan itu diverifikasi langsung: setelah ketiga berkas dihapus dan layanan distart ulang, `seed-healthcare.sh` membuat ontologi `healthcare` sendiri alih-alih menumpang yang lama.
 `--industry all` sengaja menyemai keempatnya ke dalam satu ontologi.
+
+Objek dan link disimpan per ontologi, jadi dua ontologi boleh sama-sama punya object type `Employee` tanpa saling melihat datanya.
+`object-store.json` atau `link-store.json` dari versi sebelumnya tidak mencatat ontologi pemiliknya, sehingga svc-objects menyisihkannya utuh menjadi `*.unscoped-<ms>` saat start dan mulai kosong.
+`start.sh` dan `docker-entrypoint.sh` mendeteksi `object-store.json` lama itu sebelum menyalakan layanan, menghapus ketiga berkas store, lalu menyemai ontologi baru dengan sendirinya.
 
 Keempat skrip itu juga **mengabaikan `ORG_RID`**.
 Hanya `scripts/seed-common.sh` yang membacanya, dan tak satu pun dari keempat skrip demo memakai berkas itu.

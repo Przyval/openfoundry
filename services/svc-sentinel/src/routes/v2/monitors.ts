@@ -42,6 +42,7 @@ export async function monitorRoutes(
       name: string;
       description?: string;
       objectType: string;
+      ontologyRid?: string;
       trigger: TriggerDef;
       effects: EffectDef[];
     };
@@ -65,6 +66,7 @@ export async function monitorRoutes(
       name?: string;
       description?: string;
       objectType?: string;
+      ontologyRid?: string;
       trigger?: TriggerDef;
       effects?: EffectDef[];
       status?: "ACTIVE" | "PAUSED" | "ERROR";

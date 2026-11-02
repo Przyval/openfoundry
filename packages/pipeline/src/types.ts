@@ -9,6 +9,7 @@ export interface PipelineDefinition {
   steps: PipelineStep[];
   schedule?: PipelineSchedule;
   inputDatasets: string[]; // dataset RIDs
+  ontologyRid?: string; // ontology the source object type is read from
   outputDataset: string; // target dataset RID
   status: PipelineStatus;
   createdAt: Date;
