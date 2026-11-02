@@ -161,7 +161,7 @@ export class PgObjectStore {
     private orgRid?: string,
   ) {}
 
-  // Wrap fn in an explicit transaction with SET LOCAL so the tenant context
+  // Wrap fn in an explicit transaction with a transaction-local setting so the tenant context
   // is guaranteed to reset at COMMIT/ROLLBACK and never leaks to the next
   // request on a pooled connection.
   private async withTenant<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
@@ -169,7 +169,7 @@ export class PgObjectStore {
     try {
       await client.query("BEGIN");
       if (this.orgRid) {
-        await client.query("SET LOCAL app.current_org_rid = $1", [this.orgRid]);
+        await client.query("SELECT set_config('app.org_rid', $1, true)", [this.orgRid]);
       }
       const result = await fn(client);
       await client.query("COMMIT");

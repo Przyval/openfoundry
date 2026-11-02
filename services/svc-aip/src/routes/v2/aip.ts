@@ -37,8 +37,6 @@ interface EmbeddingsBody {
   texts: string[];
   model?: string;
   ontologyRid?: string;
-  sourceRid?: string;
-  sourceType?: string;
 }
 
 interface SemanticSearchBody {
@@ -173,7 +171,7 @@ export async function aipRoutes(
   app.post<{ Body: EmbeddingsBody }>(
     "/aip/embeddings",
     async (request, reply) => {
-      const { texts, model, ontologyRid, sourceRid, sourceType } =
+      const { texts, model, ontologyRid } =
         request.body ?? ({} as EmbeddingsBody);
 
       if (!texts || !Array.isArray(texts) || texts.length === 0) {
@@ -186,8 +184,8 @@ export async function aipRoutes(
       // Store the embeddings
       const inputs = texts.map((text, i) => ({
         ontologyRid: ontologyRid ?? null,
-        sourceRid: sourceRid ?? generateRid("aip", "text").toString(),
-        sourceType: sourceType ?? "text",
+        sourceRid: generateRid("aip", "text").toString(),
+        sourceType: "text",
         content: text,
         embedding: embeddings[i],
         model: usedModel,

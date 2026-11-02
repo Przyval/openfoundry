@@ -27,6 +27,7 @@ interface PipelineRow {
   steps: PipelineStep[];
   schedule: PipelineSchedule | null;
   input_datasets: string[];
+  ontology_rid: string | null;
   output_dataset: string | null;
   status: string;
   created_by: string | null;
@@ -57,6 +58,7 @@ function rowToPipeline(row: PipelineRow): PipelineDefinition {
     steps: row.steps,
     schedule: row.schedule ?? undefined,
     inputDatasets: row.input_datasets ?? [],
+    ontologyRid: row.ontology_rid ?? undefined,
     outputDataset: row.output_dataset ?? "",
     status: row.status as PipelineStatus,
     createdAt: new Date(row.created_at),
@@ -104,8 +106,8 @@ export class PgPipelineStore {
 
     try {
       const { rows } = await this.pool.query<PipelineRow>({
-        text: `INSERT INTO pipelines (rid, name, description, steps, schedule, input_datasets, output_dataset)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)
+        text: `INSERT INTO pipelines (rid, name, description, steps, schedule, input_datasets, ontology_rid, output_dataset)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                RETURNING *`,
         values: [
           rid,
@@ -114,6 +116,7 @@ export class PgPipelineStore {
           JSON.stringify(input.steps),
           input.schedule ? JSON.stringify(input.schedule) : null,
           input.inputDatasets,
+          input.ontologyRid ?? null,
           input.outputDataset,
         ],
       });
@@ -177,6 +180,10 @@ export class PgPipelineStore {
     if (input.inputDatasets !== undefined) {
       setClauses.push(`input_datasets = $${paramIndex++}`);
       values.push(input.inputDatasets);
+    }
+    if (input.ontologyRid !== undefined) {
+      setClauses.push(`ontology_rid = $${paramIndex++}`);
+      values.push(input.ontologyRid);
     }
     if (input.outputDataset !== undefined) {
       setClauses.push(`output_dataset = $${paramIndex++}`);

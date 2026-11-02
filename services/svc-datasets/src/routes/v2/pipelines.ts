@@ -12,29 +12,77 @@ import { paginateArray } from "./pagination-helpers.js";
 
 const OBJECTS_SERVICE_URL =
   process.env.OBJECTS_SERVICE_URL ?? "http://localhost:8082";
+const ONTOLOGY_SERVICE_URL =
+  process.env.ONTOLOGY_SERVICE_URL ?? "http://localhost:8081";
 
 /**
- * Fetch all objects of a given type from svc-objects, paginating through
- * all pages. Returns a flat array of property maps (rows).
+ * Resolve the ontology a pipeline reads its source object type from. A
+ * pipeline that names no ontology predates the field, so it reads from the
+ * one ontology that declares the type; none or several is an error, because
+ * an object type's API name is unique only within one ontology.
+ */
+async function resolveSourceOntology(
+  objectType: string,
+  ontologyRid: string | undefined,
+): Promise<string> {
+  if (ontologyRid) return ontologyRid;
+
+  const declaring: string[] = [];
+  let pageToken: string | undefined;
+  do {
+    const qs = new URLSearchParams();
+    if (pageToken) qs.set("pageToken", pageToken);
+    const res = await fetch(`${ONTOLOGY_SERVICE_URL}/api/v2/ontologies?${qs}`);
+    if (!res.ok) {
+      throw new Error(`Failed to list ontologies: HTTP ${res.status}`);
+    }
+    const body = (await res.json()) as {
+      data: Array<{ rid: string }>;
+      nextPageToken?: string;
+    };
+    for (const ontology of body.data) {
+      const typeRes = await fetch(
+        `${ONTOLOGY_SERVICE_URL}/api/v2/ontologies/${encodeURIComponent(ontology.rid)}/objectTypes/${encodeURIComponent(objectType)}`,
+      );
+      if (typeRes.ok) declaring.push(ontology.rid);
+      else if (typeRes.status !== 404) {
+        throw new Error(
+          `Failed to read object type ${objectType} in ontology ${ontology.rid}: HTTP ${typeRes.status}`,
+        );
+      }
+    }
+    pageToken = body.nextPageToken;
+  } while (pageToken);
+
+  if (declaring.length === 1) return declaring[0];
+  if (declaring.length === 0) {
+    throw new Error(`No ontology declares object type ${objectType}`);
+  }
+  throw new Error(
+    `Object type ${objectType} is declared by ${declaring.length} ontologies ` +
+      `(${declaring.join(", ")}); set the pipeline's ontologyRid`,
+  );
+}
+
+/**
+ * Fetch all objects of a given type from one ontology in svc-objects,
+ * paginating through all pages. Returns a flat array of property maps (rows).
  */
 async function fetchSourceObjects(
   objectType: string,
+  ontologyRid: string | undefined,
 ): Promise<Record<string, unknown>[]> {
+  const sourceOntologyRid = await resolveSourceOntology(objectType, ontologyRid);
   const rows: Record<string, unknown>[] = [];
   let pageToken: string | undefined;
   const pageSize = 500;
-
-  // We use the direct REST list endpoint on svc-objects
-  // Route: GET /api/v2/ontologies/:ontologyRid/objects/:objectType
-  // We use a placeholder ontology RID since the in-memory store ignores it.
-  const ontologyRid = "default";
 
   do {
     const qs = new URLSearchParams({ pageSize: String(pageSize) });
     if (pageToken) qs.set("pageToken", pageToken);
 
     const res = await fetch(
-      `${OBJECTS_SERVICE_URL}/api/v2/ontologies/${ontologyRid}/objects/${objectType}?${qs}`,
+      `${OBJECTS_SERVICE_URL}/api/v2/ontologies/${encodeURIComponent(sourceOntologyRid)}/objects/${encodeURIComponent(objectType)}?${qs}`,
       { headers: { "Content-Type": "application/json" } },
     );
 
@@ -81,6 +129,7 @@ function serializePipeline(p: {
   steps: unknown[];
   schedule?: unknown;
   inputDatasets: string[];
+  ontologyRid?: string;
   outputDataset: string;
   status: string;
   createdAt: Date;
@@ -93,6 +142,7 @@ function serializePipeline(p: {
     steps: p.steps,
     schedule: p.schedule,
     inputDatasets: p.inputDatasets,
+    ontologyRid: p.ontologyRid,
     outputDataset: p.outputDataset,
     status: p.status,
     createdAt: p.createdAt.toISOString(),
@@ -330,6 +380,7 @@ export async function pipelineRoutes(
       }>;
       schedule?: { type: string; interval?: number; cron?: string };
       inputDatasets: string[];
+      ontologyRid?: string;
       outputDataset: string;
     };
   }>("/pipelines", {
@@ -370,6 +421,7 @@ export async function pipelineRoutes(
       }>;
       schedule?: { type: string; interval?: number; cron?: string };
       inputDatasets?: string[];
+      ontologyRid?: string;
       outputDataset?: string;
       status?: string;
     };
@@ -462,7 +514,7 @@ export async function pipelineRoutes(
     // 2. Fetch source data from svc-objects
     let sourceRows: Record<string, unknown>[];
     try {
-      sourceRows = await fetchSourceObjects(sourceObjectType);
+      sourceRows = await fetchSourceObjects(sourceObjectType, pipeline.ontologyRid);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       // Record a failed run

@@ -27,6 +27,8 @@
     "@types/pg": "^8.11.0",
     "typescript": "~5.5.4",
     "vitest": "^3.2.0",
-    "tsx": "^4.0.0"
+    "tsx": "^4.0.0",
+    "@electric-sql/pglite": "0.5.14",
+    "@electric-sql/pglite-pgvector": "0.0.15"
   }
 }

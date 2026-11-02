@@ -206,51 +206,36 @@ describe("POST /api/v2/aip/semantic-search", () => {
   it("matches only embeddings of the requested ontology", async () => {
     const alpha = "ri.ontology.main.ontology.alpha";
     const beta = "ri.ontology.main.ontology.beta";
-    for (const [ontologyRid, primaryKey, text] of [
-      [alpha, "emp-a", "Employee: name=Alpha Ann"],
-      [beta, "emp-b", "Employee: name=Beta Bob"],
+    for (const [ontologyRid, text] of [
+      [alpha, "Employee: name=Alpha Ann"],
+      [beta, "Employee: name=Beta Bob"],
+      [undefined, "Employee: name=Unscoped Una"],
     ]) {
       const res = await app.inject({
         method: "POST",
         url: "/api/v2/aip/embeddings",
-        payload: {
-          texts: [text],
-          ontologyRid,
-          sourceRid: primaryKey,
-          sourceType: "Employee",
-        },
+        payload: { texts: [text], ontologyRid },
       });
       expect(res.statusCode).toBe(200);
     }
-    await app.inject({
-      method: "POST",
-      url: "/api/v2/aip/embeddings",
-      payload: {
-        texts: ["Employee: name=Unscoped Una"],
-        sourceRid: "emp-u",
-        sourceType: "Employee",
-      },
-    });
 
     const search = async (ontologyRid?: string) => {
       const res = await app.inject({
         method: "POST",
         url: "/api/v2/aip/semantic-search",
-        payload: { query: "Employee", objectType: "Employee", ontologyRid },
+        payload: { query: "Employee", ontologyRid },
       });
       expect(res.statusCode).toBe(200);
-      return res.json().results;
+      return res
+        .json()
+        .results.map(
+          (r: { properties: { content: string } }) => r.properties.content,
+        );
     };
 
-    expect(await search(alpha)).toEqual([
-      expect.objectContaining({ rid: "emp-a", objectType: "Employee" }),
-    ]);
-    expect(await search(beta)).toEqual([
-      expect.objectContaining({ rid: "emp-b", objectType: "Employee" }),
-    ]);
-    expect(await search()).toEqual([
-      expect.objectContaining({ rid: "emp-u", objectType: "Employee" }),
-    ]);
+    expect(await search(alpha)).toEqual(["Employee: name=Alpha Ann"]);
+    expect(await search(beta)).toEqual(["Employee: name=Beta Bob"]);
+    expect(await search()).toEqual(["Employee: name=Unscoped Una"]);
   });
 
   it("returns 400 when query is missing", async () => {

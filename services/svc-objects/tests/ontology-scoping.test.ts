@@ -15,11 +15,18 @@
  * answers, is scoped by forwarding the path's ontology.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type pg from "pg";
+import { fileURLToPath } from "node:url";
+import pg from "pg";
+import { PGlite } from "@electric-sql/pglite";
+import { createPgConfig } from "@electric-sql/pglite/node-postgres";
+import { citext } from "@electric-sql/pglite/contrib/citext";
+import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
+import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
+import { vector } from "@electric-sql/pglite-pgvector";
 import Fastify, { type FastifyInstance } from "fastify";
 import { createServer } from "../src/server.js";
 import { ObjectStore } from "../src/store/object-store.js";
@@ -446,137 +453,105 @@ describe("Persisted stores keep the ontology", () => {
 // 3. PgObjectStore resolves the object type within the ontology
 // ===========================================================================
 
-/**
- * Answers the statements `PgObjectStore` issues from a small table of object
- * types and objects, so the test can tell which ontology's rows a read used.
- */
-class FakePool {
-  readonly statements: Array<{ text: string; values: unknown[] }> = [];
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
-  /** object_types rows: ontology RID + api name -> object type RID. */
-  private readonly types = [
-    { rid: "ot-alpha-employee", ontology_rid: ALPHA, api_name: "Employee" },
-    { rid: "ot-beta-employee", ontology_rid: BETA, api_name: "Employee" },
-    { rid: "ot-beta-badge", ontology_rid: BETA, api_name: "Badge" },
-  ];
-
-  private readonly objects = [
-    { rid: "o1", object_type_rid: "ot-alpha-employee", primary_key: "emp-1", properties: { name: "Alpha Ann" } },
-    { rid: "o2", object_type_rid: "ot-beta-employee", primary_key: "emp-1", properties: { name: "Beta Bob" } },
-  ];
-
-  async query(config: { text: string; values?: unknown[] } | string) {
-    const text = typeof config === "string" ? config : config.text;
-    const values = typeof config === "string" ? [] : (config.values ?? []);
-    this.statements.push({ text, values });
-
-    if (/FROM object_types/.test(text) && /SELECT rid/.test(text)) {
-      // Honour exactly the predicates the statement names, so an unscoped
-      // lookup is answered the way Postgres would answer it: first row wins.
-      const scoped = /ontology_rid = \$1 AND api_name = \$2/.test(text);
-      const rows = this.types.filter((t) =>
-        scoped
-          ? t.ontology_rid === values[0] && t.api_name === values[1]
-          : t.api_name === values[0],
-      );
-      return { rows: rows.map((t) => ({ rid: t.rid })), rowCount: rows.length };
-    }
-    if (/COUNT\(\*\)/.test(text)) {
-      const total = this.objects.filter((o) => o.object_type_rid === values[0]).length;
-      return { rows: [{ total }], rowCount: 1 };
-    }
-    if (/^\s*SELECT \* FROM objects/.test(text)) {
-      const rows = this.objects
-        .filter((o) => o.object_type_rid === values[0])
-        .filter((o) =>
-          /primary_key = \$2/.test(text) ? o.primary_key === values[1] : true,
-        )
-        .map((o) => ({ ...o, created_at: "t", updated_at: "t", version: 1 }));
-      return { rows, rowCount: rows.length };
-    }
-    if (/INSERT INTO objects/.test(text)) {
-      return {
-        rows: [{ rid: values[0], primary_key: values[2], properties: JSON.parse(String(values[3])), created_at: "t", updated_at: "t" }],
-        rowCount: 1,
-      };
-    }
-    return { rows: [], rowCount: 0 };
-  }
-
-  async connect() {
-    return { query: this.query.bind(this), release: () => {} };
-  }
+/** What docker-entrypoint-initdb.d and `pnpm db:migrate` apply, in their order. */
+function migrationFiles(): string[] {
+  const dir = path.join(REPO_ROOT, "db/migrations");
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+    .map((f) => path.join(dir, f));
 }
 
-describe("PgObjectStore scopes object-type resolution to the ontology", () => {
-  it("serves each ontology the rows hanging off its own object type", async () => {
-    const pool = new FakePool();
-    const store = new PgObjectStore(pool as unknown as pg.Pool);
+const SCHEMAS: [string, () => string[]][] = [
+  ["db/migrations", migrationFiles],
+  ["scripts/migrate.sql", () => [path.join(REPO_ROOT, "scripts/migrate.sql")]],
+];
+
+describe.each(SCHEMAS)("PgObjectStore on a database built from %s", (schema, files) => {
+  let db: PGlite;
+  let pool: pg.Pool;
+  let store: PgObjectStore;
+
+  beforeAll(async () => {
+    db = await PGlite.create({ extensions: { citext, pgcrypto, pg_trgm, vector } });
+    for (const file of files()) await db.exec(readFileSync(file, "utf8"));
+    pool = new pg.Pool(createPgConfig(db));
+    store = new PgObjectStore(pool);
+
+    await pool.query(
+      `INSERT INTO ontologies (rid, api_name) VALUES ($1, 'alpha'), ($2, 'beta')`,
+      [ALPHA, BETA],
+    );
+    await pool.query(
+      `INSERT INTO object_types (rid, ontology_rid, api_name, primary_key_api_name, primary_key_type)
+       VALUES ('ot-alpha-employee', $1, 'Employee', 'id', 'STRING'),
+              ('ot-beta-employee', $2, 'Employee', 'id', 'STRING'),
+              ('ot-beta-badge', $2, 'Badge', 'id', 'STRING')`,
+      [ALPHA, BETA],
+    );
+  }, 60_000);
+
+  afterAll(async () => {
+    await pool?.end();
+    await db?.close();
+  });
+
+  it("creates and upserts without an organization, each into its own ontology's type", async () => {
+    await store.createObject(ALPHA, "Employee", "emp-1", { name: "Alpha Ann" });
+    await store.createObject(BETA, "Employee", "emp-1", { name: "Beta Bob" });
+    await store.upsertObject(BETA, "Employee", "emp-2", { name: "Beta Bea" });
+    await store.upsertObject(BETA, "Employee", "emp-2", { name: "Beta Bea II" });
 
     expect((await store.getObject(ALPHA, "Employee", "emp-1")).properties.name).toBe("Alpha Ann");
     expect((await store.getObject(BETA, "Employee", "emp-1")).properties.name).toBe("Beta Bob");
-    expect((await store.allObjects(BETA, "Employee")).map((o) => o.properties.name)).toEqual([
-      "Beta Bob",
+    expect((await store.allObjects(ALPHA, "Employee")).map((o) => o.primaryKey)).toEqual([
+      "emp-1",
     ]);
-    expect((await store.listObjects(ALPHA, "Employee")).totalCount).toBe(1);
+    expect(
+      (await store.allObjects(BETA, "Employee")).map((o) => [o.primaryKey, o.properties.name]),
+    ).toEqual([
+      ["emp-1", "Beta Bob"],
+      ["emp-2", "Beta Bea II"],
+    ]);
+    expect((await store.listObjects(BETA, "Employee")).totalCount).toBe(2);
+
+    const { rows } = await pool.query<{ object_type_rid: string; primary_key: string }>(
+      "SELECT object_type_rid, primary_key FROM objects ORDER BY object_type_rid, primary_key",
+    );
+    expect(rows).toEqual([
+      { object_type_rid: "ot-alpha-employee", primary_key: "emp-1" },
+      { object_type_rid: "ot-beta-employee", primary_key: "emp-1" },
+      { object_type_rid: "ot-beta-employee", primary_key: "emp-2" },
+    ]);
   });
 
   it("does not find a type through an ontology that does not declare it", async () => {
-    const store = new PgObjectStore(new FakePool() as unknown as pg.Pool);
-
-    await expect(store.allObjects(ALPHA, "Badge")).rejects.toMatchObject({
+    await expect(store.allObjects(ALPHA, "Badge")).rejects.toMatchObject({ statusCode: 404 });
+    await expect(store.createObject(ALPHA, "Badge", "b-1", {})).rejects.toMatchObject({
       statusCode: 404,
     });
   });
 
-  it("writes into the requested ontology's object type", async () => {
-    const pool = new FakePool();
-    const store = new PgObjectStore(pool as unknown as pg.Pool);
+  it.runIf(schema === "db/migrations")(
+    "records the organization when one is configured, and the column default when none is",
+    async () => {
+      await pool.query("INSERT INTO organizations (rid, display_name) VALUES ('org:acme', 'Acme')");
+      const acme = new PgObjectStore(pool, "org:acme");
+      await acme.createObject(ALPHA, "Employee", "emp-acme-1", {});
+      await acme.upsertObject(ALPHA, "Employee", "emp-acme-2", {});
 
-    await store.createObject(BETA, "Employee", "emp-2", { name: "Beta Bea" });
-
-    const insert = pool.statements.find((s) => /INSERT INTO objects/.test(s.text))!;
-    expect(insert.values[1]).toBe("ot-beta-employee");
-  });
-
-  it("leaves org_rid to its column default when no organization is configured", async () => {
-    // An explicit NULL overrides the `NOT NULL DEFAULT 'org:default'` that
-    // db/migrations gives the column, so every create failed with 23502.
-    const pool = new FakePool();
-    await new PgObjectStore(pool as unknown as pg.Pool).createObject(
-      ALPHA,
-      "Employee",
-      "emp-2",
-      {},
-    );
-    await new PgObjectStore(pool as unknown as pg.Pool).upsertObject(
-      ALPHA,
-      "Employee",
-      "emp-3",
-      {},
-    );
-
-    const inserts = pool.statements.filter((s) => /INSERT INTO objects/.test(s.text));
-    expect(inserts).toHaveLength(2);
-    for (const insert of inserts) {
-      expect(insert.text).not.toMatch(/org_rid/);
-      expect(insert.values).toHaveLength(4);
-    }
-  });
-
-  it("names org_rid when an organization is configured", async () => {
-    const pool = new FakePool();
-    await new PgObjectStore(pool as unknown as pg.Pool, "org:acme").createObject(
-      ALPHA,
-      "Employee",
-      "emp-2",
-      {},
-    );
-
-    const insert = pool.statements.find((s) => /INSERT INTO objects/.test(s.text))!;
-    expect(insert.text).toMatch(/org_rid/);
-    expect(insert.values[4]).toBe("org:acme");
-  });
+      const { rows } = await pool.query<{ primary_key: string; org_rid: string }>(
+        "SELECT primary_key, org_rid FROM objects WHERE object_type_rid = 'ot-alpha-employee' ORDER BY primary_key",
+      );
+      expect(rows).toEqual([
+        { primary_key: "emp-1", org_rid: "org:default" },
+        { primary_key: "emp-acme-1", org_rid: "org:acme" },
+        { primary_key: "emp-acme-2", org_rid: "org:acme" },
+      ]);
+    },
+  );
 });
 
 // ===========================================================================
