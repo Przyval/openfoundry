@@ -12,7 +12,7 @@ import type { SigningKey } from "../keys.js";
 import { verifyCodeChallenge } from "../pkce.js";
 import { TokenStore } from "../store/token-store.js";
 import type { ClientStore, OAuthClient } from "../store/client-store.js";
-import type { UserDirectory } from "../store/user-store.js";
+import { DEFAULT_ORG, userTokenClaims, type UserDirectory } from "../store/user-store.js";
 import { registerAuthorizeRoutes } from "./authorize.js";
 
 // ---------------------------------------------------------------------------
@@ -44,14 +44,7 @@ interface RevokeRequest {
 }
 
 /** What a token says about its subject beyond the subject's name. */
-interface SubjectClaims {
-  /** Space-separated platform roles, or undefined for none. */
-  roles?: string;
-  org: string;
-}
-
-/** The `org` claim of a subject that belongs to no organization. */
-const DEFAULT_ORG = "default-org";
+type SubjectClaims = ReturnType<typeof userTokenClaims>;
 
 // ---------------------------------------------------------------------------
 // Plugin
@@ -194,10 +187,7 @@ export async function oauthRoutes(
     if (!user || !user.active) {
       throw invalidArgument("grant", "the user is unknown or disabled");
     }
-    return {
-      roles: user.roles.length > 0 ? user.roles.join(" ") : undefined,
-      org: user.orgRid ?? DEFAULT_ORG,
-    };
+    return userTokenClaims(user);
   }
 
   async function handleAuthorizationCodeGrant(
@@ -260,8 +250,8 @@ export async function oauthRoutes(
     const scope = body.scope ?? client.scopes.join(" ");
 
     return issueTokens(`service:${client.clientId}`, scope, client, {
-      roles: client.roles && client.roles.length > 0 ? client.roles.join(" ") : undefined,
       org: DEFAULT_ORG,
+      ...(client.roles && client.roles.length > 0 ? { roles: client.roles.join(" ") } : {}),
     }, reply, false);
   }
 
@@ -306,15 +296,11 @@ export async function oauthRoutes(
         sub: subject,
         sid: sessionId,
         jti: rid.toString(),
-        org: claims.org,
         svc: "multipass",
         iss: "openfoundry-multipass",
         aud: "openfoundry-api",
         scope,
-        // Minted, but with no consumer yet: the gateway asserts no identity
-        // downstream. The permission-model work that unifies the guarded
-        // routes is what will read this claim.
-        ...(claims.roles ? { roles: claims.roles } : {}),
+        ...claims,
       },
       config.tokenExpirySeconds,
     );

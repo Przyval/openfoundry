@@ -4,6 +4,8 @@ import { generateCodeChallenge, verifyCodeChallenge } from "../src/pkce.js";
 import { TokenStore } from "../src/store/token-store.js";
 import { ClientStore, createClientStore, DEV_CLIENTS } from "../src/store/client-store.js";
 import { createServer } from "../src/server.js";
+import { FileAuthorizationStore, ROOT_RESOURCE } from "@openfoundry/permissions";
+import { InMemoryUserDirectory } from "../src/store/user-store.js";
 import {
   CONSOLE_CLIENT,
   SERVICE_CLIENT,
@@ -257,7 +259,8 @@ describe("development credentials under NODE_ENV=production", () => {
         payload: { username: "developer", password: "dev123" },
       });
       expect(login.statusCode).toBe(200);
-      expect(decodeJwt(login.json().accessToken).roles).toBe("EDITOR");
+      // The development user holds no platform role: access is a role on a resource.
+      expect(decodeJwt(login.json().accessToken).roles).toBeUndefined();
     } finally {
       await app.close();
     }
@@ -324,8 +327,66 @@ describe("token endpoint", () => {
     expect(response.json().refresh_token).toBeUndefined();
   });
 
+  it("grants a declared client's legacy EDITOR as editor on the platform root", async () => {
+    const authorizationStore = new FileAuthorizationStore(null);
+    const app = await createServer({
+      config: testConfig({
+        oauthClients: JSON.stringify([{ clientId: "sync", clientSecret: "s3cret", roles: ["EDITOR"] }]),
+      }),
+      users: new InMemoryUserDirectory(),
+      authorizationStore,
+    });
+    try {
+      expect(await authorizationStore.listGrants(ROOT_RESOURCE)).toMatchObject([
+        { principalType: "user", principalId: "service:sync", roleId: "editor" },
+      ]);
+      const response = await app.inject({
+        method: "POST",
+        url: "/multipass/api/oauth2/token",
+        payload: { grant_type: "client_credentials", client_id: "sync", client_secret: "s3cret" },
+      });
+      expect(response.statusCode).toBe(200);
+      const claims = decodeJwt(response.json().access_token);
+      expect(claims.sub).toBe("service:sync");
+      expect(claims.roles).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("takes back a legacy grant once the client no longer declares it, and leaves an operator's grant", async () => {
+    const authorizationStore = new FileAuthorizationStore(null);
+    const start = async (clients: unknown[]) =>
+      (
+        await createServer({
+          config: testConfig({ oauthClients: JSON.stringify(clients) }),
+          users: new InMemoryUserDirectory(),
+          authorizationStore,
+        })
+      ).close();
+    await authorizationStore.addGrant({
+      resourceRid: ROOT_RESOURCE,
+      principalType: "user",
+      principalId: "service:ops",
+      roleId: "viewer",
+      grantedBy: "root",
+      grantedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await start([
+      { clientId: "sync", clientSecret: "s3cret", roles: ["EDITOR", "VIEWER"] },
+      { clientId: "ops", clientSecret: "s3cret", roles: ["EDITOR"] },
+    ]);
+    const held = async () =>
+      (await authorizationStore.listGrants(ROOT_RESOURCE)).map((g) => `${g.principalId}:${g.roleId}`).sort();
+    expect(await held()).toEqual(["service:ops:editor", "service:ops:viewer", "service:sync:editor", "service:sync:viewer"]);
+
+    await start([{ clientId: "sync", clientSecret: "s3cret", roles: ["VIEWER"] }]);
+    expect(await held()).toEqual(["service:ops:viewer", "service:sync:viewer"]);
+  });
+
   it("puts the client's own roles on a client_credentials token", async () => {
-    server.clientStore.registerClient({ ...SERVICE_CLIENT, clientId: "roleful", roles: ["EDITOR"] });
+    server.clientStore.registerClient({ ...SERVICE_CLIENT, clientId: "roleful", roles: ["SERVICE_ACCOUNT"] });
 
     const response = await token({
       grant_type: "client_credentials",
@@ -334,7 +395,7 @@ describe("token endpoint", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(decodeJwt(response.json().access_token).roles).toBe("EDITOR");
+    expect(decodeJwt(response.json().access_token).roles).toBe("SERVICE_ACCOUNT");
   });
 
   it("rejects client_credentials with a wrong secret or from a public client", async () => {

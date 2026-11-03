@@ -2,8 +2,13 @@ import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import { OpenFoundryApiError } from "@openfoundry/errors";
 import { createPool } from "@openfoundry/db";
+import {
+  createAuthorizationStore,
+  registerAuthorization,
+  type AuthorizationStore,
+} from "@openfoundry/permissions";
 import { type OntologyServiceConfig, loadConfig } from "./config.js";
-import { OntologyStore } from "./store/ontology-store.js";
+import { OntologyStore, type StoredOntology } from "./store/ontology-store.js";
 import { PgOntologyStore } from "./store/pg-ontology-store.js";
 import { healthRoutes } from "./routes/health.js";
 import { v2Routes } from "./routes/v2/index.js";
@@ -14,6 +19,8 @@ import { v1Routes } from "./routes/v1/index.js";
 // ---------------------------------------------------------------------------
 
 export interface CreateServerOptions {
+  /** Inject the grant and policy store (useful for tests). */
+  authorizationStore?: AuthorizationStore;
   /** Override the config (useful for tests). */
   config?: OntologyServiceConfig;
   /** Inject an existing store (useful for tests). */
@@ -27,6 +34,7 @@ export async function createServer(
   options: CreateServerOptions = {},
 ): Promise<FastifyInstance> {
   const config = options.config ?? loadConfig();
+  let authPool: ReturnType<typeof createPool> | undefined;
 
   let store: OntologyStore | PgOntologyStore;
   if (options.store) {
@@ -34,6 +42,7 @@ export async function createServer(
   } else if (config.databaseUrl) {
     console.log("Using PostgreSQL storage (DATABASE_URL is set)");
     const pool = createPool({ connectionString: config.databaseUrl });
+    authPool = pool;
     store = new PgOntologyStore(pool);
   } else {
     console.log("Using JSON file storage (DATABASE_URL is not set)");
@@ -111,6 +120,17 @@ export async function createServer(
   });
 
   // -- Routes -------------------------------------------------------------
+  registerAuthorization(app, {
+    store: options.authorizationStore ?? createAuthorizationStore(authPool),
+    // Routes accept an ontology's API name where its RID goes.
+    alias: async (identifier) => {
+      if (identifier.startsWith("ri.")) return undefined;
+      const listed = await store.listOntologies();
+      const all = Array.isArray(listed) ? listed : ((listed as { items?: StoredOntology[] }).items ?? []);
+      return all.find((o) => o.apiName === identifier)?.rid;
+    },
+  });
+
   await app.register(healthRoutes);
   await app.register(v2Routes, { prefix: "/api/v2", store: store as OntologyStore });
   await app.register(v1Routes, { prefix: "/api/v1", store: store as OntologyStore });

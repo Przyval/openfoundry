@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import type { RoleId } from "@openfoundry/permissions";
 import { canonicalRoles } from "./user-store.js";
 
 /**
@@ -26,6 +27,13 @@ export interface OAuthClient {
    * the client's.
    */
   readonly roles?: readonly string[];
+  /**
+   * Roles the client holds on the platform root, from the legacy EDITOR and
+   * VIEWER in its declaration. The server grants them at startup.
+   */
+  readonly rootRoles?: readonly RoleId[];
+  /** The legacy role names declared, for the deprecation warning. */
+  readonly legacyRoles?: readonly string[];
 }
 
 export const GRANT_TYPES = ["authorization_code", "client_credentials", "refresh_token"] as const;
@@ -73,7 +81,7 @@ export const DEV_CLIENTS: readonly OAuthClient[] = [
     redirectUris: [],
     grantTypes: ["client_credentials"],
     scopes: DEFAULT_SCOPES,
-    roles: ["EDITOR"],
+    roles: [],
   },
 ];
 
@@ -136,7 +144,7 @@ export function createClientStore(options: {
  *
  *   [{ "clientId": "openfoundry-console",
  *      "redirectUris": ["https://console.example.com/login"] },
- *    { "clientId": "sync-job", "clientSecret": "<secret>", "roles": ["EDITOR"] }]
+ *    { "clientId": "sync-job", "clientSecret": "<secret>", "roles": ["SERVICE_ACCOUNT"] }]
  *
  * A declaration with a `clientSecret` is confidential and defaults to the
  * client_credentials grant; one without is public and defaults to
@@ -217,7 +225,7 @@ function parseDeclaration(entry: unknown, index: number): OAuthClient {
         "roles of the user who logged in",
     );
   }
-  let canonical: string[] | undefined;
+  let canonical: ReturnType<typeof canonicalRoles> | undefined;
   try {
     canonical = roles ? canonicalRoles(roles) : undefined;
   } catch (err) {
@@ -232,7 +240,10 @@ function parseDeclaration(entry: unknown, index: number): OAuthClient {
     redirectUris,
     grantTypes,
     scopes: optionalStringArray(e.scopes, "scopes", fail) ?? DEFAULT_SCOPES,
-    ...(canonical && canonical.length > 0 ? { roles: canonical } : {}),
+    ...(canonical && canonical.platformRoles.length > 0 ? { roles: canonical.platformRoles } : {}),
+    ...(canonical && canonical.rootRoles.length > 0
+      ? { rootRoles: canonical.rootRoles, legacyRoles: canonical.legacy }
+      : {}),
   };
 }
 

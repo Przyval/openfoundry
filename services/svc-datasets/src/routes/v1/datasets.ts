@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { requirePermission } from "@openfoundry/permissions";
+import { grantCreatorOwner, requirePermission } from "@openfoundry/permissions";
 import { invalidArgument } from "@openfoundry/errors";
 import type {
   DatasetReadWriteStore,
@@ -62,9 +62,9 @@ export async function datasetRoutesV1(
       throw invalidArgument("parentFolderRid", "is required");
     }
 
-    return toV1Dataset(
-      await datasetStore.createDataset({ name, parentFolderRid }),
-    );
+    const dataset = await datasetStore.createDataset({ name, parentFolderRid });
+    await grantCreatorOwner(request, dataset.rid);
+    return toV1Dataset(dataset);
   });
 
   // Get dataset by RID

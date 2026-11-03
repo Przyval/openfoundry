@@ -1,262 +1,156 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import type { PgPermissionStore } from "@openfoundry/permissions";
-import { requirePermission } from "@openfoundry/permissions";
-import { generateRid } from "@openfoundry/rid";
-import { notFound, invalidArgument } from "@openfoundry/errors";
+import {
+  ROLES,
+  LEGACY_ROLE_GRANT_SOURCE,
+  ROOT_RESOURCE,
+  isRoleId,
+  requirePermission,
+  type PrincipalType,
+  type RoleGrant,
+} from "@openfoundry/permissions";
+import { invalidArgument, notFound } from "@openfoundry/errors";
 
-// ---------------------------------------------------------------------------
-// Route plugin
-// ---------------------------------------------------------------------------
+/**
+ * Roles and mandatory controls, shaped after Foundry's filesystem API.
+ *
+ * Roles are platform-defined and read-only: listing them is all the API does.
+ * What an operator manages is who holds a role on a resource - Foundry's
+ * `POST /filesystem/resources/{resourceRid}/roles/add` - and the Organization
+ * and Marking restrictions on it. Both need Owner on the resource.
+ */
 
-export async function permissionRoutes(
-  app: FastifyInstance,
-  opts: { permissionStore: PgPermissionStore },
-): Promise<void> {
-  const { permissionStore } = opts;
+interface RoleBody {
+  roles?: Array<{ principalId?: unknown; principalType?: unknown; roleId?: unknown }>;
+}
 
-  // =========================================================================
-  // ROLES
-  // =========================================================================
+const PRINCIPAL_TYPES: Record<string, PrincipalType> = { USER: "user", GROUP: "group" };
 
-  // List all roles
-  app.get(
-    "/admin/roles",
-    {
-      preHandler: requirePermission(permissionStore, "manage-roles"),
-    },
-    async () => {
-      const roles = await permissionStore.listAllRoles();
-      return { data: roles };
-    },
-  );
+function parseRoles(body: RoleBody | undefined) {
+  if (!body || !Array.isArray(body.roles) || body.roles.length === 0) {
+    throw invalidArgument("roles", "roles must be a non-empty array");
+  }
+  return body.roles.map((r, i) => {
+    const principalType = typeof r.principalType === "string" ? PRINCIPAL_TYPES[r.principalType] : undefined;
+    if (!principalType) {
+      throw invalidArgument(`roles[${i}].principalType`, "principalType must be USER or GROUP");
+    }
+    if (typeof r.principalId !== "string" || r.principalId === "") {
+      throw invalidArgument(`roles[${i}].principalId`, "principalId is required");
+    }
+    if (!isRoleId(r.roleId)) {
+      throw invalidArgument(`roles[${i}].roleId`, `roleId must be one of ${ROLES.map((x) => x.id).join(", ")}`);
+    }
+    return { principalType, principalId: r.principalId, roleId: r.roleId };
+  });
+}
 
-  // Create role
-  app.post<{
-    Body: {
-      name: string;
-      permissions: string[];
-      description?: string;
-    };
-  }>(
-    "/admin/roles",
-    {
-      preHandler: requirePermission(permissionStore, "manage-roles"),
-    },
-    async (request, reply) => {
-      const { name, permissions, description } = request.body;
+function stringList(value: unknown, field: string): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((v) => typeof v !== "string" || v === "")) {
+    throw invalidArgument(field, `${field} must be an array of non-empty strings`);
+  }
+  return [...new Set(value as string[])];
+}
 
-      if (!name || typeof name !== "string") {
-        throw invalidArgument("name", "name is required");
-      }
-      if (!Array.isArray(permissions)) {
-        throw invalidArgument("permissions", "permissions must be an array");
-      }
+const wire = (g: RoleGrant) => ({
+  roleId: g.roleId,
+  principalId: g.principalId,
+  principalType: g.principalType === "user" ? "USER" : "GROUP",
+  grantedBy: g.grantedBy,
+  grantedAt: g.grantedAt,
+});
 
-      const rid = generateRid("admin", "role").toString();
-      const role = await permissionStore.createRole({
-        rid,
-        name,
-        permissions,
-        description,
-      });
+export async function permissionRoutes(app: FastifyInstance): Promise<void> {
+  // Management is Owner on the resource the path names; the platform root
+  // (`ri.platform.main.root.root`) stands for the platform itself.
+  const managed = (request: FastifyRequest) => {
+    const rid = (request.params as { resourceRid: string }).resourceRid;
+    return rid === ROOT_RESOURCE ? [ROOT_RESOURCE] : [rid, ROOT_RESOURCE];
+  };
+  const manage = requirePermission("resource:manage-roles", { resource: managed });
+  // A Marking nobody holds would lock everyone out of a resource for good, so
+  // a platform administrator may read and replace its policy without holding
+  // what the policy demands. Every other route still binds them.
+  const managePolicy = requirePermission("resource:manage-roles", {
+    resource: managed,
+    platformAdminOverridesControls: true,
+  });
 
-      reply.status(201);
+  // Roles are platform-defined: read-only, as in Foundry.
+  app.get("/admin/roles", { preHandler: requirePermission("admin:manage") }, async () => ({
+    data: ROLES,
+  }));
+
+  app.get<{ Params: { roleId: string } }>(
+    "/admin/roles/:roleId",
+    { preHandler: requirePermission("admin:manage") },
+    async (request) => {
+      const role = ROLES.find((r) => r.id === request.params.roleId);
+      if (!role) throw notFound("Role", request.params.roleId);
       return role;
     },
   );
 
-  // Get role by RID
-  app.get<{
-    Params: { rid: string };
-  }>(
-    "/admin/roles/:rid",
-    {
-      preHandler: requirePermission(permissionStore, "manage-roles"),
-    },
-    async (request) => {
-      const role = await permissionStore.getRole(request.params.rid);
-      if (!role) {
-        throw notFound("Role", request.params.rid);
-      }
-      return role;
-    },
+  app.get<{ Params: { resourceRid: string } }>(
+    "/admin/resources/:resourceRid/roles",
+    { preHandler: manage },
+    async (request) => ({
+      data: (await app.authorization.listGrants(request.params.resourceRid)).map(wire),
+    }),
   );
 
-  // Delete role
-  app.delete<{
-    Params: { rid: string };
-  }>(
-    "/admin/roles/:rid",
-    {
-      preHandler: requirePermission(permissionStore, "manage-roles"),
-    },
-    async (request) => {
-      const deleted = await permissionStore.deleteRole(request.params.rid);
-      if (!deleted) {
-        throw notFound("Role", request.params.rid);
-      }
-      return { deleted: true };
-    },
-  );
-
-  // =========================================================================
-  // ROLE ASSIGNMENTS
-  // =========================================================================
-
-  // Assign role to user
-  app.post<{
-    Params: { rid: string };
-    Body: { subjectRid: string };
-  }>(
-    "/admin/roles/:rid/assignments",
-    {
-      preHandler: requirePermission(permissionStore, "manage-roles"),
-    },
+  app.post<{ Params: { resourceRid: string }; Body: RoleBody }>(
+    "/admin/resources/:resourceRid/roles/add",
+    { preHandler: manage },
     async (request, reply) => {
-      const { rid: roleRid } = request.params;
-      const { subjectRid } = request.body;
-
-      if (!subjectRid || typeof subjectRid !== "string") {
-        throw invalidArgument("subjectRid", "subjectRid is required");
+      const grants = parseRoles(request.body);
+      const grantedBy = request.identity?.userId ?? "system";
+      const grantedAt = new Date().toISOString();
+      const resourceRid = request.params.resourceRid;
+      const mapped = (await app.authorization.listGrants(resourceRid)).filter(
+        (g) => g.grantedBy === LEGACY_ROLE_GRANT_SOURCE,
+      );
+      for (const g of grants) {
+        const same = mapped.find(
+          (m) => m.principalType === g.principalType && m.principalId === g.principalId && m.roleId === g.roleId,
+        );
+        if (same) await app.authorization.removeGrant(resourceRid, same, same.roleId);
+        await app.authorization.addGrant({ resourceRid, ...g, grantedBy, grantedAt });
       }
-
-      // Verify role exists
-      const role = await permissionStore.getRole(roleRid);
-      if (!role) {
-        throw notFound("Role", roleRid);
-      }
-
-      await permissionStore.assignRole(subjectRid, roleRid);
-      reply.status(201);
-      return { subjectRid, roleRid };
+      reply.status(204);
     },
   );
 
-  // Remove role assignment
-  app.delete<{
-    Params: { rid: string; subjectRid: string };
-  }>(
-    "/admin/roles/:rid/assignments/:subjectRid",
-    {
-      preHandler: requirePermission(permissionStore, "manage-roles"),
+  app.post<{ Params: { resourceRid: string }; Body: RoleBody }>(
+    "/admin/resources/:resourceRid/roles/remove",
+    { preHandler: manage },
+    async (request, reply) => {
+      for (const g of parseRoles(request.body)) {
+        await app.authorization.removeGrant(request.params.resourceRid, g, g.roleId);
+      }
+      reply.status(204);
     },
+  );
+
+  app.get<{ Params: { resourceRid: string } }>(
+    "/admin/resources/:resourceRid/policy",
+    { preHandler: managePolicy },
     async (request) => {
-      const { rid: roleRid, subjectRid } = request.params;
-
-      // Verify role exists
-      const role = await permissionStore.getRole(roleRid);
-      if (!role) {
-        throw notFound("Role", roleRid);
-      }
-
-      await permissionStore.removeRole(subjectRid, roleRid);
-      return { deleted: true };
+      const [policy] = await app.authorization.policiesFor([request.params.resourceRid]);
+      return { organizations: policy?.organizations ?? [], markings: policy?.markings ?? [] };
     },
   );
 
-  // =========================================================================
-  // USER PERMISSIONS
-  // =========================================================================
-
-  // List user's effective permissions (grants + roles)
-  app.get<{
-    Params: { rid: string };
-  }>(
-    "/admin/users/:rid/permissions",
-    {
-      preHandler: requirePermission(permissionStore, "manage-roles"),
-    },
+  // Replaces the whole policy. Applying a Marking takes effect on everything
+  // the resource contains at once, which is why it is Owner-only.
+  app.put<{ Params: { resourceRid: string }; Body: { organizations?: unknown; markings?: unknown } }>(
+    "/admin/resources/:resourceRid/policy",
+    { preHandler: managePolicy },
     async (request) => {
-      const subjectRid = request.params.rid;
-      const [grants, roles] = await Promise.all([
-        permissionStore.listGrants(subjectRid),
-        permissionStore.listRoles(subjectRid),
-      ]);
-      return {
-        subjectRid,
-        grants,
-        roles,
-      };
-    },
-  );
-
-  // =========================================================================
-  // DIRECT PERMISSION GRANTS
-  // =========================================================================
-
-  // Grant permission on resource
-  app.post<{
-    Body: {
-      subjectRid: string;
-      resourceRid: string;
-      permission: string;
-    };
-  }>(
-    "/admin/permissions/grant",
-    {
-      preHandler: requirePermission(permissionStore, "manage-roles"),
-    },
-    async (request: FastifyRequest<{
-      Body: {
-        subjectRid: string;
-        resourceRid: string;
-        permission: string;
-      };
-    }>, reply) => {
-      const { subjectRid, resourceRid, permission } = request.body;
-
-      if (!subjectRid || typeof subjectRid !== "string") {
-        throw invalidArgument("subjectRid", "subjectRid is required");
-      }
-      if (!resourceRid || typeof resourceRid !== "string") {
-        throw invalidArgument("resourceRid", "resourceRid is required");
-      }
-      if (!permission || typeof permission !== "string") {
-        throw invalidArgument("permission", "permission is required");
-      }
-
-      // grantedBy is the authenticated caller (or "system" in dev mode)
-      const grantedBy = request.claims?.sub ?? "system";
-      await permissionStore.grant(subjectRid, resourceRid, permission, grantedBy);
-
-      reply.status(201);
-      return { subjectRid, resourceRid, permission, grantedBy };
-    },
-  );
-
-  // Revoke permission on resource
-  app.delete<{
-    Body: {
-      subjectRid: string;
-      resourceRid: string;
-      permission: string;
-    };
-  }>(
-    "/admin/permissions/revoke",
-    {
-      preHandler: requirePermission(permissionStore, "manage-roles"),
-    },
-    async (request: FastifyRequest<{
-      Body: {
-        subjectRid: string;
-        resourceRid: string;
-        permission: string;
-      };
-    }>) => {
-      const { subjectRid, resourceRid, permission } = request.body;
-
-      if (!subjectRid || typeof subjectRid !== "string") {
-        throw invalidArgument("subjectRid", "subjectRid is required");
-      }
-      if (!resourceRid || typeof resourceRid !== "string") {
-        throw invalidArgument("resourceRid", "resourceRid is required");
-      }
-      if (!permission || typeof permission !== "string") {
-        throw invalidArgument("permission", "permission is required");
-      }
-
-      await permissionStore.revoke(subjectRid, resourceRid, permission);
-      return { deleted: true };
+      const organizations = stringList(request.body?.organizations, "organizations");
+      const markings = stringList(request.body?.markings, "markings");
+      await app.authorization.setPolicy({ resourceRid: request.params.resourceRid, organizations, markings });
+      return { organizations, markings };
     },
   );
 }

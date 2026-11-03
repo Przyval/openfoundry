@@ -10,7 +10,7 @@ import { generateRid } from "@openfoundry/rid";
 import type { MultipassConfig } from "../config.js";
 import type { SigningKey } from "../keys.js";
 import { hashPassword } from "../passwords.js";
-import { authenticate, type UserDirectory } from "../store/user-store.js";
+import { authenticate, userTokenClaims, type UserDirectory } from "../store/user-store.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,15 +69,14 @@ export async function authRoutes(
         sub: user.username,
         sid: sessionId,
         jti: rid.toString(),
-        org: user.orgRid ?? "default-org",
         svc: "multipass",
         iss: "openfoundry-multipass",
         aud: "openfoundry-api",
         scope: "api:read api:write",
-        // Signed into the token so the gateway can hand downstream services a
-        // role set they can trust. A role that only travels in this response
-        // body is a role the client could have invented.
-        ...(user.roles.length > 0 ? { roles: user.roles.join(" ") } : {}),
+        // Signed into the token so the gateway can hand downstream services
+        // roles, groups and markings they can trust. Anything that only
+        // travels in this response body is something the client could invent.
+        ...userTokenClaims(user),
       },
       config.tokenExpirySeconds,
     );

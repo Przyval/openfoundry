@@ -1,11 +1,10 @@
 /**
  * The gateway is the only thing allowed to say who a caller is.
  *
- * Downstream services read `X-User-Id` / `X-User-Roles` as identity
- * (packages/permissions/src/middleware.ts). Those headers used to arrive
- * straight from the client, so anyone could claim to be ADMIN. They are now
- * dropped on the way in, and the gateway asserts none of its own - so
- * downstream sees no identity at all, deliberately.
+ * Downstream services read the caller from `x-user-*` headers
+ * (packages/permissions/src/identity.ts). Those headers used to arrive straight
+ * from the client, so anyone could claim to be ADMIN. They are dropped on the
+ * way in, and the gateway writes them itself from the token it verified.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { generateKeyPair, exportSPKI, exportPKCS8, importPKCS8 } from "jose";
@@ -106,7 +105,7 @@ describe("client-supplied identity headers", () => {
     await app.close();
   });
 
-  it("are dropped alongside a valid token rather than replaced", async () => {
+  it("are replaced by the verified token's identity, never merged with it", async () => {
     const app = await createServer({ config: configWith(publicKeyPem) });
     const token = await signToken({ roles: "VIEWER" });
 
@@ -121,19 +120,17 @@ describe("client-supplied identity headers", () => {
     });
 
     const headers = forwardedHeaders();
-    expect(headers["x-user-id"]).toBeUndefined();
+    expect(headers["x-user-id"]).toBe("alice");
+    expect(headers["x-user-platform-admin"]).toBeUndefined();
     expect(headers["x-user-roles"]).toBeUndefined();
     await app.close();
   });
 });
 
-describe("the gateway's own headers", () => {
-  it("carry no identity even for a token whose claims could supply one", async () => {
-    // Asserting roles here would enforce permissions downstream whatever
-    // ENFORCE_PERMISSIONS says; that decision belongs to the permission-model
-    // work, not to this hop.
+describe("the gateway's own identity headers", () => {
+  it("state the caller, Organization, groups and Markings of the verified token", async () => {
     const app = await createServer({ config: configWith(publicKeyPem) });
-    const token = await signToken({ sub: "service:admin", roles: "ADMIN" });
+    const token = await signToken({ sub: "carol", groups: "analysts finance", markings: "pii" });
 
     await app.inject({
       method: "GET",
@@ -142,8 +139,32 @@ describe("the gateway's own headers", () => {
     });
 
     const headers = forwardedHeaders();
-    expect(headers["x-user-id"]).toBeUndefined();
-    expect(headers["x-user-roles"]).toBeUndefined();
+    expect(headers["x-user-id"]).toBe("carol");
+    expect(headers["x-user-org"]).toBe("org-1");
+    expect(headers["x-user-groups"]).toBe("analysts,finance");
+    expect(headers["x-user-markings"]).toBe("pii");
+    expect(headers["x-user-platform-admin"]).toBeUndefined();
+    await app.close();
+  });
+
+  it("mark a platform administrator only for the ADMIN role", async () => {
+    const app = await createServer({ config: configWith(publicKeyPem) });
+    await app.inject({
+      method: "GET",
+      url: "/api/v2/ontologies",
+      headers: { authorization: `Bearer ${await signToken({ sub: "ada", roles: "ADMIN" })}` },
+    });
+
+    expect(forwardedHeaders()["x-user-platform-admin"]).toBe("true");
+    await app.close();
+  });
+
+  it("are absent when the gateway verifies no token", async () => {
+    const app = await createServer({ config: configWith("") });
+    await app.inject({ method: "GET", url: "/api/v2/ontologies" });
+
+    const headers = forwardedHeaders();
+    expect(Object.keys(headers).some((k) => k.startsWith("x-user-"))).toBe(false);
     await app.close();
   });
 

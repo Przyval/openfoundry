@@ -41,15 +41,17 @@ export interface OpenFoundryClaims {
 
   /**
    * Platform roles held by the subject - a space-separated string, e.g.
-   * "ADMIN" or "EDITOR VIEWER". Optional: tokens minted before this claim
-   * existed do not carry it, and a token without it simply conveys no roles.
-   *
-   * Minted, but with no consumer yet: the gateway asserts no identity
-   * downstream (services/svc-gateway/src/proxy.ts). The permission-model work
-   * that unifies the guarded routes is what will read this claim, and it is
-   * the only trustworthy source of a caller's roles when it does.
+   * "ADMIN" or "ADMIN SERVICE_ACCOUNT". Optional: a token without it conveys
+   * no platform role. ADMIN makes the subject a platform administrator; it is
+   * not how access to a resource is granted (that is a role on the resource).
    */
   readonly roles?: string;
+
+  /** Groups the subject belongs to - a space-separated string. Optional. */
+  readonly groups?: string;
+
+  /** Markings the subject is a member of - a space-separated string. Optional. */
+  readonly markings?: string;
 }
 
 /**

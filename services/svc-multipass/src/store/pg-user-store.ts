@@ -1,13 +1,14 @@
 import type pg from "pg";
 import { generateRid } from "@openfoundry/rid";
-import type { UserDirectory, UserRecord } from "./user-store.js";
+import type { AuthorizationStore } from "@openfoundry/permissions";
+import { syncLegacyRootGrants, type RoleNames, type UserDirectory, type UserRecord } from "./user-store.js";
 
 /**
  * The `users` table as svc-multipass reads and writes it.
  *
- * svc-admin owns the profile columns of the same rows; this store owns the two
- * that decide what a login yields - `password_hash` and `platform_roles` - and
- * reads the rest. A user svc-admin created has no password until an operator
+ * svc-admin owns the profile columns of the same rows; this store owns the ones
+ * that decide what a login yields - `password_hash`, `platform_roles`,
+ * `group_ids` and `marking_ids` - and reads the rest. A user svc-admin created has no password until an operator
  * sets one (src/cli/users.ts), and until then cannot log in.
  *
  * Login is pre-tenant: the username is all there is to look the row up by.
@@ -24,10 +25,13 @@ interface UserRow {
   password_hash: string | null;
   platform_roles: string[] | null;
   org_rid: string | null;
+  group_ids: string[] | null;
+  marking_ids: string[] | null;
   is_active: boolean;
 }
 
-const COLUMNS = "username, display_name, password_hash, platform_roles, org_rid, is_active";
+const COLUMNS =
+  "username, display_name, password_hash, platform_roles, org_rid, group_ids, marking_ids, is_active";
 
 function toRecord(row: UserRow): UserRecord {
   return {
@@ -36,6 +40,8 @@ function toRecord(row: UserRow): UserRecord {
     passwordHash: row.password_hash,
     roles: row.platform_roles ?? [],
     orgRid: row.org_rid,
+    groups: row.group_ids ?? [],
+    markings: row.marking_ids ?? [],
     active: row.is_active,
   };
 }
@@ -46,6 +52,8 @@ export interface NewUser {
   readonly passwordHash: string;
   readonly roles: readonly string[];
   readonly orgRid: string | null;
+  readonly groups: readonly string[];
+  readonly markings: readonly string[];
 }
 
 export class UserAlreadyExistsError extends Error {
@@ -69,8 +77,9 @@ export class PgUserStore implements UserDirectory {
   async createUser(user: NewUser): Promise<UserRecord> {
     try {
       const { rows } = await this.pool.query<UserRow>({
-        text: `INSERT INTO users (rid, username, display_name, password_hash, platform_roles, org_rid, is_active)
-               VALUES ($1, $2, $3, $4, $5, $6, TRUE)
+        text: `INSERT INTO users (rid, username, display_name, password_hash, platform_roles, org_rid,
+                                  group_ids, marking_ids, is_active)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE)
                RETURNING ${COLUMNS}`,
         values: [
           generateRid("multipass", "user").toString(),
@@ -79,6 +88,8 @@ export class PgUserStore implements UserDirectory {
           user.passwordHash,
           user.roles,
           user.orgRid,
+          user.groups,
+          user.markings,
         ],
       });
       return toRecord(rows[0]!);
@@ -101,10 +112,48 @@ export class PgUserStore implements UserDirectory {
 
   /** @returns false when no such user exists. */
   async setRoles(username: string, roles: readonly string[]): Promise<boolean> {
+    return this.setList("platform_roles", username, roles);
+  }
+
+  /** @returns false when no such user exists. */
+  async setGroups(username: string, groups: readonly string[]): Promise<boolean> {
+    return this.setList("group_ids", username, groups);
+  }
+
+  /** @returns false when no such user exists. */
+  async setMarkings(username: string, markings: readonly string[]): Promise<boolean> {
+    return this.setList("marking_ids", username, markings);
+  }
+
+  private async setList(
+    column: "platform_roles" | "group_ids" | "marking_ids",
+    username: string,
+    values: readonly string[],
+  ): Promise<boolean> {
     const result = await this.pool.query({
-      text: "UPDATE users SET platform_roles = $2 WHERE username = $1",
-      values: [username, roles],
+      text: `UPDATE users SET ${column} = $2 WHERE username = $1`,
+      values: [username, values],
     });
     return (result.rowCount ?? 0) > 0;
   }
+}
+
+/**
+ * Set a user's roles: the platform roles on the account, and the legacy
+ * EDITOR / VIEWER as grants on the platform root, taking back any such grant
+ * no longer named. The grants are keyed by the stored spelling of the
+ * username - the token's `sub` - whatever case the operator typed.
+ *
+ * @returns the stored username, or undefined when no such user exists.
+ */
+export async function assignRoles(
+  store: PgUserStore,
+  authorization: AuthorizationStore,
+  username: string,
+  roles: RoleNames,
+): Promise<string | undefined> {
+  if (!(await store.setRoles(username, roles.platformRoles))) return undefined;
+  const stored = (await store.findByUsername(username))!.username;
+  await syncLegacyRootGrants(authorization, (id) => id === stored, new Map([[stored, roles.rootRoles]]));
+  return stored;
 }

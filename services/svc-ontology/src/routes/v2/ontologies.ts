@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { OntologyStore, StoredOntology } from "../../store/ontology-store.js";
-import { requirePermission } from "@openfoundry/permissions";
+import { filterDiscoverable, grantCreatorOwner, requireCaller, requirePermission } from "@openfoundry/permissions";
 import { rejectUnsupportedOntologyScoping } from "@openfoundry/errors";
 import { paginateArray } from "./pagination-helpers.js";
 import { parseBooleanParam } from "./query-params.js";
@@ -146,11 +146,14 @@ export async function ontologyRoutes(
   app.get<{
     Querystring: { pageSize?: string; pageToken?: string };
   }>("/ontologies", {
-    preHandler: requirePermission("ontology:read"),
+    // Listing needs no role on any one ontology; the list is cut down to the
+    // ones the caller can at least discover.
+    preHandler: requireCaller,
   }, async (request) => {
     const raw = await store.listOntologies();
     const list: StoredOntology[] = Array.isArray(raw) ? raw : (raw as { items: StoredOntology[] }).items ?? raw as unknown as StoredOntology[];
-    const all = list.map(serializeOntology);
+    const visible = await filterDiscoverable(request, list, (o) => o.rid);
+    const all = visible.map(serializeOntology);
     return paginateArray(all, request.query);
   });
 
@@ -161,6 +164,7 @@ export async function ontologyRoutes(
     preHandler: requirePermission("ontology:write"),
   }, async (request, reply) => {
     const ontology = await store.createOntology(request.body);
+    await grantCreatorOwner(request, ontology.rid);
     reply.status(201);
     return serializeOntology(ontology);
   });

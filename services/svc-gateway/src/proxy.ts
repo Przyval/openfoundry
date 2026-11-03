@@ -1,4 +1,5 @@
 import type { FastifyRequest, FastifyReply } from "fastify";
+import { identityFromClaims, identityToHeaders } from "@openfoundry/permissions";
 
 // ---------------------------------------------------------------------------
 // Hop-by-hop headers that must not be forwarded (RFC 2616 Section 13.5.1)
@@ -23,8 +24,8 @@ const HOP_BY_HOP_HEADERS = new Set([
  * Headers by which a caller asserts *who it is* rather than *what it wants*.
  *
  * Downstream services treat these as trusted: the permission middleware in
- * `@openfoundry/permissions` reads `x-user-roles` and grants whatever those
- * roles imply. They are therefore only ever safe when a trusted hop sets them
+ * `@openfoundry/permissions` reads the caller, their groups, Organization and
+ * Markings from them. They are therefore only ever safe when a trusted hop sets them
  * from a verified token, and never safe to forward from the public edge.
  *
  * The gateway is that edge, so it drops every `x-user-*` header arriving from
@@ -33,12 +34,10 @@ const HOP_BY_HOP_HEADERS = new Set([
  * `Authorization: Bearer`, and the seed and sync scripts talk to the service
  * ports directly rather than through this proxy.
  *
- * The gateway does not set them itself either, so downstream permission checks
- * see no identity at all. That is deliberate: asserting roles here would make
- * permission enforcement effective regardless of `ENFORCE_PERMISSIONS`, and
- * enforcement is to be switched on deliberately. Minting the identity belongs
- * with the work that unifies the 119 guarded routes onto one permission model,
- * which is where the role vocabulary is actually decided.
+ * What replaces them is the identity from the token this gateway verified
+ * (`request.claims`), written as `x-user-*` headers by `identityToHeaders`.
+ * With no verified claims - the unauthenticated demo - none are set, and a
+ * downstream service sees an anonymous request.
  */
 const CLIENT_ASSERTED_IDENTITY_PREFIX = "x-user-";
 
@@ -54,7 +53,7 @@ const CLIENT_ASSERTED_IDENTITY_PREFIX = "x-user-";
  * - Preserves method, path, query string, headers, and body.
  * - Strips hop-by-hop headers from both the outgoing and incoming directions.
  * - Strips client-asserted `x-user-*` identity headers from the outgoing
- *   direction, and asserts none of its own.
+ *   direction and sets them from the verified token claims instead.
  * - Drops the incoming `Content-Length`, which no longer describes the
  *   re-serialised body.
  * - Injects `X-Forwarded-For` and `X-Request-Id` headers.
@@ -86,6 +85,12 @@ export async function proxyRequest(
       outgoingHeaders[key] = Array.isArray(value) ? value.join(", ") : value;
     }
   }
+
+  // Assert the caller's verified identity, never the one the client claimed.
+  const identity = request.claims
+    ? identityFromClaims(request.claims as unknown as Record<string, unknown>)
+    : undefined;
+  if (identity) Object.assign(outgoingHeaders, identityToHeaders(identity));
 
   // Inject proxy headers
   const clientIp =

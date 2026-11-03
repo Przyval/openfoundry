@@ -1,151 +1,118 @@
 /**
- * Standard role definitions for the OpenFoundry platform.
+ * Roles, as Foundry defines them.
  *
- * Each role maps to a set of domain-scoped permissions (e.g. "ontology:read",
- * "objects:write"). The permission middleware uses these definitions to decide
- * whether a request is allowed.
+ * Foundry grants a *role on a resource*, and the role is inherited by
+ * everything the resource contains. The default roles are Owner, Editor,
+ * Viewer and Discoverer, most to least powerful; each can hand out its own
+ * level or lower. Roles are platform-defined and read-only over the API - an
+ * operator picks one for a principal, never writes a new one.
+ *
+ * See docs/foundry-fidelity.md for the sources.
  */
 
-// ---------------------------------------------------------------------------
-// Permission constants
-// ---------------------------------------------------------------------------
+export const ROLE_IDS = ["owner", "editor", "viewer", "discoverer"] as const;
 
-/**
- * All domain-scoped permissions recognised by the platform.
- */
-export const PERMISSIONS = {
-  // Ontology service
-  ONTOLOGY_READ: "ontology:read",
-  ONTOLOGY_WRITE: "ontology:write",
-  ONTOLOGY_DELETE: "ontology:delete",
+export type RoleId = (typeof ROLE_IDS)[number];
 
-  // Objects service
-  OBJECTS_READ: "objects:read",
-  OBJECTS_WRITE: "objects:write",
-  OBJECTS_DELETE: "objects:delete",
+/** Higher outranks lower. */
+const ROLE_RANK: Readonly<Record<RoleId, number>> = {
+  discoverer: 1,
+  viewer: 2,
+  editor: 3,
+  owner: 4,
+};
 
-  // Datasets service
-  DATASETS_READ: "datasets:read",
-  DATASETS_WRITE: "datasets:write",
-  DATASETS_DELETE: "datasets:delete",
-
-  // Actions service
-  ACTIONS_READ: "actions:read",
-  ACTIONS_EXECUTE: "actions:execute",
-
-  // Admin service
-  ADMIN_MANAGE: "admin:manage",
-} as const;
-
-export type DomainPermission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
-
-// ---------------------------------------------------------------------------
-// Role definitions
-// ---------------------------------------------------------------------------
-
-export interface StandardRole {
-  readonly name: string;
+export interface RoleDefinition {
+  readonly id: RoleId;
+  readonly displayName: string;
   readonly description: string;
-  readonly permissions: readonly string[];
 }
 
-/** All domain-scoped permissions as a flat array. */
-const ALL_PERMISSIONS: readonly string[] = Object.values(PERMISSIONS);
+export const ROLES: readonly RoleDefinition[] = [
+  {
+    id: "owner",
+    displayName: "Owner",
+    description: "Full control of the resource, including who holds a role on it",
+  },
+  {
+    id: "editor",
+    displayName: "Editor",
+    description: "Read and change the resource and everything it contains",
+  },
+  {
+    id: "viewer",
+    displayName: "Viewer",
+    description: "Read the resource and everything it contains",
+  },
+  {
+    id: "discoverer",
+    displayName: "Discoverer",
+    description: "See that the resource exists, without reading its contents",
+  },
+];
 
-/**
- * ADMIN — full access to every operation.
- */
-export const ADMIN: StandardRole = {
-  name: "ADMIN",
-  description: "Full access to all platform operations",
-  permissions: ALL_PERMISSIONS,
-};
+export function isRoleId(value: unknown): value is RoleId {
+  return typeof value === "string" && (ROLE_IDS as readonly string[]).includes(value);
+}
 
-/**
- * EDITOR — read + write (create, update, delete) on ontologies, objects, and
- * datasets.  Cannot manage admin resources.
- */
-export const EDITOR: StandardRole = {
-  name: "EDITOR",
-  description: "Read and write access to ontologies, objects, and datasets",
-  permissions: [
-    PERMISSIONS.ONTOLOGY_READ,
-    PERMISSIONS.ONTOLOGY_WRITE,
-    PERMISSIONS.ONTOLOGY_DELETE,
-    PERMISSIONS.OBJECTS_READ,
-    PERMISSIONS.OBJECTS_WRITE,
-    PERMISSIONS.OBJECTS_DELETE,
-    PERMISSIONS.DATASETS_READ,
-    PERMISSIONS.DATASETS_WRITE,
-    PERMISSIONS.DATASETS_DELETE,
-    PERMISSIONS.ACTIONS_READ,
-    PERMISSIONS.ACTIONS_EXECUTE,
-  ],
-};
+/** True when `held` is at least as powerful as `required`. */
+export function roleSatisfies(held: RoleId, required: RoleId): boolean {
+  return ROLE_RANK[held] >= ROLE_RANK[required];
+}
 
-/**
- * VIEWER — read-only access to ontologies, objects, datasets, and actions.
- */
-export const VIEWER: StandardRole = {
-  name: "VIEWER",
-  description: "Read-only access to platform resources",
-  permissions: [
-    PERMISSIONS.ONTOLOGY_READ,
-    PERMISSIONS.OBJECTS_READ,
-    PERMISSIONS.DATASETS_READ,
-    PERMISSIONS.ACTIONS_READ,
-  ],
-};
-
-/**
- * SERVICE_ACCOUNT — full access, intended for service-to-service calls.
- */
-export const SERVICE_ACCOUNT: StandardRole = {
-  name: "SERVICE_ACCOUNT",
-  description: "Full access for service-to-service communication",
-  permissions: ALL_PERMISSIONS,
-};
+/** The roles a holder of `role` may hand to others: its own and every lower one. */
+export function assignableRoles(role: RoleId): RoleId[] {
+  return ROLE_IDS.filter((r) => ROLE_RANK[r] <= ROLE_RANK[role]);
+}
 
 // ---------------------------------------------------------------------------
-// Lookup helpers
+// Operations
 // ---------------------------------------------------------------------------
 
 /**
- * Map of role name (case-insensitive key) to its definition.
+ * The lowest role that may perform each operation a route guards.
+ *
+ * An operation names a kind of request, not a place: *where* it is checked -
+ * which resource's roles count - comes from the route (see `middleware.ts`).
+ * `admin:manage` is the exception: it is a platform operation and needs Owner
+ * on the platform root.
  */
-const ROLE_MAP: ReadonlyMap<string, StandardRole> = new Map(
-  [ADMIN, EDITOR, VIEWER, SERVICE_ACCOUNT].map((r) => [
-    r.name.toUpperCase(),
-    r,
-  ]),
-);
+export const OPERATION_ROLES = {
+  "ontology:read": "viewer",
+  "ontology:write": "editor",
+  "ontology:delete": "editor",
+  "objects:read": "viewer",
+  "objects:write": "editor",
+  "objects:delete": "editor",
+  "datasets:read": "viewer",
+  "datasets:write": "editor",
+  "datasets:delete": "editor",
+  "actions:read": "viewer",
+  "actions:execute": "editor",
+  "resource:discover": "discoverer",
+  "resource:manage-roles": "owner",
+  "admin:manage": "owner",
+} as const satisfies Record<string, RoleId>;
+
+export type Operation = keyof typeof OPERATION_ROLES;
+
+// ---------------------------------------------------------------------------
+// Platform roles
+// ---------------------------------------------------------------------------
 
 /**
- * Resolve a role name to its definition.
- * Returns `undefined` for unknown roles.
+ * Roles a sign-in carries in its token, as distinct from roles on a resource.
+ * A platform administrator administers the platform: it holds Owner on the
+ * platform root and so, through inheritance, on every resource. It does not
+ * see past Organizations or Markings - those are mandatory.
  */
-export function resolveRole(name: string): StandardRole | undefined {
-  return ROLE_MAP.get(name.toUpperCase());
+export const PLATFORM_ROLES = ["ADMIN", "SERVICE_ACCOUNT"] as const;
+
+export function canonicalPlatformRole(name: string): string | undefined {
+  const upper = name.trim().toUpperCase();
+  return (PLATFORM_ROLES as readonly string[]).includes(upper) ? upper : undefined;
 }
 
-/**
- * Given one or more role names (comma-separated string or array), return the
- * union of all permissions granted by those roles.  Unknown role names are
- * silently ignored.
- */
-export function resolvePermissionsForRoles(roles: string | string[]): Set<string> {
-  const names = typeof roles === "string"
-    ? roles.split(",").map((s) => s.trim())
-    : roles;
-
-  const perms = new Set<string>();
-  for (const name of names) {
-    const role = resolveRole(name);
-    if (role) {
-      for (const p of role.permissions) {
-        perms.add(p);
-      }
-    }
-  }
-  return perms;
+export function hasPlatformAdminRole(roles: readonly string[]): boolean {
+  return roles.some((r) => canonicalPlatformRole(r) !== undefined);
 }

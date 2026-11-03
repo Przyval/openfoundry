@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { requirePermission } from "@openfoundry/permissions";
 import { invalidArgument } from "@openfoundry/errors";
 
 // ---------------------------------------------------------------------------
@@ -53,6 +54,7 @@ export async function semanticSearchRoutes(
     Body: SemanticSearchBody;
   }>(
     "/ontologies/:ontologyRid/objects/semantic-search",
+    { preHandler: requirePermission("objects:read") },
     async (request, reply) => {
       const { ontologyRid } = request.params;
       const { query, objectType, limit } =

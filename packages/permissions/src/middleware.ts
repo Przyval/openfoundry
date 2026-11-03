@@ -1,244 +1,175 @@
-import type {
-  FastifyRequest,
-  FastifyReply,
-  preHandlerHookHandler,
-} from "fastify";
-import { permissionDenied } from "@openfoundry/errors";
-import type { PgPermissionStore } from "./pg-permission-store.js";
-import { resolvePermissionsForRoles } from "./roles.js";
-
-// ---------------------------------------------------------------------------
-// Augment FastifyRequest so permission middleware can read JWT claims
-// ---------------------------------------------------------------------------
+import type { FastifyInstance, FastifyRequest, preHandlerHookHandler } from "fastify";
+import { internal, permissionDenied } from "@openfoundry/errors";
+import { denialError, evaluate, evaluateEach } from "./authorizer.js";
+import { ROOT_RESOURCE, type AuthorizationStore } from "./authorization-store.js";
+import { identityFromHeaders, type Identity } from "./identity.js";
+import type { Operation } from "./roles.js";
 
 declare module "fastify" {
   interface FastifyRequest {
-    claims?: {
-      sub: string;
-      [key: string]: unknown;
-    };
+    /** The verified caller the gateway asserted; undefined for an anonymous request. */
+    identity?: Identity;
+  }
+  interface FastifyInstance {
+    authorization: AuthorizationStore;
+    /** Resolves a path identifier that aliases a resource (an API name) to its RID. */
+    resourceAlias: ResourceAlias;
   }
 }
 
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
 /**
- * When true, requests without an X-User-Id header (and without JWT claims)
- * will be rejected with 403.  When false (the default) the middleware
- * gracefully skips the check, enabling backward compatibility and dev mode.
+ * When true, a request with no identity is refused with 403. When false (the
+ * default) it passes, which is what the unauthenticated demo relies on: the
+ * gateway only asserts an identity when it verifies tokens.
  */
 let enforcePermissions =
   (process.env.ENFORCE_PERMISSIONS ?? "").toLowerCase() === "true";
 
-/**
- * Programmatically override the enforcement flag (useful for tests).
- */
+/** Override the enforcement flag (useful for tests). */
 export function setEnforcePermissions(value: boolean): void {
   enforcePermissions = value;
 }
 
+/** Whether a request with no identity is refused. */
+export function permissionsEnforced(): boolean {
+  return enforcePermissions;
+}
+
+/**
+ * Give a service its authorization store and read the caller's identity.
+ *
+ * Call it directly on the root instance - `await registerAuthorization(app, ...)`
+ * - for the reason `authPlugin` is: a hook added inside `app.register` guards
+ * only its own child context.
+ */
+export function registerAuthorization(
+  app: FastifyInstance,
+  options: { store: AuthorizationStore; alias?: ResourceAlias },
+): void {
+  app.decorate("authorization", options.store);
+  app.decorate("resourceAlias", options.alias ?? (() => undefined));
+  app.decorateRequest("identity", undefined);
+  app.addHook("onRequest", async (request) => {
+    request.identity = identityFromHeaders(request.headers);
+  });
+}
+
 // ---------------------------------------------------------------------------
-// Factory options (PgPermissionStore variant)
+// Which resource a route is about
 // ---------------------------------------------------------------------------
+
+/**
+ * Where to look for roles: the resource first, then each container up to the
+ * platform root. Roles and policies held at any of them apply.
+ */
+export type ResourceAlias = (
+  identifier: string,
+) => string | undefined | Promise<string | undefined>;
+
+export type ResourceChain = (
+  request: FastifyRequest,
+) => readonly string[] | Promise<readonly string[]>;
 
 export interface RequirePermissionOptions {
+  /** Defaults to the resource named by the route's `ontologyRid`, `datasetRid` or `pipelineRid`. */
+  resource?: ResourceChain;
   /**
-   * Extract the resource RID from the incoming request.
-   * When provided, the middleware will check for a direct permission grant
-   * on that specific resource in addition to the role-based check.
+   * Let a platform administrator through without holding the resource's
+   * Organizations and Markings. Only for the route that changes those
+   * controls, so a resource a Marking locked everybody out of can be recovered.
    */
-  getResourceRid?: (request: FastifyRequest) => string;
+  platformAdminOverridesControls?: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// PgPermissionStore-based middleware factory (original)
-// ---------------------------------------------------------------------------
+/**
+ * The resource a route's path parameters name, inside the platform root.
+ *
+ * Some routes accept an alias where a RID goes (an ontology's API name). The
+ * service says how to resolve one, and the alias and the RID both count: a
+ * Marking on the RID must bind a caller who reaches the resource by its name.
+ */
+export async function defaultResourceChain(request: FastifyRequest): Promise<readonly string[]> {
+  const params = (request.params ?? {}) as Record<string, string | undefined>;
+  const id = params.ontologyRid ?? params.datasetRid ?? params.pipelineRid;
+  if (!id) return [ROOT_RESOURCE];
+  const rid = await request.server.resourceAlias(id);
+  return rid && rid !== id ? [id, rid, ROOT_RESOURCE] : [id, ROOT_RESOURCE];
+}
 
 /**
- * Creates a Fastify `preHandler` hook that enforces a permission check using
- * the PgPermissionStore.
- *
- * The returned handler:
- * 1. In development mode with no JWT claims present, logs a warning and skips
- *    all checks (allows seed scripts and direct API calls to work).
- * 2. Extracts the subject RID from `request.claims.sub`.
- * 3. Checks for the platform-admin role (always allowed).
- * 4. If `getResourceRid` is supplied, checks for a direct permission grant
- *    on the resource.
- * 5. Falls back to a role-based permission check.
- * 6. Throws a 403 `PermissionDenied` error if none of the checks pass.
- *
- * @param store      - The PgPermissionStore to query.
- * @param permission - The permission string to enforce (e.g. "READ", "manage-users").
- * @param options    - Optional configuration.
+ * Guard a route with a Foundry permission check: the caller's Organization and
+ * Markings, then the role they hold on the resource or a container of it.
  */
 export function requirePermission(
-  store: PgPermissionStore,
-  permission: string,
-  options?: RequirePermissionOptions,
-): preHandlerHookHandler;
-
-// ---------------------------------------------------------------------------
-// Header-based middleware factory (new lightweight variant)
-// ---------------------------------------------------------------------------
-
-/**
- * Creates a Fastify `preHandler` hook that enforces a domain-scoped
- * permission using the X-User-Id and X-User-Roles request headers.
- *
- * This variant does NOT require a PgPermissionStore and is suitable for
- * services that use the standard role definitions from `@openfoundry/permissions`.
- *
- * @param permission - The domain permission to enforce (e.g. "ontology:read").
- */
-export function requirePermission(
-  permission: string,
-): preHandlerHookHandler;
-
-// ---------------------------------------------------------------------------
-// Implementation
-// ---------------------------------------------------------------------------
-
-export function requirePermission(
-  storeOrPermission: PgPermissionStore | string,
-  permissionOrOptions?: string | RequirePermissionOptions,
-  maybeOptions?: RequirePermissionOptions,
+  operation: Operation,
+  options: RequirePermissionOptions = {},
 ): preHandlerHookHandler {
-  // Detect which overload was used
-  if (typeof storeOrPermission === "string") {
-    // Header-based overload: requirePermission(permission)
-    return createHeaderBasedHook(storeOrPermission);
-  }
-
-  // PgPermissionStore overload: requirePermission(store, permission, options?)
-  const store = storeOrPermission;
-  const permission = permissionOrOptions as string;
-  const options = maybeOptions;
-  return createPgStoreHook(store, permission, options);
-}
-
-// ---------------------------------------------------------------------------
-// Header-based hook
-// ---------------------------------------------------------------------------
-
-function createHeaderBasedHook(permission: string): preHandlerHookHandler {
-  return async function headerPermissionHook(
-    request: FastifyRequest,
-    _reply: FastifyReply,
-  ): Promise<void> {
-    const userId = request.headers["x-user-id"] as string | undefined;
-    const userRoles = request.headers["x-user-roles"] as string | undefined;
-
-    // Also check JWT claims (set by the gateway auth middleware)
-    const hasClaims = !!request.claims;
-
-    // If there is no identity information at all, decide based on enforcement
-    if (!userId && !hasClaims) {
-      if (!enforcePermissions) {
-        // Silently skip — dev mode / backward compat
-        return;
-      }
-      throw permissionDenied("platform", permission);
+  const chainOf = options.resource ?? defaultResourceChain;
+  return async function permissionHook(request) {
+    const identity = request.identity;
+    if (!identity) {
+      if (!enforcePermissions) return;
+      throw permissionDenied("platform", operation);
     }
-
-    // If we have roles from the header, check them
-    if (userRoles) {
-      const granted = resolvePermissionsForRoles(userRoles);
-      if (granted.has(permission)) {
-        return;
-      }
+    if (options.platformAdminOverridesControls && identity.platformAdmin) return;
+    if (!request.server.authorization) {
+      throw internal("Authorization store is not registered on this service");
     }
-
-    // If we have JWT claims but no header roles, skip in non-enforcing mode
-    // (the PgPermissionStore variant handles JWT-based checks)
-    if (hasClaims && !userRoles && !enforcePermissions) {
-      return;
+    const chain = await chainOf(request);
+    const denial = await evaluate(request.server.authorization, identity, operation, chain);
+    if (denial) {
+      request.log.info({ userId: identity.userId, operation, resource: chain[0], denial }, "permission denied");
+      throw denialError(chain, operation);
     }
-
-    // No header identity but enforcement is off — skip
-    if (!userId && !enforcePermissions) {
-      return;
-    }
-
-    // Denied
-    const subject = userId ?? request.claims?.sub ?? "unknown";
-    throw permissionDenied(subject, permission);
   };
 }
 
+/**
+ * Guard a listing route: any identified caller may ask, and the handler cuts
+ * the result down with `filterDiscoverable`. No role on the platform root is
+ * needed to list, or a caller holding a role on one resource could never see it.
+ */
+export const requireCaller: preHandlerHookHandler = async function callerHook(request) {
+  if (!request.identity && enforcePermissions) throw permissionDenied("platform", "list");
+};
+
 // ---------------------------------------------------------------------------
-// PgPermissionStore hook (unchanged from original implementation)
+// Resources a caller creates and lists
 // ---------------------------------------------------------------------------
 
-function createPgStoreHook(
-  store: PgPermissionStore,
-  permission: string,
-  options?: RequirePermissionOptions,
-): preHandlerHookHandler {
-  const getResourceRid = options?.getResourceRid;
+/**
+ * Make the caller Owner of a resource they just created, as Foundry does for
+ * a new Project. Without it nobody but an administrator could ever use it.
+ */
+export async function grantCreatorOwner(request: FastifyRequest, resourceRid: string): Promise<void> {
+  const identity = request.identity;
+  if (!identity) return;
+  await request.server.authorization.addGrant({
+    resourceRid,
+    principalType: "user",
+    principalId: identity.userId,
+    roleId: "owner",
+    grantedBy: identity.userId,
+    grantedAt: new Date().toISOString(),
+  });
+}
 
-  return async function permissionHook(
-    request: FastifyRequest,
-    _reply: FastifyReply,
-  ): Promise<void> {
-    // ------------------------------------------------------------------
-    // Development bypass: when no auth claims are present, skip checks
-    // ------------------------------------------------------------------
-    if (!request.claims) {
-      if (process.env.NODE_ENV === "development" || !process.env.NODE_ENV) {
-        request.log.warn(
-          { permission },
-          "Skipping permission check — no auth claims present (development mode)",
-        );
-        return;
-      }
-
-      // Production with no claims should never happen (auth middleware would
-      // have already rejected the request), but guard against misconfiguration.
-      throw permissionDenied("unknown", permission);
-    }
-
-    const subjectRid = request.claims.sub;
-
-    // ------------------------------------------------------------------
-    // Platform-admin always allowed
-    // ------------------------------------------------------------------
-    const isAdmin = await store.isPlatformAdmin(subjectRid);
-    if (isAdmin) {
-      return;
-    }
-
-    // ------------------------------------------------------------------
-    // Resource-specific grant check
-    // ------------------------------------------------------------------
-    if (getResourceRid) {
-      const resourceRid = getResourceRid(request);
-      const hasGrant = await store.hasPermission(
-        subjectRid,
-        resourceRid,
-        permission,
-      );
-      if (hasGrant) {
-        return;
-      }
-    }
-
-    // ------------------------------------------------------------------
-    // Role-based permission check
-    // ------------------------------------------------------------------
-    const hasRole = await store.hasRolePermission(subjectRid, permission);
-    if (hasRole) {
-      return;
-    }
-
-    // ------------------------------------------------------------------
-    // Denied
-    // ------------------------------------------------------------------
-    const resourceDesc = getResourceRid
-      ? getResourceRid(request)
-      : "platform";
-    throw permissionDenied(resourceDesc, permission);
-  };
+/**
+ * Keep only the resources the caller may at least discover. A resource a
+ * caller cannot see should not appear in a listing at all.
+ */
+export async function filterDiscoverable<T>(
+  request: FastifyRequest,
+  items: readonly T[],
+  ridOf: (item: T) => string,
+): Promise<T[]> {
+  const identity = request.identity;
+  if (!identity) return [...items];
+  const allowed = await evaluateEach(
+    request.server.authorization,
+    identity,
+    "resource:discover",
+    items.map((item) => [ridOf(item)]),
+  );
+  return items.filter((_, i) => allowed[i]);
 }

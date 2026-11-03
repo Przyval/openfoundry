@@ -10,6 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { decodeJwt } from "jose";
+import { FileAuthorizationStore, ROOT_RESOURCE, evaluate, identityFromClaims } from "@openfoundry/permissions";
 import {
   ALICE_PASSWORD,
   CONSOLE_CLIENT,
@@ -233,7 +234,7 @@ describe("the token is the signed-in user's", () => {
     expect(response.statusCode).toBe(200);
     const claims = decodeJwt(response.json().access_token);
     expect(claims.sub).toBe("alice");
-    expect(claims.roles).toBe("EDITOR");
+    expect(claims.roles).toBe("SERVICE_ACCOUNT");
     expect(claims.org).toBe("org:acme");
     expect(claims.scope).toBe("api:read");
     expect(response.json().refresh_token).toBeTruthy();
@@ -247,6 +248,73 @@ describe("the token is the signed-in user's", () => {
     expect(claims.sub).toBe("carol");
     expect(claims.roles).toBeUndefined();
     expect(claims.org).toBe("default-org");
+  });
+
+  it("carries the user's groups and markings, at sign-in, direct login and refresh", async () => {
+    server.users.add(
+      await user("alice", ALICE_PASSWORD, {
+        roles: ["SERVICE_ACCOUNT"],
+        groups: ["ri.group.analysts"],
+        markings: ["pii", "phi"],
+      }),
+    );
+
+    const exchanged = await signInAndExchange(server.app);
+    const alice = identityFromClaims(decodeJwt(exchanged.json().access_token))!;
+    expect(alice).toMatchObject({
+      userId: "alice",
+      groups: ["ri.group.analysts"],
+      markings: ["pii", "phi"],
+    });
+
+    // What the token carries is what opens a marked resource: a viewer role
+    // through the group, and the Marking on the ontology.
+    const authz = new FileAuthorizationStore(null);
+    const marked = "ri.ontology.main.ontology.patients";
+    await authz.addGrant({
+      resourceRid: marked,
+      principalType: "group",
+      principalId: "ri.group.analysts",
+      roleId: "viewer",
+      grantedBy: "t",
+      grantedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await authz.setPolicy({ resourceRid: marked, organizations: [], markings: ["pii"] });
+    expect(await evaluate(authz, alice, "objects:read", [marked, ROOT_RESOURCE])).toBeUndefined();
+    expect(
+      await evaluate(authz, { ...alice, markings: [] }, "objects:read", [marked, ROOT_RESOURCE]),
+    ).toMatchObject({ layer: "marking" });
+
+    const login = await server.app.inject({
+      method: "POST",
+      url: "/multipass/api/auth/login",
+      payload: { username: "alice", password: ALICE_PASSWORD },
+    });
+    expect(identityFromClaims(decodeJwt(login.json().accessToken))).toMatchObject({
+      groups: ["ri.group.analysts"],
+      markings: ["pii", "phi"],
+    });
+
+    // A Marking taken away reaches the next refreshed token.
+    server.users.add(await user("alice", ALICE_PASSWORD, { groups: ["ri.group.analysts"], markings: ["pii"] }));
+    const refreshed = await server.app.inject({
+      method: "POST",
+      url: "/multipass/api/oauth2/token",
+      payload: {
+        grant_type: "refresh_token",
+        client_id: CONSOLE_CLIENT.clientId,
+        refresh_token: exchanged.json().refresh_token,
+      },
+    });
+    const claims = decodeJwt(refreshed.json().access_token);
+    expect(claims.markings).toBe("pii");
+    expect(claims.groups).toBe("ri.group.analysts");
+  });
+
+  it("carries no groups or markings claim for a user who has none", async () => {
+    const claims = decodeJwt((await signInAndExchange(server.app, "carol", "carol-password")).json().access_token);
+    expect(claims.groups).toBeUndefined();
+    expect(claims.markings).toBeUndefined();
   });
 
   it("will not exchange a public client's code without the PKCE verifier", async () => {
@@ -275,7 +343,7 @@ describe("the token is the signed-in user's", () => {
 
   it("reads the roles again on refresh, so a demotion takes effect", async () => {
     const first = await signInAndExchange(server.app);
-    server.users.add(await user("alice", ALICE_PASSWORD, { roles: ["VIEWER"] }));
+    server.users.add(await user("alice", ALICE_PASSWORD, { roles: ["SERVICE_ACCOUNT"] }));
 
     const refreshed = await server.app.inject({
       method: "POST",
@@ -288,13 +356,13 @@ describe("the token is the signed-in user's", () => {
     });
 
     expect(refreshed.statusCode).toBe(200);
-    expect(decodeJwt(refreshed.json().access_token).roles).toBe("VIEWER");
+    expect(decodeJwt(refreshed.json().access_token).roles).toBe("SERVICE_ACCOUNT");
     expect(refreshed.json().refresh_token).not.toBe(first.json().refresh_token);
   });
 
   it("refuses to refresh for a user disabled since they signed in", async () => {
     const first = await signInAndExchange(server.app);
-    server.users.add(await user("alice", ALICE_PASSWORD, { roles: ["EDITOR"], active: false }));
+    server.users.add(await user("alice", ALICE_PASSWORD, { roles: ["SERVICE_ACCOUNT"], active: false }));
 
     const refreshed = await server.app.inject({
       method: "POST",

@@ -91,7 +91,7 @@ Jadi baris status "Service status" tidak pernah menyebut svc-sentinel, hidup mau
 ### Mode pengembangan
 
 Buka konsol, lalu isi form "Developer login form".
-Tiga akun pengembangan didefinisikan pada konstanta `DEV_USERS` di `services/svc-multipass/src/store/user-store.ts`, masing-masing dengan peran ADMIN, EDITOR, dan VIEWER.
+Tiga akun pengembangan didefinisikan pada konstanta `DEV_USERS` di `services/svc-multipass/src/store/user-store.ts`, `admin` dengan peran platform ADMIN, sedangkan `developer` dan `analyst` tanpa peran apa pun.
 Baca nilainya langsung dari berkas itu; panduan ini sengaja tidak menyalin kredensial ke dalam repositori publik.
 
 Ketiga akun itu hanya ada selama `NODE_ENV` bukan `production`.
@@ -152,7 +152,10 @@ docker compose -f deploy/docker-compose.yml exec postgres sh -c \
 ```
 
 Kata sandi ditanyakan dua kali tanpa ditampilkan, atau dibaca dari `OPENFOUNDRY_USER_PASSWORD` bila variabel itu diisi; ia tidak pernah diberikan sebagai argumen.
-Perintah yang sama juga mengelola akun berikutnya: `create`, `set-password`, dan `set-roles` (peran: ADMIN, EDITOR, VIEWER, SERVICE_ACCOUNT).
+Perintah yang sama juga mengelola akun berikutnya: `create`, `set-password`, `set-roles` (peran platform: ADMIN, SERVICE_ACCOUNT), `set-groups`, dan `set-markings`.
+Grup dan Marking akun (`--groups`, `--markings`, dipisah koma) ikut ditandatangani ke token sebagai klaim `groups` dan `markings` saat login, saat penukaran kode dari `/authorize`, dan saat refresh; deployment lama harus menerapkan `db/migrations/015_user_groups_markings.sql` dulu.
+Nama peran lama EDITOR dan VIEWER masih diterima di CLI dan di `OAUTH_CLIENTS`, tetapi diberikan sebagai peran editor atau viewer pada akar platform disertai peringatan deprecation; migrasi 015 memindahkan nilai itu dari `users.platform_roles` dengan cara yang sama.
+Grant hasil pemetaan itu ditandai `grantedBy: legacy-role-mapping`, sehingga `set-roles` tanpa EDITOR/VIEWER, atau client yang tidak lagi mendeklarasikannya di `OAUTH_CLIENTS` (berlaku saat svc-multipass dimulai ulang), mencabutnya kembali; grant yang diberikan lewat API peran tidak tersentuh.
 Pengguna yang dibuat dari halaman Users di konsol belum punya kata sandi dan baru bisa masuk setelah `set-password`.
 
 `POST /api/v2/auth/signup` (tertutup secara default, dibuka dengan `OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1` pada svc-multipass dan gateway) tidak menyimpan pengguna, jadi tidak menghasilkan akun yang bisa dipakai masuk.
@@ -166,14 +169,33 @@ Begitu penegakan menyala, semua pemanggil non-browser (skrip penyemai, `scripts/
 Di `NODE_ENV=production` tidak ada OAuth client yang di-seed, jadi pasangan id/secret itu harus milik client yang Anda deklarasikan di `OAUTH_CLIENTS`.
 Jangan pernah menulis nilai kredensial ke dalam skrip atau dokumen: repositori ini publik.
 
-### Apa yang belum ditegakkan
+### Model izin
 
-Token yang sah membuktikan *siapa* pemanggilnya, belum *apa* yang boleh dilakukannya.
-Gateway tidak mengisi header `x-user-id` / `x-user-roles` yang dibaca pemeriksaan izin di hilir, jadi `ENFORCE_PERMISSIONS` belum punya identitas untuk dinilai; itu menunggu penyatuan model izin.
+Token yang sah membuktikan *siapa* pemanggilnya.
+*Apa* yang boleh dilakukannya diputuskan oleh model izin Foundry, yang dijabarkan di `docs/foundry-fidelity.md`.
+Gateway memverifikasi token lalu menulis identitasnya (`x-user-id`, `x-user-org`, `x-user-groups`, `x-user-markings`, `x-user-platform-admin`) ke permintaan yang diteruskan; layanan hilir hanya mempercayai header itu.
+Tanpa `AUTH_PUBLIC_KEY` tidak ada identitas, dan permintaan lolos tanpa pemeriksaan - itu mode demo.
+
+Tiga lapisan, dalam urutan ini:
+
+1. **Organization** dan **Marking** bersifat wajib. Pemanggil harus anggota setiap Organization dan memegang setiap Marking yang menempel pada sumber daya atau wadahnya, apa pun perannya, termasuk administrator platform.
+2. **Peran pada sumber daya**: Owner, Editor, Viewer, Discoverer. Peran dipegang pengguna atau grup pada satu sumber daya dan diwariskan ke isinya. Peran sudah ditetapkan platform dan hanya bisa dibaca (`GET /api/v2/admin/roles`).
+3. **Administrator platform** (klaim `roles` berisi `ADMIN`) memegang Owner pada akar platform, jadi lolos lapisan peran di mana pun.
+
+Mengelola siapa memegang peran, dan Organization/Marking sebuah sumber daya, butuh Owner pada sumber daya itu:
+`POST /api/v2/admin/resources/{resourceRid}/roles/add`, `.../roles/remove`, `GET .../roles`, dan `GET`/`PUT .../policy`.
+Satu pengecualian: administrator platform boleh membaca dan mengganti `.../policy` tanpa memegang Organization atau Marking-nya, supaya sumber daya yang terkunci oleh Marking yang tidak dipegang siapa pun bisa dipulihkan.
+Akar platform bernama `ri.platform.main.root.root`; peran yang diberikan di sana berlaku untuk semuanya.
+Pembuat ontologi, dataset atau pipeline otomatis menjadi Owner-nya.
+Akun dev `developer` dan `analyst` tidak punya peran apa pun sampai diberi satu.
+
+Grup dan Marking seorang pengguna diatur lewat CLI akun (`set-groups`, `set-markings`); client `client_credentials` tidak membawa keduanya.
+`GET /api/v2/search` hanya mengembalikan entitas yang boleh ditemukan pemanggil menurut model yang sama (peran discoverer ke atas, Organization, Marking; object type ikut ontologinya, pengguna dan grup hanya untuk administrator platform), dan `POST /api/v2/search/reindex` butuh Owner pada akar platform.
+Data objek disimpan menurut string `ontologyRid` di path, sehingga peran dan Marking harus ditempelkan pada pengenal yang dipakai pemanggil.
 Pembatasan laju juga masih jatuh ke kunci per-token, bukan per-tenant.
 
-Gateway **memang** membuang setiap header `x-user-*` yang dikirim klien sebelum meneruskan permintaan ke layanan hilir.
-Itu menutup jalan bagi pemanggil untuk mengarang perannya sendiri.
+Gateway membuang setiap header `x-user-*` yang dikirim klien sebelum meneruskan permintaan ke layanan hilir.
+Itu menutup jalan bagi pemanggil untuk mengarang identitasnya sendiri.
 
 Perlakukan port layanan (8081-8092) sebagai jaringan internal.
 Skrip penyemai dan sinkronisasi bicara langsung ke port-port itu, jadi pembuangan header di gateway tidak menjangkau mereka.
@@ -801,7 +823,7 @@ Seluruh operasi berkas v1 menolak `branchId`, `startTransactionRid`, `endTransac
 | PostgreSQL (opsional) | 5434 lewat Docker Compose | tidak |
 
 Konsol bicara hanya ke gateway.
-Gateway mem-proxy ke layanan hilir dan membuang setiap header `x-user-*` yang datang dari klien.
+Gateway mem-proxy ke layanan hilir, membuang setiap header `x-user-*` yang datang dari klien, dan menggantinya dengan identitas dari token yang diverifikasinya.
 
 Gateway juga membatasi laju permintaan: 100 permintaan per 60 detik secara bawaan, diatur lewat `RATE_LIMIT_MAX_REQUESTS`, `RATE_LIMIT_WINDOW_MS`, dan `RATE_LIMIT_ENABLED`.
 Batas itu mudah tersentuh oleh halaman konsol yang menembak banyak permintaan kecil, terutama Network Graph; kalau sebuah halaman tampak kehilangan data, periksa 429 di log gateway sebelum mencurigai datanya.
@@ -818,43 +840,41 @@ Semuanya nyata pada `master` saat panduan ini ditulis.
 
 **Autentikasi dan izin**
 
-1. Gateway tidak menegakkan token. Permintaan tanpa `Authorization`, atau dengan token karangan, tetap dilayani, bahkan ketika `AUTH_PUBLIC_KEY` diset.
-   `authPlugin` didaftarkan terkurung di `services/svc-gateway/src/server.ts`, jadi hook-nya tidak berlaku untuk rute mana pun.
-2. Karena itu `request.claims` tidak pernah terisi, penegakan izin berbasis peran tidak aktif, dan `ENFORCE_PERMISSIONS=true` membuat setiap rute terproxy menjawab 403.
-3. Rate limit per-tenant jatuh ke kunci per-token atau per-IP, karena kunci per-org bergantung pada klaim yang tidak pernah ada.
+1. `ENFORCE_PERMISSIONS=true` menolak permintaan tanpa identitas; gateway yang tidak memverifikasi token (tanpa `AUTH_PUBLIC_KEY`) tidak menulis identitas, jadi setiap rute terproxy menjawab 403.
+2. Rate limit per-tenant jatuh ke kunci per-token atau per-IP, karena kunci per-org bergantung pada klaim yang tidak pernah ada.
 
 **Konsol**
 
-4. **Network Graph tidak pernah menggambar edge.** Ada dua sebab yang berdiri sendiri.
+3. **Network Graph tidak pernah menggambar edge.** Ada dua sebab yang berdiri sendiri.
    Pertama, halaman itu membaca `sourceObjectType` dan `targetPrimaryKey` dari respons `.../links/:lt`, padahal respons itu berisi objek terkait dan tidak punya field tersebut.
    Kedua, halaman itu menembak satu permintaan per pasangan objek dan link type, sehingga menabrak batas laju gateway dan sebagian besar permintaannya dijawab 429.
-5. Baris ringkasan agregat di Object Explorer rusak dalam dua lapis.
+4. Baris ringkasan agregat di Object Explorer rusak dalam dua lapis.
     Ia hanya dipicu oleh tipe properti huruf besar (`INTEGER`), sedangkan skrip demo mendeklarasikan huruf kecil (`integer`), jadi untuk data demo ia tidak pernah muncul.
     Ketika dipicu dengan tipe huruf besar, ia menampilkan `type: COUNT` dan `value: <n>`: konsol membaca `data[0].metrics` berupa objek, sementara layanan mengembalikan daftar datar `{type, property, value}`, sehingga metrik avg dan sum hilang.
-6. Kotak "Search everything..." memerlukan Postgres. Tanpa `DATABASE_URL`, `GET /api/v2/search` menjawab 500.
-7. Compass menampilkan lencana **Offline Mode** dan pohon contoh bawaan ketika layanan compass mengembalikan daftar kosong, yang merupakan keadaan normal mode demo.
+5. Kotak "Search everything..." memerlukan Postgres. Tanpa `DATABASE_URL`, `GET /api/v2/search` menjawab 500.
+6. Compass menampilkan lencana **Offline Mode** dan pohon contoh bawaan ketika layanan compass mengembalikan daftar kosong, yang merupakan keadaan normal mode demo.
    Yang Anda lihat di situ bukan resource nyata Anda.
-8. Monitor yang dibuat dari konsol selalu tanpa effect, dan tidak ada UI untuk menambahkannya.
-9. URL yang tidak dikenal, termasuk `/pest-control` yang sudah dicabut, menampilkan halaman kosong alih-alih pesan 404.
-10. Halaman Scenarios gagal dirender jika ada objek Customer atau ServiceJob yang tidak punya properti `status`.
+7. Monitor yang dibuat dari konsol selalu tanpa effect, dan tidak ada UI untuk menambahkannya.
+8. URL yang tidak dikenal, termasuk `/pest-control` yang sudah dicabut, menampilkan halaman kosong alih-alih pesan 404.
+9. Halaman Scenarios gagal dirender jika ada objek Customer atau ServiceJob yang tidak punya properti `status`.
     Ini mudah terpicu setelah impor CSV atau pembuatan objek lewat API yang melewatkan kolom itu.
     Halaman yang sama juga diam-diam beralih ke data contoh dalam kode ketika tidak ada ontologi bernama "pest", tanpa penanda apa pun di layar.
-11. Dua tombol ikon pada kartu monitor tidak punya nama yang bisa dibaca pembaca layar.
-12. Halaman Webhooks menampilkan "No webhooks configured" baik ketika daftar memang kosong maupun ketika svc-webhooks mati, tanpa membedakan keduanya.
+10. Dua tombol ikon pada kartu monitor tidak punya nama yang bisa dibaca pembaca layar.
+11. Halaman Webhooks menampilkan "No webhooks configured" baik ketika daftar memang kosong maupun ketika svc-webhooks mati, tanpa membedakan keduanya.
 
 **Data dan deployment**
 
-13. Keempat skrip di `scripts/demo/` memakai ulang ontologi pertama yang ada dan mengabaikan `ORG_RID`. Gunakan `start.sh --industry` untuk berganti industri.
-14. `docker-compose.yml` memakai kata sandi Postgres yang berbeda antara service basis data dan `DATABASE_URL` aplikasinya.
-15. `scripts/migrate.sql` (dimuat Compose saat init) dan `db/migrations/*.sql` (diterapkan `pnpm db:migrate`) sudah berbeda: hanya yang kedua menambahkan `org_rid` dan RLS, kecuali pada tabel model (`ml_resources`, `ml_model_versions`) yang identik di keduanya.
-16. Isolasi RLS belum terbukti ujung ke ujung. Kebijakan di `db/migrations/009_multi_tenancy.sql` membaca setelan sesi `app.org_rid`, sedangkan `services/svc-objects/src/store/pg-object-store.ts` menyetel `app.current_org_rid`.
-17. `.env.example` dan `deploy/docker/Dockerfile.console` menyetel `VITE_API_BASE_URL`, sementara konsol membaca `VITE_API_URL`.
-18. `pnpm db:seed` menunjuk ke `scripts/seed.js`, yang tidak ada di repositori.
-19. `complete-service-job` menurunkan `invoiceId` dari `jobId`, sementara semaian pest control menomori invoice secara terpisah.
+12. Keempat skrip di `scripts/demo/` memakai ulang ontologi pertama yang ada dan mengabaikan `ORG_RID`. Gunakan `start.sh --industry` untuk berganti industri.
+13. `docker-compose.yml` memakai kata sandi Postgres yang berbeda antara service basis data dan `DATABASE_URL` aplikasinya.
+14. `scripts/migrate.sql` (dimuat Compose saat init) dan `db/migrations/*.sql` (diterapkan `pnpm db:migrate`) sudah berbeda: hanya yang kedua menambahkan `org_rid` dan RLS, kecuali pada tabel model (`ml_resources`, `ml_model_versions`) yang identik di keduanya.
+15. Isolasi RLS belum terbukti ujung ke ujung. Kebijakan di `db/migrations/009_multi_tenancy.sql` membaca setelan sesi `app.org_rid`, sedangkan `services/svc-objects/src/store/pg-object-store.ts` menyetel `app.current_org_rid`.
+16. `.env.example` dan `deploy/docker/Dockerfile.console` menyetel `VITE_API_BASE_URL`, sementara konsol membaca `VITE_API_URL`.
+17. `pnpm db:seed` menunjuk ke `scripts/seed.js`, yang tidak ada di repositori.
+18. `complete-service-job` menurunkan `invoiceId` dari `jobId`, sementara semaian pest control menomori invoice secara terpisah.
     Nomornya bentrok untuk hampir semua job, dan action menjawab 500 yang membungkus 409 alih-alih konflik yang bisa ditindaklanjuti.
     Pada semaian baru hanya `JOB-2026-008` yang lolos.
-20. Dengan `DATABASE_URL` terpasang, sebagian besar rute user dan grup di svc-admin menjawab 500 karena memanggil store asinkron secara sinkron.
-21. `GET /api/v2/datasets/:rid/files/:filePath` mengembalikan isi berkas, padahal di Foundry rute itu mengembalikan metadata `File` dan isinya diambil dari `.../files/:filePath/content`, yang belum ada di sini.
+19. Dengan `DATABASE_URL` terpasang, sebagian besar rute user dan grup di svc-admin menjawab 500 karena memanggil store asinkron secara sinkron.
+20. `GET /api/v2/datasets/:rid/files/:filePath` mengembalikan isi berkas, padahal di Foundry rute itu mengembalikan metadata `File` dan isinya diambil dari `.../files/:filePath/content`, yang belum ada di sini.
     Bentuk `File` yang dikirim rute-rute lain sudah benar; yang belum cocok adalah operasi mana yang menempati path tersebut.
     Memindahkannya berarti mengubah URL unduhan yang dipakai klien sekarang, jadi dibiarkan sampai rute `/content` ditambahkan.
 

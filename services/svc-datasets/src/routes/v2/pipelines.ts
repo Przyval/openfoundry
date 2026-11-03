@@ -3,7 +3,14 @@ import { validateDag, PipelineExecutor, topologicalSort } from "@openfoundry/pip
 import type { PipelineStep, PipelineStatus, PipelineSchedule } from "@openfoundry/pipeline";
 import type { CreatePipelineInput, UpdatePipelineInput } from "../../store/pipeline-store.js";
 import type { PipelineStore } from "../../store/pipeline-store.js";
-import { requirePermission } from "@openfoundry/permissions";
+import {
+  filterDiscoverable,
+  grantCreatorOwner,
+  identityToHeaders,
+  requireCaller,
+  requirePermission,
+} from "@openfoundry/permissions";
+import { OpenFoundryApiError, permissionDenied } from "@openfoundry/errors";
 import { paginateArray } from "./pagination-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -19,11 +26,13 @@ const ONTOLOGY_SERVICE_URL =
  * Resolve the ontology a pipeline reads its source object type from. A
  * pipeline that names no ontology predates the field, so it reads from the
  * one ontology that declares the type; none or several is an error, because
- * an object type's API name is unique only within one ontology.
+ * an object type's API name is unique only within one ontology. An ontology
+ * the caller may not read is no candidate source for them.
  */
 async function resolveSourceOntology(
   objectType: string,
   ontologyRid: string | undefined,
+  headers: Record<string, string>,
 ): Promise<string> {
   if (ontologyRid) return ontologyRid;
 
@@ -32,7 +41,7 @@ async function resolveSourceOntology(
   do {
     const qs = new URLSearchParams();
     if (pageToken) qs.set("pageToken", pageToken);
-    const res = await fetch(`${ONTOLOGY_SERVICE_URL}/api/v2/ontologies?${qs}`);
+    const res = await fetch(`${ONTOLOGY_SERVICE_URL}/api/v2/ontologies?${qs}`, { headers });
     if (!res.ok) {
       throw new Error(`Failed to list ontologies: HTTP ${res.status}`);
     }
@@ -43,9 +52,10 @@ async function resolveSourceOntology(
     for (const ontology of body.data) {
       const typeRes = await fetch(
         `${ONTOLOGY_SERVICE_URL}/api/v2/ontologies/${encodeURIComponent(ontology.rid)}/objectTypes/${encodeURIComponent(objectType)}`,
+        { headers },
       );
       if (typeRes.ok) declaring.push(ontology.rid);
-      else if (typeRes.status !== 404) {
+      else if (typeRes.status !== 404 && typeRes.status !== 403) {
         throw new Error(
           `Failed to read object type ${objectType} in ontology ${ontology.rid}: HTTP ${typeRes.status}`,
         );
@@ -67,12 +77,16 @@ async function resolveSourceOntology(
 /**
  * Fetch all objects of a given type from one ontology in svc-objects,
  * paginating through all pages. Returns a flat array of property maps (rows).
+ *
+ * Every read carries the caller's identity, so svc-ontology and svc-objects
+ * decide what this caller may read; a pipeline is no way around their checks.
  */
 async function fetchSourceObjects(
   objectType: string,
   ontologyRid: string | undefined,
+  identityHeaders: Record<string, string>,
 ): Promise<Record<string, unknown>[]> {
-  const sourceOntologyRid = await resolveSourceOntology(objectType, ontologyRid);
+  const sourceOntologyRid = await resolveSourceOntology(objectType, ontologyRid, identityHeaders);
   const rows: Record<string, unknown>[] = [];
   let pageToken: string | undefined;
   const pageSize = 500;
@@ -83,9 +97,10 @@ async function fetchSourceObjects(
 
     const res = await fetch(
       `${OBJECTS_SERVICE_URL}/api/v2/ontologies/${encodeURIComponent(sourceOntologyRid)}/objects/${encodeURIComponent(objectType)}?${qs}`,
-      { headers: { "Content-Type": "application/json" } },
+      { headers: identityHeaders },
     );
 
+    if (res.status === 403) throw permissionDenied(sourceOntologyRid, "objects:read");
     if (!res.ok) {
       throw new Error(
         `Failed to fetch ${objectType} objects: HTTP ${res.status}`,
@@ -360,9 +375,10 @@ export async function pipelineRoutes(
   app.get<{
     Querystring: { pageSize?: string; pageToken?: string };
   }>("/pipelines", {
-    preHandler: requirePermission("datasets:read"),
+    preHandler: requireCaller,
   }, async (request) => {
-    const all = pipelineStore.listPipelines().map(serializePipeline);
+    const visible = await filterDiscoverable(request, pipelineStore.listPipelines(), (p) => p.rid);
+    const all = visible.map(serializePipeline);
     return paginateArray(all, request.query);
   });
 
@@ -392,6 +408,7 @@ export async function pipelineRoutes(
       schedule: request.body.schedule as PipelineSchedule | undefined,
     };
     const pipeline = pipelineStore.createPipeline(input);
+    await grantCreatorOwner(request, pipeline.rid);
     reply.status(201);
     return serializePipeline(pipeline);
   });
@@ -514,8 +531,13 @@ export async function pipelineRoutes(
     // 2. Fetch source data from svc-objects
     let sourceRows: Record<string, unknown>[];
     try {
-      sourceRows = await fetchSourceObjects(sourceObjectType, pipeline.ontologyRid);
+      sourceRows = await fetchSourceObjects(
+        sourceObjectType,
+        pipeline.ontologyRid,
+        request.identity ? identityToHeaders(request.identity) : {},
+      );
     } catch (err: unknown) {
+      if (err instanceof OpenFoundryApiError) throw err;
       const msg = err instanceof Error ? err.message : String(err);
       // Record a failed run
       const failedRun = pipelineStore.createRun({

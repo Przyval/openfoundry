@@ -60,6 +60,8 @@ export async function user(
     passwordHash: password === null ? null : await hashPassword(password),
     roles: [],
     orgRid: null,
+    groups: [],
+    markings: [],
     active: true,
     ...extra,
   };
@@ -74,13 +76,13 @@ export interface TestServer {
 
 /**
  * A server with no development accounts or clients - nodeEnv "test" still
- * seeds them, so the stores are passed explicitly - holding alice (EDITOR),
+ * seeds them, so the stores are passed explicitly - holding alice (SERVICE_ACCOUNT),
  * carol (no roles) and dave (disabled).
  */
 export async function startServer(): Promise<TestServer> {
   const keys = await generateKeyPair("ES256", { extractable: true });
   const users = new InMemoryUserDirectory([
-    await user("alice", ALICE_PASSWORD, { roles: ["EDITOR"], orgRid: "org:acme" }),
+    await user("alice", ALICE_PASSWORD, { roles: ["SERVICE_ACCOUNT"], orgRid: "org:acme" }),
     await user("carol", "carol-password"),
     await user("dave", "dave-password", { roles: ["ADMIN"], active: false }),
   ]);
