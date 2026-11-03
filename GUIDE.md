@@ -777,7 +777,9 @@ Isi `CONNECTIVITY_SECRETS_KEY` dengan kunci 32 byte berbasis base64; tanpa kunci
 Import memeriksa bahwa dataset (dan branch) tujuannya ada, dan butuh izin tulis pada koneksi sekaligus pada dataset itu.
 Table import hanya menerima konfigurasi yang cocok dengan koneksinya; untuk JDBC, selain `jdbcImportConfig`, jenis spesifiknya ditentukan dari awalan URL (`jdbc:postgresql:`, `jdbc:sqlserver:`, `jdbc:oracle:`, `jdbc:ucanaccess:`).
 Virtual table hanya bisa didaftarkan dari koneksi `snowflake` (config `snowflake`), `databricks` (`unity`, `delta`, `iceberg`, `files`) atau `s3` (`glue`, `delta`, `iceberg`, `files`).
-`parentFolderRid` dan `parentRid` harus berupa RID folder, tetapi keberadaan foldernya belum diperiksa; `markings` pada virtual table disimpan apa adanya.
+`parentFolderRid` dan `parentRid` harus berupa RID folder, tetapi keberadaan foldernya belum diperiksa.
+Izin koneksi diwarisi dari folder induknya, jadi Marking atau Organization pada folder ikut membatasi pembacaan koneksi.
+Mendaftarkan virtual table butuh `datasets:write` pada koneksi dan pada `parentRid`, dan setiap `markings` yang dipasang harus dimiliki pemanggil (kecuali administrator platform).
 
 **2 dari 20 operasi bagian ini sengaja tidak disajikan** dan menjawab 404:
 

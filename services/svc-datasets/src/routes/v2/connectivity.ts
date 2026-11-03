@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { invalidArgument } from "@openfoundry/errors";
+import { invalidArgument, permissionDenied } from "@openfoundry/errors";
 import { type PageToken, decodePageToken, encodePageToken, normalizePageRequest } from "@openfoundry/pagination";
 import {
   ROOT_RESOURCE,
@@ -53,14 +53,15 @@ import type { DatasetReadWriteStore } from "../../store/dataset-store.js";
  *  - `parentFolderRid` and a virtual table's `parentRid` must be folder RIDs and
  *    scope the per-folder name rules, but whether the folder exists is not
  *    checked: no folder tree is served to check it against.
- *  - A virtual table's `markings` are stored as given; no Marking catalogue is
- *    consulted.
+ *  - A virtual table's `markings` must all be held by the caller (a platform
+ *    administrator is exempt); no Marking catalogue is consulted.
  *  - `snowflake` `externalOauth` and `databricks` `workflowIdentityFederation`
  *    authentication are rejected: their read form carries an OIDC issuer URL,
  *    which this platform has none to name.
  *
  * Permissions follow the platform model: a connection is a resource, and
- * reading it needs `datasets:read`, changing it `datasets:write`. Export
+ * inside its parent folder, and reading it needs `datasets:read`, changing it
+ * `datasets:write`. A virtual table also needs `datasets:write` on its `parentRid`. Export
  * settings need Owner (Foundry restricts them to the Information Security
  * Officer). An import also needs `datasets:write` on its target dataset.
  */
@@ -88,10 +89,11 @@ export async function connectivityRoutes(
   );
 
   const onConnection = {
-    resource: (request: FastifyRequest) => [
-      (request.params as { connectionRid: string }).connectionRid,
-      ROOT_RESOURCE,
-    ],
+    resource: async (request: FastifyRequest) => {
+      const rid = (request.params as { connectionRid: string }).connectionRid;
+      const connection = await store.getConnection(rid);
+      return connection ? [rid, connection.parentFolderRid, ROOT_RESOURCE] : [rid, ROOT_RESOURCE];
+    },
   };
   const read = requirePermission("datasets:read", onConnection);
   const write = requirePermission("datasets:write", onConnection);
@@ -169,7 +171,7 @@ export async function connectivityRoutes(
             request.server.authorization,
             identity,
             "datasets:read",
-            found.map((c) => [c.rid, ROOT_RESOURCE]),
+            found.map((c) => [c.rid, c.parentFolderRid, ROOT_RESOURCE]),
           )
         : found.map(() => true);
       return {
@@ -385,11 +387,16 @@ export async function connectivityRoutes(
 
   app.post<{ Params: { connectionRid: string } }>(
     "/connectivity/connections/:connectionRid/virtualTables",
-    { preHandler: write },
+    { preHandler: [write, requirePermission("datasets:write", onBody("parentRid"))] },
     async (request) => {
       const connection = await requireConnection(store, request.params.connectionRid);
       const fields = parseVirtualTable(obj(request.body, "body"));
       folderRid(fields.parentRid, "parentRid");
+      const identity = request.identity;
+      if (identity && !identity.platformAdmin) {
+        const unheld = (fields.markings ?? []).find((m) => !identity.markings.includes(m));
+        if (unheld) throw permissionDenied(unheld, "apply-marking");
+      }
       requireVirtualTableSource(connection, fields.config);
       const record = await store.createVirtualTable({
         rid: generateRid("foundry", "table").toString(),

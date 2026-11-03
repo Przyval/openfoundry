@@ -639,5 +639,43 @@ describe.each(BACKENDS)("connectivity on $name", (backend) => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ data: {} });
     });
+
+    it("inherits the parent folder's Markings on every read of a connection", async () => {
+      const folder = "ri.compass.main.folder.33333333-3333-4333-8333-333333333333";
+      const c = (await call("POST", `${BASE}${Q}`, { parentFolderRid: folder, displayName: "f", worker: WORKER, configuration: S3 }, ADMIN)).json();
+      expect((await call("GET", `${BASE}/${c.rid}${Q}`, undefined, as("viewer"))).statusCode).toBe(200);
+      await authz.setPolicy({ resourceRid: folder, organizations: [], markings: ["secret"] });
+
+      expect((await call("GET", `${BASE}/${c.rid}${Q}`, undefined, as("viewer"))).statusCode).toBe(403);
+      expect((await call("GET", `${BASE}/${c.rid}/getConfiguration${Q}`, undefined, as("viewer"))).statusCode).toBe(403);
+      const batch = await call("POST", `${BASE}/getConfigurationBatch${Q}`, [{ connectionRid: c.rid }], as("viewer"));
+      expect(batch.json()).toEqual({ data: {} });
+      const cleared = { "x-user-id": "viewer", "x-user-markings": "secret" };
+      expect((await call("GET", `${BASE}/${c.rid}${Q}`, undefined, cleared)).statusCode).toBe(200);
+    });
+
+    it("checks the virtual table's folder and the Markings it applies", async () => {
+      const snow = (await call(
+        "POST",
+        `${BASE}${Q}`,
+        {
+          parentFolderRid: FOLDER,
+          displayName: "vt",
+          worker: WORKER,
+          configuration: { type: "snowflake", accountIdentifier: "a", jdbcProperties: {}, authenticationMode: { type: "basic", username: "u", password: { type: "asPlaintextValue", value: "p" } } },
+        },
+        as("editor"),
+      )).json();
+      const url = `${BASE}/${snow.rid}/virtualTables${Q}`;
+      const config = { type: "snowflake", database: "D", schema: "S", table: "T" };
+      const restricted = "ri.compass.main.folder.44444444-4444-4444-8444-444444444444";
+      await authz.setPolicy({ resourceRid: restricted, organizations: [], markings: ["secret"] });
+
+      expect((await call("POST", url, { name: "a", parentRid: restricted, config }, as("editor"))).statusCode).toBe(403);
+      expect((await call("POST", url, { name: "b", parentRid: OTHER_FOLDER, markings: ["pii"], config }, as("editor"))).statusCode).toBe(403);
+      const held = await call("POST", url, { name: "c", parentRid: OTHER_FOLDER, markings: ["pii"], config }, { "x-user-id": "editor", "x-user-markings": "pii" });
+      expect(held.statusCode, held.body).toBe(200);
+      expect((await call("POST", url, { name: "d", parentRid: OTHER_FOLDER, markings: ["pii"], config }, ADMIN)).statusCode).toBe(200);
+    });
   });
 });
