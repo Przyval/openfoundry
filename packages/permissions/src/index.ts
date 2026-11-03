@@ -23,6 +23,7 @@ export {
 
 export {
   ROOT_RESOURCE,
+  LEGACY_ROLE_GRANT_SOURCE,
   FileAuthorizationStore,
   PgAuthorizationStore,
   createAuthorizationStore,
@@ -43,6 +44,7 @@ export {
   grantCreatorOwner,
   filterDiscoverable,
   setEnforcePermissions,
+  permissionsEnforced,
   type RequirePermissionOptions,
   type ResourceChain,
   type ResourceAlias,

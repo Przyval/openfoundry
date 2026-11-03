@@ -8,6 +8,13 @@ export const ROOT_RESOURCE = "ri.platform.main.root.root";
 
 export type PrincipalType = "user" | "group";
 
+/**
+ * The `grantedBy` of a root grant svc-multipass made from a legacy role name
+ * (EDITOR, VIEWER). svc-multipass takes back what it granted under this
+ * mark; a grant made explicitly takes the mark off.
+ */
+export const LEGACY_ROLE_GRANT_SOURCE = "legacy-role-mapping";
+
 /** A role held by one principal on one resource; inherited by the resource's contents. */
 export interface RoleGrant {
   readonly resourceRid: string;

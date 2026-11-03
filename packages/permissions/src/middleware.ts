@@ -30,6 +30,11 @@ export function setEnforcePermissions(value: boolean): void {
   enforcePermissions = value;
 }
 
+/** Whether a request with no identity is refused. */
+export function permissionsEnforced(): boolean {
+  return enforcePermissions;
+}
+
 /**
  * Give a service its authorization store and read the caller's identity.
  *

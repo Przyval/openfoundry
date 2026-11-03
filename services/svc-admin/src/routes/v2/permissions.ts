@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
   ROLES,
+  LEGACY_ROLE_GRANT_SOURCE,
   ROOT_RESOURCE,
   isRoleId,
   requirePermission,
@@ -105,8 +106,16 @@ export async function permissionRoutes(app: FastifyInstance): Promise<void> {
       const grants = parseRoles(request.body);
       const grantedBy = request.identity?.userId ?? "system";
       const grantedAt = new Date().toISOString();
+      const resourceRid = request.params.resourceRid;
+      const mapped = (await app.authorization.listGrants(resourceRid)).filter(
+        (g) => g.grantedBy === LEGACY_ROLE_GRANT_SOURCE,
+      );
       for (const g of grants) {
-        await app.authorization.addGrant({ resourceRid: request.params.resourceRid, ...g, grantedBy, grantedAt });
+        const same = mapped.find(
+          (m) => m.principalType === g.principalType && m.principalId === g.principalId && m.roleId === g.roleId,
+        );
+        if (same) await app.authorization.removeGrant(resourceRid, same, same.roleId);
+        await app.authorization.addGrant({ resourceRid, ...g, grantedBy, grantedAt });
       }
       reply.status(204);
     },

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { FileAuthorizationStore, ROOT_RESOURCE, setEnforcePermissions } from "@openfoundry/permissions";
+import { FileAuthorizationStore, LEGACY_ROLE_GRANT_SOURCE, ROOT_RESOURCE, setEnforcePermissions } from "@openfoundry/permissions";
 import { createServer } from "../src/server.js";
 import { UserStore } from "../src/store/user-store.js";
 import { GroupStore } from "../src/store/group-store.js";
@@ -79,6 +79,21 @@ describe("who holds a role on a resource", () => {
     });
     expect(res.statusCode).toBe(204);
     expect(await authz.grantsFor([RESOURCE], [{ principalType: "group", principalId: "analysts" }])).toHaveLength(1);
+  });
+
+  it("takes over a grant made from a legacy role name, so its mapping can no longer revoke it", async () => {
+    await authz.addGrant({ resourceRid: ROOT_RESOURCE, principalType: "user", principalId: "service:sync", roleId: "editor", grantedBy: LEGACY_ROLE_GRANT_SOURCE, grantedAt: "2026-01-01T00:00:00.000Z" });
+    const root = `/api/v2/admin/resources/${ROOT_RESOURCE}/roles`;
+    const add = await app.inject({
+      method: "POST",
+      url: `${root}/add`,
+      headers: admin,
+      payload: roles([{ principalId: "service:sync", principalType: "USER", roleId: "editor" }]),
+    });
+    expect(add.statusCode).toBe(204);
+    expect((await app.inject({ method: "GET", url: root, headers: admin })).json().data).toMatchObject([
+      { principalId: "service:sync", roleId: "editor", grantedBy: "root" },
+    ]);
   });
 
   it("rejects a role Foundry does not define", async () => {

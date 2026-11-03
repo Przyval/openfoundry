@@ -1,4 +1,5 @@
 import {
+  LEGACY_ROLE_GRANT_SOURCE,
   ROOT_RESOURCE,
   canonicalPlatformRole,
   type AuthorizationStore,
@@ -102,12 +103,6 @@ export function legacyRolesWarning(source: string, legacy: readonly string[]): s
     `(ri.platform.main.root.root); grant roles on resources instead`
   );
 }
-
-/**
- * The `grantedBy` of a root grant made from a legacy role name. It is what
- * lets the mapping take back what it granted, and nothing an operator granted.
- */
-export const LEGACY_ROLE_GRANT_SOURCE = "legacy-role-mapping";
 
 /**
  * Make the legacy-role grants on the platform root of every principal `owns`

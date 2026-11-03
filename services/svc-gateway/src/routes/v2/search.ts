@@ -9,6 +9,7 @@ import {
   evaluate,
   evaluateEach,
   identityFromClaims,
+  permissionsEnforced,
   type AuthorizationStore,
   type Identity,
 } from "@openfoundry/permissions";
@@ -133,6 +134,7 @@ export async function searchRoutes(app: FastifyInstance, options: SearchRouteOpt
 
       const identity = callerOf(request);
       if (!identity) {
+        if (permissionsEnforced()) throw permissionDenied("platform", "resource:discover");
         return reply.send(await engine.search({ query: q, entityTypes, limit, offset }));
       }
 
@@ -170,9 +172,10 @@ export async function searchRoutes(app: FastifyInstance, options: SearchRouteOpt
     "/reindex",
     async (request: FastifyRequest, reply: FastifyReply) => {
       const identity = callerOf(request);
-      if (identity && (await evaluate(authorization, identity, "admin:manage", [ROOT_RESOURCE]))) {
-        throw permissionDenied(ROOT_RESOURCE, "admin:manage");
-      }
+      const denied = identity
+        ? (await evaluate(authorization, identity, "admin:manage", [ROOT_RESOURCE])) !== undefined
+        : permissionsEnforced();
+      if (denied) throw permissionDenied(ROOT_RESOURCE, "admin:manage");
       const result = await engine.reindexAll();
       return reply.send(result);
     },

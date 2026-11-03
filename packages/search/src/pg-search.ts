@@ -146,7 +146,7 @@ export class PgSearchEngine implements SearchEngine {
         metadata
       FROM search_index
       WHERE ${whereClause}
-      ORDER BY score DESC, title ASC
+      ORDER BY score DESC, title ASC, rid ASC
       LIMIT $${params.length + 1}
       OFFSET $${params.length + 2}
     `;

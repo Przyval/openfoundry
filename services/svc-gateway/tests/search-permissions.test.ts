@@ -18,7 +18,7 @@ import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { vector } from "@electric-sql/pglite-pgvector";
 import type { OpenFoundryClaims } from "@openfoundry/auth-tokens";
 import { OpenFoundryApiError } from "@openfoundry/errors";
-import { FileAuthorizationStore, ROOT_RESOURCE, type RoleId } from "@openfoundry/permissions";
+import { FileAuthorizationStore, ROOT_RESOURCE, setEnforcePermissions, type RoleId } from "@openfoundry/permissions";
 import { searchRoutes } from "../src/routes/v2/search.js";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -130,6 +130,36 @@ describe("GET /search", () => {
     expect((await search({ sub: "root", roles: "ADMIN" })).rids).toEqual([DATASET, OPEN_TYPE, OPEN, USER].sort());
     await grant(ROOT_RESOURCE, "vera", "viewer");
     expect((await search({ sub: "vera" })).rids).not.toContain(USER);
+  });
+});
+
+describe("GET /search over more than one page of ties", () => {
+  it("returns every visible hit once", async () => {
+    const wards = Array.from({ length: 150 }, (_, i) => `ri.foundry.main.dataset.ward-${String(i).padStart(3, "0")}`);
+    await db.exec(
+      `INSERT INTO search_index (rid, entity_type, title) VALUES ${wards.map((r) => `('${r}', 'DATASET', 'Ward')`).join(", ")}`,
+    );
+    await grant(ROOT_RESOURCE, "wanda", "viewer");
+    const seen: string[] = [];
+    for (const offset of [0, 100]) {
+      const page = await search({ sub: "wanda" }, `q=ward&limit=100&offset=${offset}`);
+      expect(page.totalCount).toBe(150);
+      seen.push(...page.rids);
+    }
+    expect(seen.sort()).toEqual(wards);
+  });
+});
+
+describe("an anonymous caller under ENFORCE_PERMISSIONS", () => {
+  it("is refused search and reindex", async () => {
+    setEnforcePermissions(true);
+    try {
+      expect((await app.inject({ method: "GET", url: "/search?q=patient" })).statusCode).toBe(403);
+      expect((await app.inject({ method: "POST", url: "/search/reindex" })).statusCode).toBe(403);
+    } finally {
+      setEnforcePermissions(false);
+    }
+    expect((await app.inject({ method: "GET", url: "/search?q=patient" })).statusCode).toBe(200);
   });
 });
 
