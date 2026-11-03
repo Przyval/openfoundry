@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import type { DatasetStore } from "../../store/dataset-store.js";
+import type { ConnectivityStore } from "../../connectivity/store.js";
+import type { DatasetReadWriteStore, DatasetStore } from "../../store/dataset-store.js";
 import type { PipelineStore } from "../../store/pipeline-store.js";
+import { connectivityRoutes } from "./connectivity.js";
 import { datasetRoutes } from "./datasets.js";
 import { fileRoutes, type FileReadWriteStore } from "./files.js";
 import { pipelineRoutes } from "./pipelines.js";
@@ -11,6 +13,7 @@ export async function v2Routes(
     datasetStore: DatasetStore;
     fileStore: FileReadWriteStore;
     pipelineStore: PipelineStore;
+    connectivityStore: ConnectivityStore;
   },
 ): Promise<void> {
   const routeOpts = {
@@ -22,5 +25,10 @@ export async function v2Routes(
   await app.register(fileRoutes, routeOpts);
   await app.register(pipelineRoutes, {
     pipelineStore: opts.pipelineStore,
+  });
+  await app.register(connectivityRoutes, {
+    store: opts.connectivityStore,
+    // The store may be the Postgres one at runtime; the interface awaits both.
+    datasetStore: opts.datasetStore as DatasetReadWriteStore,
   });
 }

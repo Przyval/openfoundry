@@ -746,6 +746,47 @@ svc-aip belum menerima konteks organisasi dari gateway, jadi semua model saat in
 | Config version Model Studio (4 operasi) | Setiap config version wajib menunjuk trainer, dan trainer tidak ada |
 | `launch` dan listing run Model Studio | Run adalah build pelatihan; `buildRid` dan `jobRid` akan menunjuk build yang tidak pernah ada |
 
+### Konektivitas (Data Connection)
+
+Bagian `connectivity` Foundry disajikan oleh svc-datasets lewat gateway, di memori maupun di Postgres (tabel `connectivity_connections`, `connectivity_secrets`, `connectivity_imports` dan `connectivity_virtual_tables`).
+Semua operasinya berstatus preview di Foundry, jadi setiap panggilan wajib membawa `?preview=true`; tanpa itu jawabannya 400 `ApiFeaturePreviewUsageOnly`.
+
+```
+POST   /api/v2/connectivity/connections                                          Buat koneksi (parentFolderRid, displayName, worker, configuration)
+GET    /api/v2/connectivity/connections/:connectionRid                           Ambil koneksi
+GET    /api/v2/connectivity/connections/:connectionRid/getConfiguration          Ambil konfigurasinya saja
+POST   /api/v2/connectivity/connections/getConfigurationBatch                    Konfigurasi banyak koneksi (maks 200)
+POST   /api/v2/connectivity/connections/:connectionRid/updateExportSettings      Ubah pengaturan ekspor (butuh Owner)
+POST   /api/v2/connectivity/connections/:connectionRid/updateSecrets             Ganti nilai secret yang sudah ada
+POST   /api/v2/connectivity/connections/:connectionRid/fileImports               Buat file import
+GET    /api/v2/connectivity/connections/:connectionRid/fileImports[/:rid]        List / ambil file import
+PUT    /api/v2/connectivity/connections/:connectionRid/fileImports/:rid          Ganti file import
+DELETE /api/v2/connectivity/connections/:connectionRid/fileImports/:rid          Hapus file import
+POST   /api/v2/connectivity/connections/:connectionRid/tableImports              Buat table import
+GET    /api/v2/connectivity/connections/:connectionRid/tableImports[/:rid]       List / ambil table import
+PUT    /api/v2/connectivity/connections/:connectionRid/tableImports/:rid         Ganti table import
+DELETE /api/v2/connectivity/connections/:connectionRid/tableImports/:rid         Hapus table import
+POST   /api/v2/connectivity/connections/:connectionRid/virtualTables             Daftarkan virtual table
+```
+
+Koneksi mendukung konfigurasi `s3`, `rest`, `snowflake`, `databricks`, `smb` dan `jdbc`.
+Secret ditulis sebagai `asPlaintextValue` dan tidak pernah dikembalikan: koneksi hanya menyebut *nama* secret (`asSecretName`), yang berupa jalur propertinya di dalam `configuration`, misalnya `credentials.password`.
+Nilainya dienkripsi AES-256-GCM sebelum disimpan.
+Isi `CONNECTIVITY_SECRETS_KEY` dengan kunci 32 byte berbasis base64; tanpa kunci itu mode memori memakai kunci sementara, sedangkan mode Postgres menolak menulis secret (500 `SecretsKeyNotConfigured`) daripada menyimpan sesuatu yang tidak bisa didekripsi setelah restart.
+Import memeriksa bahwa dataset (dan branch) tujuannya ada, dan butuh izin tulis pada koneksi sekaligus pada dataset itu.
+Table import hanya menerima konfigurasi yang cocok dengan koneksinya; untuk JDBC, selain `jdbcImportConfig`, jenis spesifiknya ditentukan dari awalan URL (`jdbc:postgresql:`, `jdbc:sqlserver:`, `jdbc:oracle:`, `jdbc:ucanaccess:`).
+Virtual table hanya bisa didaftarkan dari koneksi `snowflake` (config `snowflake`), `databricks` (`unity`, `delta`, `iceberg`, `files`) atau `s3` (`glue`, `delta`, `iceberg`, `files`).
+`parentFolderRid` dan `parentRid` harus berupa RID folder, tetapi keberadaan foldernya belum diperiksa; `markings` pada virtual table disimpan apa adanya.
+
+**3 dari 20 operasi bagian ini sengaja tidak disajikan** dan menjawab 404:
+
+| Operasi | Alasan |
+|---------|--------|
+| `execute` pada file import dan table import (2 operasi) | Hasilnya `BuildRid` dari build yang menarik data dari sistem eksternal ke dataset; tidak ada build system maupun runtime konektor, jadi RID-nya hanya bisa dikarang dan impornya tidak akan pernah jalan |
+| `uploadCustomJdbcDrivers` | Isinya byte mentah sebuah jar (`application/octet-stream`); gateway menserialisasi ulang setiap body sebagai JSON, jadi byte-nya tidak akan sampai utuh |
+
+Dua jenis autentikasi ditolak dengan 400 karena bentuk bacanya memuat URL penerbit OIDC yang tidak dimiliki platform ini: `externalOauth` pada Snowflake dan `workflowIdentityFederation` pada Databricks.
+
 ### API v1
 
 ```

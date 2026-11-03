@@ -8,6 +8,9 @@ import {
   type AuthorizationStore,
 } from "@openfoundry/permissions";
 import { type DatasetServiceConfig, loadConfig } from "./config.js";
+import { PgConnectivityStore } from "./connectivity/pg-store.js";
+import { SecretBox } from "./connectivity/secrets.js";
+import { type ConnectivityStore, MemoryConnectivityStore } from "./connectivity/store.js";
 import { DatasetStore } from "./store/dataset-store.js";
 import { FileStore } from "./store/file-store.js";
 import { PipelineStore } from "./store/pipeline-store.js";
@@ -23,6 +26,8 @@ import { v1Routes } from "./routes/v1/index.js";
 // ---------------------------------------------------------------------------
 
 export interface CreateServerOptions {
+  /** Inject the connectivity store (useful for tests). */
+  connectivityStore?: ConnectivityStore;
   /** Inject the grant and policy store (useful for tests). */
   authorizationStore?: AuthorizationStore;
   /** Override the config (useful for tests). */
@@ -47,21 +52,28 @@ export async function createServer(
   let datasetStore: DatasetStore | PgDatasetStore;
   let fileStore: FileStore | PgFileStore;
   let pipelineStore: PipelineStore | PgPipelineStore;
+  let connectivityStore: ConnectivityStore;
 
   if (options.datasetStore && options.fileStore) {
     datasetStore = options.datasetStore;
     fileStore = options.fileStore;
     pipelineStore = options.pipelineStore ?? new PipelineStore();
+    connectivityStore =
+      options.connectivityStore ?? new MemoryConnectivityStore(SecretBox.fromEnv(process.env, false));
   } else if (config.databaseUrl) {
     const pool = createPool({ connectionString: config.databaseUrl });
     authPool = pool;
     datasetStore = options.datasetStore ?? new PgDatasetStore(pool);
     fileStore = options.fileStore ?? new PgFileStore(pool);
     pipelineStore = options.pipelineStore ?? new PgPipelineStore(pool);
+    connectivityStore =
+      options.connectivityStore ?? new PgConnectivityStore(pool, SecretBox.fromEnv(process.env, true));
   } else {
     datasetStore = options.datasetStore ?? new DatasetStore();
     fileStore = options.fileStore ?? new FileStore();
     pipelineStore = options.pipelineStore ?? new PipelineStore();
+    connectivityStore =
+      options.connectivityStore ?? new MemoryConnectivityStore(SecretBox.fromEnv(process.env, false));
   }
 
   // Seed default pipeline definitions (no-op if pipelines already exist)
@@ -150,6 +162,7 @@ export async function createServer(
     datasetStore: datasetStore as DatasetStore,
     fileStore,
     pipelineStore: pipelineStore as PipelineStore,
+    connectivityStore,
   });
   await app.register(v1Routes, {
     prefix: "/api/v1",
