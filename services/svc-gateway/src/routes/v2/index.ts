@@ -5,6 +5,7 @@ import { objectRoutes } from "./objects.js";
 import { actionRoutes } from "./actions.js";
 import { datasetRoutes } from "./datasets.js";
 import { compassRoutes } from "./compass.js";
+import { connectivityRoutes } from "./connectivity.js";
 import { adminRoutes } from "./admin.js";
 import { functionRoutes } from "./functions.js";
 import { webhookRoutes } from "./webhooks.js";
@@ -44,6 +45,7 @@ export async function v2Routes(
   await app.register(actionRoutes, { prefix: "/actions" });
   await app.register(datasetRoutes, { prefix: "/datasets" });
   await app.register(compassRoutes, { prefix: "/compass" });
+  await app.register(connectivityRoutes, { prefix: "/connectivity" });
   await app.register(adminRoutes, { prefix: "/admin" });
   await app.register(functionRoutes, { prefix: "/functions" });
   await app.register(webhookRoutes, { prefix: "/webhooks" });
