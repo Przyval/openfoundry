@@ -1,6 +1,7 @@
 import type pg from "pg";
 import { generateRid } from "@openfoundry/rid";
-import type { UserDirectory, UserRecord } from "./user-store.js";
+import type { AuthorizationStore } from "@openfoundry/permissions";
+import { syncLegacyRootGrants, type RoleNames, type UserDirectory, type UserRecord } from "./user-store.js";
 
 /**
  * The `users` table as svc-multipass reads and writes it.
@@ -135,4 +136,24 @@ export class PgUserStore implements UserDirectory {
     });
     return (result.rowCount ?? 0) > 0;
   }
+}
+
+/**
+ * Set a user's roles: the platform roles on the account, and the legacy
+ * EDITOR / VIEWER as grants on the platform root, taking back any such grant
+ * no longer named. The grants are keyed by the stored spelling of the
+ * username - the token's `sub` - whatever case the operator typed.
+ *
+ * @returns the stored username, or undefined when no such user exists.
+ */
+export async function assignRoles(
+  store: PgUserStore,
+  authorization: AuthorizationStore,
+  username: string,
+  roles: RoleNames,
+): Promise<string | undefined> {
+  if (!(await store.setRoles(username, roles.platformRoles))) return undefined;
+  const stored = (await store.findByUsername(username))!.username;
+  await syncLegacyRootGrants(authorization, (id) => id === stored, new Map([[stored, roles.rootRoles]]));
+  return stored;
 }

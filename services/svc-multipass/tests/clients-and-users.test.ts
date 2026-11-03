@@ -20,7 +20,7 @@ import {
   syncLegacyRootGrants,
 } from "../src/store/user-store.js";
 import { PgAuthorizationStore, ROOT_RESOURCE } from "@openfoundry/permissions";
-import { PgUserStore, UserAlreadyExistsError } from "../src/store/pg-user-store.js";
+import { assignRoles, PgUserStore, UserAlreadyExistsError } from "../src/store/pg-user-store.js";
 import { user } from "./fixtures.js";
 
 // ---------------------------------------------------------------------------
@@ -288,6 +288,24 @@ describe.each(SCHEMAS)("PgUserStore on a database built from %s", (_name, files)
       markings: [],
       active: true,
     });
+  });
+
+  it("grants and takes back a legacy role under the stored spelling of the username", async () => {
+    await store.createUser({
+      username: "Alicia", displayName: "Alicia", passwordHash: "s:k", roles: [], orgRid: null, groups: [], markings: [],
+    });
+    const authorization = new PgAuthorizationStore(pool);
+    const held = async () =>
+      (await authorization.listGrants(ROOT_RESOURCE))
+        .filter((g) => g.principalId.toLowerCase() === "alicia")
+        .map((g) => `${g.principalId}:${g.roleId}`);
+
+    expect(await assignRoles(store, authorization, "alicia", canonicalRoles(["EDITOR"]))).toBe("Alicia");
+    expect(await held()).toEqual(["Alicia:editor"]);
+
+    expect(await assignRoles(store, authorization, "ALICIA", canonicalRoles([]))).toBe("Alicia");
+    expect(await held()).toEqual([]);
+    expect(await assignRoles(store, authorization, "nobody", canonicalRoles(["EDITOR"]))).toBeUndefined();
   });
 
   it("moves a stored legacy EDITOR or VIEWER to a role on the platform root", async () => {

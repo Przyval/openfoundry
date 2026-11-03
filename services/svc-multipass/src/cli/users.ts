@@ -2,13 +2,12 @@ import { parseArgs } from "node:util";
 import { createPool } from "@openfoundry/db";
 import { hashPassword, MIN_PASSWORD_LENGTH } from "../passwords.js";
 import { PgAuthorizationStore } from "@openfoundry/permissions";
-import { PgUserStore, UserAlreadyExistsError } from "../store/pg-user-store.js";
+import { assignRoles, PgUserStore, UserAlreadyExistsError } from "../store/pg-user-store.js";
 import {
   canonicalIds,
   canonicalRoles,
   isValidUsername,
   legacyRolesWarning,
-  syncLegacyRootGrants,
   type RoleNames,
 } from "../store/user-store.js";
 
@@ -176,18 +175,10 @@ async function main(argv: string[]): Promise<void> {
 
   const pool = createPool({ connectionString: databaseUrl, maxConnections: 1 });
   const store = new PgUserStore(pool);
-  // A legacy EDITOR or VIEWER is a role on the platform root now; setting
-  // roles without one takes back what an earlier mapping granted.
-  const syncRootRoles = async () => {
-    if (roles.legacy.length > 0) {
-      console.error(`users: warning: ${legacyRolesWarning(`user "${username}"`, roles.legacy)}`);
-    }
-    await syncLegacyRootGrants(
-      new PgAuthorizationStore(pool),
-      (id) => id === username,
-      new Map([[username, roles.rootRoles]]),
-    );
-  };
+  const authorization = new PgAuthorizationStore(pool);
+  if (roles.legacy.length > 0) {
+    console.error(`users: warning: ${legacyRolesWarning(`user "${username}"`, roles.legacy)}`);
+  }
   try {
     switch (command) {
       case "create": {
@@ -201,7 +192,7 @@ async function main(argv: string[]): Promise<void> {
           groups,
           markings,
         });
-        await syncRootRoles();
+        await assignRoles(store, authorization, user.username, roles);
         console.log(
           `Created user "${user.username}" with roles: ${user.roles.join(", ") || "(none)"}`,
         );
@@ -216,10 +207,9 @@ async function main(argv: string[]): Promise<void> {
         break;
       }
       case "set-roles": {
-        if (!(await store.setRoles(username, roles.platformRoles))) {
+        if (!(await assignRoles(store, authorization, username, roles))) {
           throw new UsageError(`no user "${username}"`, false);
         }
-        await syncRootRoles();
         console.log(`Roles of "${username}" set to: ${roles.platformRoles.join(", ") || "(none)"}`);
         break;
       }
