@@ -1,6 +1,12 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
+import type pg from "pg";
 import { createPool } from "@openfoundry/db";
+import {
+  ROOT_RESOURCE,
+  createAuthorizationStore,
+  type AuthorizationStore,
+} from "@openfoundry/permissions";
 import { OpenFoundryApiError } from "@openfoundry/errors";
 import { type MultipassConfig, loadConfig } from "./config.js";
 import { resolveSigningKeys, type SigningKey } from "./keys.js";
@@ -10,7 +16,7 @@ import { authRoutes, type AuthRoutesOptions } from "./routes/auth.js";
 import { createClientStore, parseDeclaredClients, type ClientStore } from "./store/client-store.js";
 import { PgUserStore } from "./store/pg-user-store.js";
 import type { TokenStore } from "./store/token-store.js";
-import { createUserDirectory, type UserDirectory } from "./store/user-store.js";
+import { createUserDirectory, legacyRolesWarning, type UserDirectory } from "./store/user-store.js";
 
 // ---------------------------------------------------------------------------
 // Server factory
@@ -32,6 +38,11 @@ export interface CreateServerOptions {
    * `users` table when DATABASE_URL is set.
    */
   users?: UserDirectory;
+  /**
+   * Override where legacy client roles are granted (useful for tests). By
+   * default the database when DATABASE_URL is set, else the shared file.
+   */
+  authorizationStore?: AuthorizationStore;
 }
 
 /**
@@ -140,28 +151,56 @@ export async function createServer(
 
   // Parsed before anything listens, so a malformed OAUTH_CLIENTS stops the
   // service rather than leaving a client nobody can sign in through.
+  const declared = overrides.clientStore ? [] : parseDeclaredClients(config.oauthClients);
   const clientStore =
-    overrides.clientStore ??
-    createClientStore({
-      nodeEnv: config.nodeEnv,
-      declared: parseDeclaredClients(config.oauthClients),
-    });
+    overrides.clientStore ?? createClientStore({ nodeEnv: config.nodeEnv, declared });
+
+  let pool: pg.Pool | undefined;
+  const sharedPool = (): pg.Pool | undefined => {
+    if (!config.databaseUrl) return undefined;
+    if (!pool) {
+      const opened = createPool({ connectionString: config.databaseUrl, maxConnections: 5 });
+      app.addHook("onClose", async () => {
+        await opened.end();
+      });
+      pool = opened;
+    }
+    return pool;
+  };
+
+  // A legacy EDITOR or VIEWER on a declared client becomes that role on the
+  // platform root, where the permission model looks for it.
+  const legacy = declared.filter((c) => c.rootRoles && c.rootRoles.length > 0);
+  if (legacy.length > 0) {
+    const authorization = options.authorizationStore ?? createAuthorizationStore(sharedPool());
+    const grantedAt = new Date().toISOString();
+    for (const client of legacy) {
+      app.log.warn(legacyRolesWarning(`OAUTH_CLIENTS client "${client.clientId}"`, client.legacyRoles ?? []));
+      for (const roleId of client.rootRoles ?? []) {
+        await authorization.addGrant({
+          resourceRid: ROOT_RESOURCE,
+          principalType: "user",
+          principalId: `service:${client.clientId}`,
+          roleId,
+          grantedBy: "OAUTH_CLIENTS",
+          grantedAt,
+        });
+      }
+    }
+  }
 
   let users = options.users;
   if (!users) {
-    let persistent: UserDirectory | undefined;
-    if (config.databaseUrl) {
-      const pool = createPool({ connectionString: config.databaseUrl, maxConnections: 5 });
-      app.addHook("onClose", async () => {
-        await pool.end();
-      });
-      persistent = new PgUserStore(pool);
-    } else if (config.nodeEnv === "production") {
+    const db = sharedPool();
+    if (!db && config.nodeEnv === "production") {
       app.log.warn(
         "DATABASE_URL is not set, so there are no user accounts: nobody can sign in.",
       );
     }
-    users = await createUserDirectory({ nodeEnv: config.nodeEnv, persistent });
+    users = await createUserDirectory({
+      nodeEnv: config.nodeEnv,
+      persistent: db ? new PgUserStore(db) : undefined,
+    });
   }
 
   await app.register(healthRoutes);

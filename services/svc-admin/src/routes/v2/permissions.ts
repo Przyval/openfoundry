@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
   ROLES,
   ROOT_RESOURCE,
@@ -62,11 +62,17 @@ const wire = (g: RoleGrant) => ({
 export async function permissionRoutes(app: FastifyInstance): Promise<void> {
   // Management is Owner on the resource the path names; the platform root
   // (`ri.platform.main.root.root`) stands for the platform itself.
-  const manage = requirePermission("resource:manage-roles", {
-    resource: (request) => {
-      const rid = (request.params as { resourceRid: string }).resourceRid;
-      return rid === ROOT_RESOURCE ? [ROOT_RESOURCE] : [rid, ROOT_RESOURCE];
-    },
+  const managed = (request: FastifyRequest) => {
+    const rid = (request.params as { resourceRid: string }).resourceRid;
+    return rid === ROOT_RESOURCE ? [ROOT_RESOURCE] : [rid, ROOT_RESOURCE];
+  };
+  const manage = requirePermission("resource:manage-roles", { resource: managed });
+  // A Marking nobody holds would lock everyone out of a resource for good, so
+  // a platform administrator may read and replace its policy without holding
+  // what the policy demands. Every other route still binds them.
+  const managePolicy = requirePermission("resource:manage-roles", {
+    resource: managed,
+    platformAdminOverridesControls: true,
   });
 
   // Roles are platform-defined: read-only, as in Foundry.
@@ -119,7 +125,7 @@ export async function permissionRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{ Params: { resourceRid: string } }>(
     "/admin/resources/:resourceRid/policy",
-    { preHandler: manage },
+    { preHandler: managePolicy },
     async (request) => {
       const [policy] = await app.authorization.policiesFor([request.params.resourceRid]);
       return { organizations: policy?.organizations ?? [], markings: policy?.markings ?? [] };
@@ -130,7 +136,7 @@ export async function permissionRoutes(app: FastifyInstance): Promise<void> {
   // the resource contains at once, which is why it is Owner-only.
   app.put<{ Params: { resourceRid: string }; Body: { organizations?: unknown; markings?: unknown } }>(
     "/admin/resources/:resourceRid/policy",
-    { preHandler: manage },
+    { preHandler: managePolicy },
     async (request) => {
       const organizations = stringList(request.body?.organizations, "organizations");
       const markings = stringList(request.body?.markings, "markings");

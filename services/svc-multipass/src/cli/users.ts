@@ -1,8 +1,15 @@
 import { parseArgs } from "node:util";
 import { createPool } from "@openfoundry/db";
 import { hashPassword, MIN_PASSWORD_LENGTH } from "../passwords.js";
+import { PgAuthorizationStore, ROOT_RESOURCE } from "@openfoundry/permissions";
 import { PgUserStore, UserAlreadyExistsError } from "../store/pg-user-store.js";
-import { canonicalRoles, isValidUsername } from "../store/user-store.js";
+import {
+  canonicalIds,
+  canonicalRoles,
+  isValidUsername,
+  legacyRolesWarning,
+  type RoleNames,
+} from "../store/user-store.js";
 
 /**
  * Manage the accounts people sign in with, directly in the `users` table.
@@ -14,8 +21,16 @@ import { canonicalRoles, isValidUsername } from "../store/user-store.js";
  *
  *   users create       --username <name> --roles <ADMIN,SERVICE_ACCOUNT>
  *                      [--display-name <text>] [--org-rid <rid>]
+ *                      [--groups <id,...>] [--markings <id,...>]
  *   users set-password --username <name>
  *   users set-roles    --username <name> --roles <ADMIN,...|"">
+ *   users set-groups   --username <name> --groups <id,...|"">
+ *   users set-markings --username <name> --markings <id,...|"">
+ *
+ * Groups and Markings are signed into the user's token at sign-in and on
+ * refresh; the permission model checks a resource's Markings against them.
+ * The legacy roles EDITOR and VIEWER are still accepted and granted as editor
+ * or viewer on the platform root, with a deprecation warning.
  *
  * The password is read from OPENFOUNDRY_USER_PASSWORD when set, otherwise
  * from standard input: prompted for (twice, unechoed) on a terminal, or the
@@ -25,8 +40,11 @@ import { canonicalRoles, isValidUsername } from "../store/user-store.js";
 
 const USAGE = `Usage:
   users create       --username <name> --roles <ADMIN,SERVICE_ACCOUNT> [--display-name <text>] [--org-rid <rid>]
+                     [--groups <id,...>] [--markings <id,...>]
   users set-password --username <name>
   users set-roles    --username <name> --roles <ADMIN,...>   (an empty list removes every role)
+  users set-groups   --username <name> --groups <id,...>     (an empty list removes every group)
+  users set-markings --username <name> --markings <id,...>   (an empty list removes every marking)
 
 Requires DATABASE_URL. The password comes from OPENFOUNDRY_USER_PASSWORD, or
 standard input (prompted on a terminal).`;
@@ -38,10 +56,22 @@ class UsageError extends Error {
   }
 }
 
-function parseRoles(raw: string | undefined): string[] {
+function parseRoles(raw: string | undefined): RoleNames {
   if (raw === undefined) throw new UsageError("--roles is required");
   try {
     return canonicalRoles(raw.split(","));
+  } catch (err) {
+    throw new UsageError((err as Error).message);
+  }
+}
+
+function parseIds(kind: string, raw: string | undefined, required: boolean): string[] {
+  if (raw === undefined) {
+    if (required) throw new UsageError(`--${kind}s is required`);
+    return [];
+  }
+  try {
+    return canonicalIds(kind, raw.split(","));
   } catch (err) {
     throw new UsageError((err as Error).message);
   }
@@ -113,6 +143,8 @@ async function main(argv: string[]): Promise<void> {
       roles: { type: "string" },
       "display-name": { type: "string" },
       "org-rid": { type: "string" },
+      groups: { type: "string" },
+      markings: { type: "string" },
     },
     strict: true,
   });
@@ -131,14 +163,35 @@ async function main(argv: string[]): Promise<void> {
   }
 
   // Validate everything that needs no database before asking for a password.
-  const roles =
-    command === "create" || command === "set-roles" ? parseRoles(values.roles) : [];
-  if (!["create", "set-password", "set-roles"].includes(command)) {
+  if (!["create", "set-password", "set-roles", "set-groups", "set-markings"].includes(command)) {
     throw new UsageError(`unknown command "${command}"`);
   }
+  const roles: RoleNames =
+    command === "create" || command === "set-roles"
+      ? parseRoles(values.roles)
+      : { platformRoles: [], rootRoles: [], legacy: [] };
+  const groups = parseIds("group", values.groups, command === "set-groups");
+  const markings = parseIds("marking", values.markings, command === "set-markings");
 
   const pool = createPool({ connectionString: databaseUrl, maxConnections: 1 });
   const store = new PgUserStore(pool);
+  // A legacy EDITOR or VIEWER is a role on the platform root now.
+  const grantRootRoles = async () => {
+    if (roles.rootRoles.length === 0) return;
+    console.error(`users: warning: ${legacyRolesWarning(`user "${username}"`, roles.legacy)}`);
+    const authorization = new PgAuthorizationStore(pool);
+    const grantedAt = new Date().toISOString();
+    for (const roleId of roles.rootRoles) {
+      await authorization.addGrant({
+        resourceRid: ROOT_RESOURCE,
+        principalType: "user",
+        principalId: username,
+        roleId,
+        grantedBy: "users-cli",
+        grantedAt,
+      });
+    }
+  };
   try {
     switch (command) {
       case "create": {
@@ -147,9 +200,12 @@ async function main(argv: string[]): Promise<void> {
           username,
           displayName: values["display-name"] ?? username,
           passwordHash,
-          roles,
+          roles: roles.platformRoles,
           orgRid: values["org-rid"] ?? null,
+          groups,
+          markings,
         });
+        await grantRootRoles();
         console.log(
           `Created user "${user.username}" with roles: ${user.roles.join(", ") || "(none)"}`,
         );
@@ -164,10 +220,25 @@ async function main(argv: string[]): Promise<void> {
         break;
       }
       case "set-roles": {
-        if (!(await store.setRoles(username, roles))) {
+        if (!(await store.setRoles(username, roles.platformRoles))) {
           throw new UsageError(`no user "${username}"`, false);
         }
-        console.log(`Roles of "${username}" set to: ${roles.join(", ") || "(none)"}`);
+        await grantRootRoles();
+        console.log(`Roles of "${username}" set to: ${roles.platformRoles.join(", ") || "(none)"}`);
+        break;
+      }
+      case "set-groups": {
+        if (!(await store.setGroups(username, groups))) {
+          throw new UsageError(`no user "${username}"`, false);
+        }
+        console.log(`Groups of "${username}" set to: ${groups.join(", ") || "(none)"}`);
+        break;
+      }
+      case "set-markings": {
+        if (!(await store.setMarkings(username, markings))) {
+          throw new UsageError(`no user "${username}"`, false);
+        }
+        console.log(`Markings of "${username}" set to: ${markings.join(", ") || "(none)"}`);
         break;
       }
     }

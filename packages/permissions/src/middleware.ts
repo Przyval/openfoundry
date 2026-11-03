@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest, preHandlerHookHandler } from "fastify";
 import { internal, permissionDenied } from "@openfoundry/errors";
-import { denialError, evaluate } from "./authorizer.js";
+import { denialError, evaluate, evaluateEach } from "./authorizer.js";
 import { ROOT_RESOURCE, type AuthorizationStore } from "./authorization-store.js";
 import { identityFromHeaders, type Identity } from "./identity.js";
 import type { Operation } from "./roles.js";
@@ -68,6 +68,12 @@ export type ResourceChain = (
 export interface RequirePermissionOptions {
   /** Defaults to the resource named by the route's `ontologyRid`, `datasetRid` or `pipelineRid`. */
   resource?: ResourceChain;
+  /**
+   * Let a platform administrator through without holding the resource's
+   * Organizations and Markings. Only for the route that changes those
+   * controls, so a resource a Marking locked everybody out of can be recovered.
+   */
+  platformAdminOverridesControls?: boolean;
 }
 
 /**
@@ -100,6 +106,7 @@ export function requirePermission(
       if (!enforcePermissions) return;
       throw permissionDenied("platform", operation);
     }
+    if (options.platformAdminOverridesControls && identity.platformAdmin) return;
     if (!request.server.authorization) {
       throw internal("Authorization store is not registered on this service");
     }
@@ -153,11 +160,6 @@ export async function filterDiscoverable<T>(
 ): Promise<T[]> {
   const identity = request.identity;
   if (!identity) return [...items];
-  const store = request.server.authorization;
-  const out: T[] = [];
-  for (const item of items) {
-    const denial = await evaluate(store, identity, "resource:discover", [ridOf(item), ROOT_RESOURCE]);
-    if (!denial) out.push(item);
-  }
-  return out;
+  const allowed = await evaluateEach(request.server.authorization, identity, "resource:discover", items.map(ridOf));
+  return items.filter((item) => allowed.has(ridOf(item)));
 }

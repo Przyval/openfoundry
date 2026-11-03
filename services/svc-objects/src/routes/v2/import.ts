@@ -12,6 +12,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
+import { requirePermission } from "@openfoundry/permissions";
 
 interface ImportRouteOptions {
   objectStore: {
@@ -91,6 +92,7 @@ export async function importRoutes(
 
   app.post<{ Params: { ontologyRid: string }; Body: ImportBody }>(
     "/ontologies/:ontologyRid/import/csv",
+    { preHandler: requirePermission("objects:write") },
     async (request, reply) => {
       const { ontologyRid } = request.params;
       const { csvContent, objectType, primaryKeyColumn } = request.body;

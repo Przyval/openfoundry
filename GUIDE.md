@@ -91,7 +91,7 @@ Jadi baris status "Service status" tidak pernah menyebut svc-sentinel, hidup mau
 ### Mode pengembangan
 
 Buka konsol, lalu isi form "Developer login form".
-Tiga akun pengembangan didefinisikan pada konstanta `DEV_USERS` di `services/svc-multipass/src/store/user-store.ts`, masing-masing dengan peran ADMIN, EDITOR, dan VIEWER.
+Tiga akun pengembangan didefinisikan pada konstanta `DEV_USERS` di `services/svc-multipass/src/store/user-store.ts`, `admin` dengan peran platform ADMIN, sedangkan `developer` dan `analyst` tanpa peran apa pun.
 Baca nilainya langsung dari berkas itu; panduan ini sengaja tidak menyalin kredensial ke dalam repositori publik.
 
 Ketiga akun itu hanya ada selama `NODE_ENV` bukan `production`.
@@ -152,7 +152,9 @@ docker compose -f deploy/docker-compose.yml exec postgres sh -c \
 ```
 
 Kata sandi ditanyakan dua kali tanpa ditampilkan, atau dibaca dari `OPENFOUNDRY_USER_PASSWORD` bila variabel itu diisi; ia tidak pernah diberikan sebagai argumen.
-Perintah yang sama juga mengelola akun berikutnya: `create`, `set-password`, dan `set-roles` (peran: ADMIN, EDITOR, VIEWER, SERVICE_ACCOUNT).
+Perintah yang sama juga mengelola akun berikutnya: `create`, `set-password`, `set-roles` (peran platform: ADMIN, SERVICE_ACCOUNT), `set-groups`, dan `set-markings`.
+Grup dan Marking akun (`--groups`, `--markings`, dipisah koma) ikut ditandatangani ke token saat masuk dan saat refresh; deployment lama harus menerapkan `db/migrations/015_user_groups_markings.sql` dulu.
+Nama peran lama EDITOR dan VIEWER masih diterima di CLI dan di `OAUTH_CLIENTS`, tetapi diberikan sebagai peran editor atau viewer pada akar platform disertai peringatan deprecation; migrasi 015 memindahkan nilai itu dari `users.platform_roles` dengan cara yang sama.
 Pengguna yang dibuat dari halaman Users di konsol belum punya kata sandi dan baru bisa masuk setelah `set-password`.
 
 `POST /api/v2/auth/signup` (tertutup secara default, dibuka dengan `OPENFOUNDRY_ALLOW_OPEN_SIGNUP=1` pada svc-multipass dan gateway) tidak menyimpan pengguna, jadi tidak menghasilkan akun yang bisa dipakai masuk.
@@ -181,11 +183,12 @@ Tiga lapisan, dalam urutan ini:
 
 Mengelola siapa memegang peran, dan Organization/Marking sebuah sumber daya, butuh Owner pada sumber daya itu:
 `POST /api/v2/admin/resources/{resourceRid}/roles/add`, `.../roles/remove`, `GET .../roles`, dan `GET`/`PUT .../policy`.
+Satu pengecualian: administrator platform boleh membaca dan mengganti `.../policy` tanpa memegang Organization atau Marking-nya, supaya sumber daya yang terkunci oleh Marking yang tidak dipegang siapa pun bisa dipulihkan.
 Akar platform bernama `ri.platform.main.root.root`; peran yang diberikan di sana berlaku untuk semuanya.
 Pembuat ontologi, dataset atau pipeline otomatis menjadi Owner-nya.
 Akun dev `developer` dan `analyst` tidak punya peran apa pun sampai diberi satu.
 
-Yang belum ada: svc-multipass belum punya sumber untuk klaim `groups` dan `markings`, jadi peran lewat grup dan Marking baru berfungsi bagi token yang membawa klaim itu.
+Grup dan Marking seorang pengguna diatur lewat CLI akun (`set-groups`, `set-markings`); client `client_credentials` tidak membawa keduanya.
 Data objek disimpan menurut string `ontologyRid` di path, sehingga peran dan Marking harus ditempelkan pada pengenal yang dipakai pemanggil.
 Pembatasan laju juga masih jatuh ke kunci per-token, bukan per-tenant.
 
@@ -835,9 +838,8 @@ Semuanya nyata pada `master` saat panduan ini ditulis.
 
 **Autentikasi dan izin**
 
-1. Peran lewat grup dan Marking belum punya sumber di svc-multipass: tidak ada tabel atau perintah CLI yang mengisi klaim `groups` dan `markings`.
-2. `ENFORCE_PERMISSIONS=true` menolak permintaan tanpa identitas; gateway yang tidak memverifikasi token (tanpa `AUTH_PUBLIC_KEY`) tidak menulis identitas, jadi setiap rute terproxy menjawab 403.
-3. Rate limit per-tenant jatuh ke kunci per-token atau per-IP, karena kunci per-org bergantung pada klaim yang tidak pernah ada.
+1. `ENFORCE_PERMISSIONS=true` menolak permintaan tanpa identitas; gateway yang tidak memverifikasi token (tanpa `AUTH_PUBLIC_KEY`) tidak menulis identitas, jadi setiap rute terproxy menjawab 403.
+2. Rate limit per-tenant jatuh ke kunci per-token atau per-IP, karena kunci per-org bergantung pada klaim yang tidak pernah ada.
 
 **Konsol**
 

@@ -607,6 +607,34 @@ describe("Permission enforcement", () => {
     expect(res.statusCode).toBe(200);
   });
 
+  it("guards CSV import like any other object write", async () => {
+    const csv = (who: Record<string, string>) =>
+      app.inject({
+        method: "POST",
+        url: `${BASE_URL}/import/csv`,
+        headers: who,
+        payload: { csvContent: "id,name\nc-1,Csv One\n", objectType: "Employee", primaryKeyColumn: "id" },
+      });
+    expect((await csv(VIEWER_HEADERS)).statusCode).toBe(403);
+    expect((await csv({ "x-user-id": "stranger" })).statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url: `${BASE_URL}/objects/Employee/c-1`, headers: ADMIN_HEADERS })).statusCode).toBe(404);
+
+    expect((await csv({ "x-user-id": "test-editor" })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `${BASE_URL}/objects/Employee/c-1`, headers: ADMIN_HEADERS })).statusCode).toBe(200);
+  });
+
+  it("guards semantic search like any other object read", async () => {
+    const search = (who: Record<string, string>) =>
+      app.inject({
+        method: "POST",
+        url: `${BASE_URL}/objects/semantic-search`,
+        headers: who,
+        payload: { query: "engineers" },
+      });
+    expect((await search({ "x-user-id": "stranger" })).statusCode).toBe(403);
+    expect((await search(VIEWER_HEADERS)).statusCode).not.toBe(403);
+  });
+
   it("denies VIEWER from creating an object", async () => {
     const res = await app.inject({
       method: "POST",

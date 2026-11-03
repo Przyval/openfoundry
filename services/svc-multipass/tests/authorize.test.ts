@@ -10,6 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { decodeJwt } from "jose";
+import { identityFromClaims } from "@openfoundry/permissions";
 import {
   ALICE_PASSWORD,
   CONSOLE_CLIENT,
@@ -247,6 +248,54 @@ describe("the token is the signed-in user's", () => {
     expect(claims.sub).toBe("carol");
     expect(claims.roles).toBeUndefined();
     expect(claims.org).toBe("default-org");
+  });
+
+  it("carries the user's groups and markings, at sign-in, direct login and refresh", async () => {
+    server.users.add(
+      await user("alice", ALICE_PASSWORD, {
+        roles: ["SERVICE_ACCOUNT"],
+        groups: ["ri.group.analysts"],
+        markings: ["pii", "phi"],
+      }),
+    );
+
+    const exchanged = await signInAndExchange(server.app);
+    expect(identityFromClaims(decodeJwt(exchanged.json().access_token))).toMatchObject({
+      userId: "alice",
+      groups: ["ri.group.analysts"],
+      markings: ["pii", "phi"],
+    });
+
+    const login = await server.app.inject({
+      method: "POST",
+      url: "/multipass/api/auth/login",
+      payload: { username: "alice", password: ALICE_PASSWORD },
+    });
+    expect(identityFromClaims(decodeJwt(login.json().accessToken))).toMatchObject({
+      groups: ["ri.group.analysts"],
+      markings: ["pii", "phi"],
+    });
+
+    // A Marking taken away reaches the next refreshed token.
+    server.users.add(await user("alice", ALICE_PASSWORD, { groups: ["ri.group.analysts"], markings: ["pii"] }));
+    const refreshed = await server.app.inject({
+      method: "POST",
+      url: "/multipass/api/oauth2/token",
+      payload: {
+        grant_type: "refresh_token",
+        client_id: CONSOLE_CLIENT.clientId,
+        refresh_token: exchanged.json().refresh_token,
+      },
+    });
+    const claims = decodeJwt(refreshed.json().access_token);
+    expect(claims.markings).toBe("pii");
+    expect(claims.groups).toBe("ri.group.analysts");
+  });
+
+  it("carries no groups or markings claim for a user who has none", async () => {
+    const claims = decodeJwt((await signInAndExchange(server.app, "carol", "carol-password")).json().access_token);
+    expect(claims.groups).toBeUndefined();
+    expect(claims.markings).toBeUndefined();
   });
 
   it("will not exchange a public client's code without the PKCE verifier", async () => {

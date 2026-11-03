@@ -4,6 +4,8 @@ import { generateCodeChallenge, verifyCodeChallenge } from "../src/pkce.js";
 import { TokenStore } from "../src/store/token-store.js";
 import { ClientStore, createClientStore, DEV_CLIENTS } from "../src/store/client-store.js";
 import { createServer } from "../src/server.js";
+import { FileAuthorizationStore, ROOT_RESOURCE } from "@openfoundry/permissions";
+import { InMemoryUserDirectory } from "../src/store/user-store.js";
 import {
   CONSOLE_CLIENT,
   SERVICE_CLIENT,
@@ -323,6 +325,33 @@ describe("token endpoint", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().access_token).toBeTruthy();
     expect(response.json().refresh_token).toBeUndefined();
+  });
+
+  it("grants a declared client's legacy EDITOR as editor on the platform root", async () => {
+    const authorizationStore = new FileAuthorizationStore(null);
+    const app = await createServer({
+      config: testConfig({
+        oauthClients: JSON.stringify([{ clientId: "sync", clientSecret: "s3cret", roles: ["EDITOR"] }]),
+      }),
+      users: new InMemoryUserDirectory(),
+      authorizationStore,
+    });
+    try {
+      expect(await authorizationStore.listGrants(ROOT_RESOURCE)).toMatchObject([
+        { principalType: "user", principalId: "service:sync", roleId: "editor" },
+      ]);
+      const response = await app.inject({
+        method: "POST",
+        url: "/multipass/api/oauth2/token",
+        payload: { grant_type: "client_credentials", client_id: "sync", client_secret: "s3cret" },
+      });
+      expect(response.statusCode).toBe(200);
+      const claims = decodeJwt(response.json().access_token);
+      expect(claims.sub).toBe("service:sync");
+      expect(claims.roles).toBeUndefined();
+    } finally {
+      await app.close();
+    }
   });
 
   it("puts the client's own roles on a client_credentials token", async () => {

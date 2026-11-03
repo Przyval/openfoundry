@@ -60,6 +60,8 @@ export async function user(
     passwordHash: password === null ? null : await hashPassword(password),
     roles: [],
     orgRid: null,
+    groups: [],
+    markings: [],
     active: true,
     ...extra,
   };

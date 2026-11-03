@@ -15,6 +15,7 @@ import {
   PgAuthorizationStore,
   ROOT_RESOURCE,
   evaluate,
+  evaluateEach,
   identityFromClaims,
   identityFromHeaders,
   identityToHeaders,
@@ -219,6 +220,48 @@ describe.each(BACKENDS)("authorization on %s", (_name, make) => {
       expect(await store.policiesFor([SECRET])).toEqual([]);
       expect(await allowed(person("mark"), "ontology:read", [SECRET])).toBe(true);
     });
+  });
+});
+
+describe("deciding a listing", () => {
+  it("agrees with evaluate on every resource, with one read of policies and one of grants", async () => {
+    const inner = new FileAuthorizationStore(null);
+    const at = "2026-01-01T00:00:00.000Z";
+    const rids = Array.from({ length: 6 }, (_, i) => `ri.ontology.main.ontology.r${i}`);
+    await inner.addGrant({ resourceRid: rids[0]!, principalType: "user", principalId: "lena", roleId: "discoverer", grantedBy: "t", grantedAt: at });
+    await inner.addGrant({ resourceRid: rids[1]!, principalType: "group", principalId: "analysts", roleId: "viewer", grantedBy: "t", grantedAt: at });
+    await inner.addGrant({ resourceRid: rids[2]!, principalType: "user", principalId: "lena", roleId: "owner", grantedBy: "t", grantedAt: at });
+    await inner.setPolicy({ resourceRid: rids[2]!, organizations: [], markings: ["pii"] });
+    await inner.setPolicy({ resourceRid: rids[3]!, organizations: ["org-b"], markings: [] });
+
+    const calls = { policiesFor: 0, grantsFor: 0 };
+    const counting: AuthorizationStore = {
+      listGrants: (r) => inner.listGrants(r),
+      addGrant: (g) => inner.addGrant(g),
+      removeGrant: (r, p, role) => inner.removeGrant(r, p, role),
+      setPolicy: (p) => inner.setPolicy(p),
+      policiesFor: (r) => (calls.policiesFor++, inner.policiesFor(r)),
+      grantsFor: (r, p) => (calls.grantsFor++, inner.grantsFor(r, p)),
+    };
+
+    for (const who of [
+      person("lena", { groups: ["analysts"] }),
+      person("lena", { groups: ["analysts"], markings: ["pii"] }),
+      person("root", { platformAdmin: true }),
+    ]) {
+      const expected = new Set<string>();
+      for (const rid of rids) {
+        if ((await evaluate(inner, who, "resource:discover", [rid, ROOT_RESOURCE])) === undefined) expected.add(rid);
+      }
+      calls.policiesFor = 0;
+      calls.grantsFor = 0;
+      expect(await evaluateEach(counting, who, "resource:discover", rids)).toEqual(expected);
+      expect(calls.policiesFor).toBe(1);
+      expect(calls.grantsFor).toBeLessThanOrEqual(1);
+    }
+    expect(await evaluateEach(inner, person("lena", { groups: ["analysts"] }), "resource:discover", rids)).toEqual(
+      new Set([rids[0], rids[1]]),
+    );
   });
 });
 

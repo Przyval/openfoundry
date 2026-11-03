@@ -33,7 +33,7 @@ export {
   type PrincipalType,
 } from "./authorization-store.js";
 
-export { evaluate, principalsOf, type Denial } from "./authorizer.js";
+export { evaluate, evaluateEach, principalsOf, type Denial } from "./authorizer.js";
 
 export {
   registerAuthorization,

@@ -12,11 +12,13 @@ import { vector } from "@electric-sql/pglite-pgvector";
 import { parseDeclaredClients } from "../src/store/client-store.js";
 import {
   authenticate,
+  canonicalIds,
   canonicalRoles,
   createUserDirectory,
   InMemoryUserDirectory,
   isValidUsername,
 } from "../src/store/user-store.js";
+import { PgAuthorizationStore, ROOT_RESOURCE } from "@openfoundry/permissions";
 import { PgUserStore, UserAlreadyExistsError } from "../src/store/pg-user-store.js";
 import { user } from "./fixtures.js";
 
@@ -58,6 +60,17 @@ describe("parseDeclaredClients", () => {
     });
   });
 
+  it("keeps a legacy EDITOR or VIEWER on a service client as a role for the platform root", () => {
+    const [client] = parseDeclaredClients(
+      JSON.stringify([{ clientId: "sync", clientSecret: "s3cret", roles: ["EDITOR", "SERVICE_ACCOUNT"] }]),
+    );
+    expect(client).toMatchObject({
+      roles: ["SERVICE_ACCOUNT"],
+      rootRoles: ["editor"],
+      legacyRoles: ["EDITOR"],
+    });
+  });
+
   for (const [label, value, message] of [
     ["invalid JSON", "[{", /not valid JSON/],
     ["a non-array", '{"clientId":"x"}', /JSON array/],
@@ -95,8 +108,25 @@ describe("usernames and roles", () => {
   });
 
   it("canonicalises roles to the names the permission middleware resolves", () => {
-    expect(canonicalRoles(["admin", " Service_Account ", "ADMIN", ""])).toEqual(["ADMIN", "SERVICE_ACCOUNT"]);
+    expect(canonicalRoles(["admin", " Service_Account ", "ADMIN", ""])).toEqual({
+      platformRoles: ["ADMIN", "SERVICE_ACCOUNT"],
+      rootRoles: [],
+      legacy: [],
+    });
     expect(() => canonicalRoles(["platform-admin"])).toThrow(/unknown role/);
+  });
+
+  it("turns the legacy EDITOR and VIEWER into roles on the platform root", () => {
+    expect(canonicalRoles(["editor", "ADMIN", "VIEWER", "Editor"])).toEqual({
+      platformRoles: ["ADMIN"],
+      rootRoles: ["editor", "viewer"],
+      legacy: ["EDITOR", "VIEWER"],
+    });
+  });
+
+  it("accepts group and marking ids that fit in a token claim and a header", () => {
+    expect(canonicalIds("marking", [" pii ", "", "pii", "phi"])).toEqual(["pii", "phi"]);
+    expect(() => canonicalIds("marking", ["p ii"])).toThrow(/whitespace or a comma/);
   });
 });
 
@@ -192,6 +222,8 @@ describe.each(SCHEMAS)("PgUserStore on a database built from %s", (_name, files)
       passwordHash: "salt:key",
       roles: ["SERVICE_ACCOUNT"],
       orgRid: "org:acme",
+      groups: ["ri.group.analysts"],
+      markings: ["pii"],
     });
     const expected = {
       username: "alice",
@@ -199,6 +231,8 @@ describe.each(SCHEMAS)("PgUserStore on a database built from %s", (_name, files)
       passwordHash: "salt:key",
       roles: ["SERVICE_ACCOUNT"],
       orgRid: "org:acme",
+      groups: ["ri.group.analysts"],
+      markings: ["pii"],
       active: true,
     };
 
@@ -208,7 +242,9 @@ describe.each(SCHEMAS)("PgUserStore on a database built from %s", (_name, files)
   });
 
   it("refuses a second user with the same username", async () => {
-    const bob = { username: "bob", displayName: "Bob", passwordHash: "s:k", roles: [], orgRid: null };
+    const bob = {
+      username: "bob", displayName: "Bob", passwordHash: "s:k", roles: [], orgRid: null, groups: [], markings: [],
+    };
     expect((await store.createUser(bob)).roles).toEqual([]);
     await expect(store.createUser(bob)).rejects.toBeInstanceOf(UserAlreadyExistsError);
   });
@@ -216,17 +252,24 @@ describe.each(SCHEMAS)("PgUserStore on a database built from %s", (_name, files)
   it("sets a password and roles on an existing user only", async () => {
     await store.createUser({
       username: "carol", displayName: "Carol", passwordHash: "old:hash", roles: [], orgRid: null,
+      groups: [], markings: [],
     });
 
     expect(await store.setPassword("carol", "new:hash")).toBe(true);
     expect(await store.setRoles("carol", ["ADMIN", "SERVICE_ACCOUNT"])).toBe(true);
+    expect(await store.setGroups("carol", ["ri.group.ops"])).toBe(true);
+    expect(await store.setMarkings("carol", ["pii", "phi"])).toBe(true);
     expect(await store.findByUsername("carol")).toMatchObject({
       passwordHash: "new:hash",
       roles: ["ADMIN", "SERVICE_ACCOUNT"],
+      groups: ["ri.group.ops"],
+      markings: ["pii", "phi"],
     });
 
     expect(await store.setPassword("nobody", "x:y")).toBe(false);
     expect(await store.setRoles("nobody", ["ADMIN"])).toBe(false);
+    expect(await store.setGroups("nobody", [])).toBe(false);
+    expect(await store.setMarkings("nobody", [])).toBe(false);
   });
 
   it("reads a user another service created without a password or roles", async () => {
@@ -240,7 +283,28 @@ describe.each(SCHEMAS)("PgUserStore on a database built from %s", (_name, files)
       passwordHash: null,
       roles: [],
       orgRid: null,
+      groups: [],
+      markings: [],
       active: true,
     });
+  });
+
+  it("moves a stored legacy EDITOR or VIEWER to a role on the platform root", async () => {
+    await pool.query(
+      `INSERT INTO users (rid, username, platform_roles)
+       VALUES ('ri.user.erin', 'erin', '{ADMIN,EDITOR}'), ('ri.user.vic', 'vic', '{viewer}')`,
+    );
+    // Applying a schema source again is what upgrades a database built by an older one.
+    for (const file of files().filter((f) => /015_|migrate\.sql$/.test(f))) {
+      await db.exec(readFileSync(file, "utf8"));
+    }
+
+    expect((await store.findByUsername("erin"))?.roles).toEqual(["ADMIN"]);
+    expect((await store.findByUsername("vic"))?.roles).toEqual([]);
+    const grants = await new PgAuthorizationStore(pool).listGrants(ROOT_RESOURCE);
+    expect(grants.map((g) => [g.principalId, g.roleId]).sort()).toEqual([
+      ["erin", "editor"],
+      ["vic", "viewer"],
+    ]);
   });
 });

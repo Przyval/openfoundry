@@ -1,5 +1,11 @@
 import { permissionDenied } from "@openfoundry/errors";
-import { ROOT_RESOURCE, type AuthorizationStore, type PrincipalRef } from "./authorization-store.js";
+import {
+  ROOT_RESOURCE,
+  type AuthorizationStore,
+  type PrincipalRef,
+  type ResourcePolicy,
+  type RoleGrant,
+} from "./authorization-store.js";
 import type { Identity } from "./identity.js";
 import { OPERATION_ROLES, roleSatisfies, type Operation, type RoleId } from "./roles.js";
 
@@ -34,7 +40,39 @@ export async function evaluate(
   chain: readonly string[],
 ): Promise<Denial | undefined> {
   const policies = await store.policiesFor(chain);
+  const control = mandatoryDenial(identity, policies);
+  if (control) return control;
+  if (identity.platformAdmin) return undefined; // Owner on the root, inherited everywhere
+  const grants = await store.grantsFor([...chain, ROOT_RESOURCE], principalsOf(identity));
+  return roleDenial(operation, grants);
+}
 
+/**
+ * `evaluate` for many resources directly inside the platform root, with one
+ * read of policies and one of grants however many resources there are.
+ *
+ * @returns the RIDs that are allowed.
+ */
+export async function evaluateEach(
+  store: AuthorizationStore,
+  identity: Identity,
+  operation: Operation,
+  resourceRids: readonly string[],
+): Promise<Set<string>> {
+  const rids = [...new Set([...resourceRids, ROOT_RESOURCE])];
+  const policies = await store.policiesFor(rids);
+  const grants = identity.platformAdmin ? [] : await store.grantsFor(rids, principalsOf(identity));
+  const allowed = new Set<string>();
+  for (const rid of resourceRids) {
+    const on = (r: { resourceRid: string }) => r.resourceRid === rid || r.resourceRid === ROOT_RESOURCE;
+    if (mandatoryDenial(identity, policies.filter(on))) continue;
+    if (!identity.platformAdmin && roleDenial(operation, grants.filter(on))) continue;
+    allowed.add(rid);
+  }
+  return allowed;
+}
+
+function mandatoryDenial(identity: Identity, policies: readonly ResourcePolicy[]): Denial | undefined {
   for (const policy of policies) {
     if (
       policy.organizations.length > 0 &&
@@ -43,18 +81,17 @@ export async function evaluate(
       return { layer: "organization", detail: policy.resourceRid };
     }
   }
-
   const held = new Set(identity.markings);
   for (const policy of policies) {
     for (const marking of policy.markings) {
       if (!held.has(marking)) return { layer: "marking", detail: marking };
     }
   }
+  return undefined;
+}
 
+function roleDenial(operation: Operation, grants: readonly RoleGrant[]): Denial | undefined {
   const required: RoleId = OPERATION_ROLES[operation];
-  if (identity.platformAdmin) return undefined; // Owner on the root, inherited everywhere
-
-  const grants = await store.grantsFor([...chain, ROOT_RESOURCE], principalsOf(identity));
   if (grants.some((g) => roleSatisfies(g.roleId, required))) return undefined;
   return { layer: "role", detail: required };
 }

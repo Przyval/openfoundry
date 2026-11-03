@@ -24,6 +24,7 @@ Cite them by the names below.
 | Markings are conjunctive: a user must be a member of all of them. Inherited down the hierarchy. (S1 s2) | Every Marking on the resource or any container must be held. |
 | Users of one Organization cannot reach another's resources unless sharing is configured. (S1 s1) | A resource or container may list Organizations; the caller's Organization must be among them, at every level that lists any. Sharing across Organizations is not modelled. |
 | Applying or removing a Marking is a sensitive action that takes effect on everything inside at once. (S1 s2) | `PUT /admin/resources/:rid/policy` needs Owner on the resource. |
+| Removing a Marking is its own permission, separate from access to the data it protects. (S1 s2) | A platform administrator may read and replace a resource's policy without holding its Organizations or Markings, and nothing else; that is the way back from a Marking nobody holds. |
 | A creator can use what they create. | The creator of an ontology, dataset or pipeline becomes its Owner (`grantCreatorOwner`). |
 | A user sees only resources they can at least discover. (S1 s2 on discovery) | The ontology, dataset and pipeline listings are cut down with `filterDiscoverable`. |
 
@@ -42,7 +43,8 @@ Resource-role management follows S2's shape: `POST /admin/resources/{resourceRid
   It reaches every resource through inheritance and stops at Organizations and Markings.
 - **Resources are named by the identifier in the path.** The ontology service resolves an API name to its RID before checking, so a Marking on the RID binds a caller who uses the name.
   The objects and actions services store data under whatever `ontologyRid` string the path carries, so a grant or Marking there must be attached to the identifier callers use.
-- **Groups and Markings have no source yet.** The token format carries `groups` and `markings`, and the gateway forwards them, but svc-multipass has no store that fills them in.
+- **Groups and Markings are per-user lists in svc-multipass.** Foundry manages group and Marking membership as their own resources; here an operator sets them on the account (`users.group_ids`, `users.marking_ids`, through `src/cli/users.ts`) and svc-multipass signs them into the token at sign-in and on refresh.
+  A `client_credentials` client carries neither.
 
 ## Where the pieces are
 

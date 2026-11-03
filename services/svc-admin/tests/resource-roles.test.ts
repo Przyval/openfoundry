@@ -114,13 +114,30 @@ describe("Organizations and Markings on a resource", () => {
       payload: { organizations: ["org-a"], markings: ["pii"] },
     });
     expect(put.statusCode).toBe(200);
-    // The restriction binds its own administrator: reading it back needs the Marking too.
-    expect((await app.inject({ method: "GET", url: `${base}/policy`, headers: admin })).statusCode).toBe(403);
     const member = { ...admin, "x-user-org": "org-a", "x-user-markings": "pii" };
     expect((await app.inject({ method: "GET", url: `${base}/policy`, headers: member })).json()).toEqual({
       organizations: ["org-a"],
       markings: ["pii"],
     });
+  });
+
+  it("bind an Owner, but a platform administrator can still reset a policy nobody satisfies", async () => {
+    await authz.addGrant({ resourceRid: RESOURCE, principalType: "user", principalId: "olga", roleId: "owner", grantedBy: "t", grantedAt: "2026-01-01T00:00:00.000Z" });
+    await authz.setPolicy({ resourceRid: RESOURCE, organizations: [], markings: ["nobody-holds-this"] });
+
+    // The Marking locks out the resource's own Owner, and the administrator everywhere else.
+    expect((await app.inject({ method: "GET", url: `${base}/policy`, headers: as("olga") })).statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url: `${base}/roles`, headers: admin })).statusCode).toBe(403);
+
+    // The way back: the administrator reads and replaces the policy.
+    expect((await app.inject({ method: "GET", url: `${base}/policy`, headers: admin })).json()).toEqual({
+      organizations: [],
+      markings: ["nobody-holds-this"],
+    });
+    const reset = await app.inject({ method: "PUT", url: `${base}/policy`, headers: admin, payload: { markings: [] } });
+    expect(reset.statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `${base}/policy`, headers: as("olga") })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `${base}/roles`, headers: admin })).statusCode).toBe(200);
   });
 
   it("cannot be set by a Viewer", async () => {

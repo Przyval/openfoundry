@@ -505,6 +505,33 @@ CREATE TABLE IF NOT EXISTS resource_policies (
     markings      TEXT[] NOT NULL DEFAULT '{}'
 );
 
+-- The Groups and Markings a sign-in carries, and the move of the legacy
+-- platform roles EDITOR and VIEWER to a role on the platform root. Same as
+-- db/migrations/015_user_groups_markings.sql.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS group_ids   TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS marking_ids TEXT[] NOT NULL DEFAULT '{}';
+
+DO $$
+DECLARE
+    moved INTEGER;
+BEGIN
+    INSERT INTO resource_role_grants (resource_rid, principal_type, principal_id, role_id, granted_by)
+    SELECT DISTINCT 'ri.platform.main.root.root', 'user', u.username::text, lower(r.role), 'migration-015'
+      FROM users u, unnest(u.platform_roles) AS r(role)
+     WHERE upper(r.role) IN ('EDITOR', 'VIEWER')
+    ON CONFLICT DO NOTHING;
+
+    UPDATE users
+       SET platform_roles = ARRAY(
+               SELECT r FROM unnest(platform_roles) AS r WHERE upper(r) NOT IN ('EDITOR', 'VIEWER'))
+     WHERE EXISTS (SELECT 1 FROM unnest(platform_roles) AS r WHERE upper(r) IN ('EDITOR', 'VIEWER'));
+    GET DIAGNOSTICS moved = ROW_COUNT;
+
+    IF moved > 0 THEN
+        RAISE WARNING 'platform roles EDITOR and VIEWER are deprecated: % user(s) now hold them as editor/viewer on the platform root', moved;
+    END IF;
+END $$;
+
 -- ============================================================================
 -- SENTINEL MONITORS
 -- ============================================================================

@@ -109,7 +109,9 @@ The console covers its ~80 `fetch` call sites with one interceptor, `apps/app-co
 Downstream services read the caller from `x-user-id`, `x-user-org`, `x-user-groups`, `x-user-markings` and `x-user-platform-admin` (`packages/permissions/src/identity.ts`).
 `services/svc-gateway/src/proxy.ts` drops every `x-user-*` header on the way in and writes those from the token it verified; with no verified token it writes none, and a service sees an anonymous request, which passes unless `ENFORCE_PERMISSIONS=true` - which is off in `deploy/`.
 svc-multipass mints an optional `roles` claim - the signed-in user's `users.platform_roles`, or a `client_credentials` client's own `roles` - and only `ADMIN` / `SERVICE_ACCOUNT` mean anything: they make the caller a platform administrator.
-The token format also carries `groups` and `markings`, but svc-multipass has no store that fills them.
+It also mints `groups` and `markings` from the user's `users.group_ids` / `users.marking_ids`, set with the users CLI; a client carries neither.
+The legacy role names `EDITOR` / `VIEWER` (in `OAUTH_CLIENTS`, the CLI, or migrated `platform_roles`) become editor / viewer on the platform root with a deprecation warning.
+A platform administrator may read and replace any resource's policy without holding its Markings - the only exemption, and the recovery path from a Marking nobody holds.
 `/multipass/api/oauth2/authorize` serves a sign-in page (`services/svc-multipass/src/routes/authorize.ts`) and issues a code only after a password check; the client registry is closed, redirect URIs match exactly, and public clients must use PKCE S256.
 The only clients are the dev seeds outside production plus whatever the operator declares in `OAUTH_CLIENTS` (`parseDeclaredClients` in `src/store/client-store.ts`), and accounts are created with `services/svc-multipass/src/cli/users.ts` - there is no HTTP path to either, by design.
 
