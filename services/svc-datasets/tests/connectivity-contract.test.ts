@@ -68,7 +68,7 @@ function postgresBackend(source: string, files: () => string[]): Backend {
     },
     async fresh() {
       await pool.query(
-        "TRUNCATE connectivity_virtual_tables, connectivity_imports, connectivity_secrets, connectivity_connections",
+        "TRUNCATE connectivity_virtual_tables, connectivity_imports, connectivity_secrets, connectivity_jdbc_drivers, connectivity_connections",
       );
       return new PgConnectivityStore(pool, BOX);
     },
@@ -530,15 +530,45 @@ describe.each(BACKENDS)("connectivity on $name", (backend) => {
     expect(wrongSource.json().errorName).toBe("InvalidVirtualTableConnection");
   });
 
-  it("does not serve the operations that need a build system or binary uploads", async () => {
+  it("does not serve the operations that need a build system", async () => {
     const c = await createConnection(S3);
     for (const [method, url] of [
       ["POST", `${BASE}/${c.rid}/fileImports/x/execute${Q}`],
       ["POST", `${BASE}/${c.rid}/tableImports/x/execute${Q}`],
-      ["POST", `${BASE}/${c.rid}/uploadCustomJdbcDrivers${Q}&fileName=a.jar`],
     ] as const) {
       expect((await call(method, url)).statusCode).toBe(404);
     }
+  });
+
+  // -- JDBC drivers ----------------------------------------------------------
+
+  it("keeps an uploaded driver jar and lists it on the connection", async () => {
+    const c = await createConnection(JDBC_PG);
+    const jar = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from("driver bytes")]);
+    const upload = (rid: string, fileName: string, body: Buffer) =>
+      app.inject({
+        method: "POST",
+        url: `${BASE}/${rid}/uploadCustomJdbcDrivers${Q}&fileName=${fileName}`,
+        headers: { ...ADMIN, "content-type": "application/octet-stream" },
+        payload: body,
+      });
+
+    const res = await upload(c.rid, "pg.jar", jar);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toEqual({ ...c, configuration: { ...c.configuration, uploadedJdbcDrivers: ["pg.jar"] } });
+    expect((await call("GET", `${BASE}/${c.rid}${Q}`)).json().configuration.uploadedJdbcDrivers).toEqual(["pg.jar"]);
+
+    const twice = await upload(c.rid, "pg.jar", jar);
+    expect(twice.statusCode).toBe(409);
+    expect(twice.json().errorName).toBe("DriverJarAlreadyExists");
+    expect((await upload(c.rid, "second.jar", jar)).json().configuration.uploadedJdbcDrivers).toEqual(["pg.jar", "second.jar"]);
+
+    expect((await upload(c.rid, "notes.txt", jar)).json().errorName).toBe("DriverContentMustBeUploadedAsJar");
+    expect((await upload(c.rid, "fake.jar", Buffer.from("plain text"))).json().errorName).toBe("DriverContentMustBeUploadedAsJar");
+    const s3 = await createConnection(S3, "s3");
+    const wrong = await upload(s3.rid, "pg.jar", jar);
+    expect(wrong.json()).toMatchObject({ errorName: "UploadCustomJdbcDriverNotSupportForConnection", parameters: { connectionType: "s3" } });
+    expect((await upload("ri.magritte.main.source.none", "pg.jar", jar)).statusCode).toBe(404);
   });
 
   // -- Permissions -----------------------------------------------------------

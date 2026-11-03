@@ -242,3 +242,33 @@ export function secretsKeyNotConfigured(): OpenFoundryApiError {
     {},
   );
 }
+
+export function uploadCustomJdbcDriverNotSupportForConnection(
+  connectionType: string,
+): OpenFoundryApiError {
+  return bad(
+    "UploadCustomJdbcDriverNotSupportForConnection",
+    `Custom JDBC drivers can only be uploaded to a jdbc connection, not a ${connectionType} one.`,
+    { connectionType },
+  );
+}
+
+export function driverContentMustBeUploadedAsJar(driverName: string): OpenFoundryApiError {
+  return bad(
+    "DriverContentMustBeUploadedAsJar",
+    "A JDBC driver must be uploaded as a .jar file.",
+    { driverName },
+  );
+}
+
+export function driverJarAlreadyExists(
+  driverName: string,
+  connectionRid: string,
+): OpenFoundryApiError {
+  return foundryError(
+    ErrorCode.CONFLICT,
+    "DriverJarAlreadyExists",
+    `Connection ${connectionRid} already has a driver named ${driverName}.`,
+    { driverName, connectionRid },
+  );
+}

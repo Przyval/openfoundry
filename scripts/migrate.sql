@@ -878,6 +878,16 @@ CREATE TABLE IF NOT EXISTS connectivity_secrets (
     PRIMARY KEY (connection_rid, name)
 );
 
+CREATE TABLE IF NOT EXISTS connectivity_jdbc_drivers (
+    connection_rid  TEXT NOT NULL REFERENCES connectivity_connections(rid),
+    name            TEXT NOT NULL,
+    content         BYTEA NOT NULL,
+    org_rid            TEXT NOT NULL
+                       DEFAULT COALESCE(NULLIF(current_setting('app.org_rid', true), ''), 'org:default')
+                       REFERENCES organizations(rid),
+    PRIMARY KEY (connection_rid, name)
+);
+
 CREATE TABLE IF NOT EXISTS connectivity_imports (
     rid             TEXT PRIMARY KEY,
     seq             BIGSERIAL,
@@ -932,6 +942,13 @@ CREATE POLICY tenant_isolation ON connectivity_virtual_tables
   USING (org_rid = current_setting('app.org_rid', true))
   WITH CHECK (org_rid = current_setting('app.org_rid', true));
 ALTER TABLE connectivity_virtual_tables FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE connectivity_jdbc_drivers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON connectivity_jdbc_drivers;
+CREATE POLICY tenant_isolation ON connectivity_jdbc_drivers
+  USING (org_rid = current_setting('app.org_rid', true))
+  WITH CHECK (org_rid = current_setting('app.org_rid', true));
+ALTER TABLE connectivity_jdbc_drivers FORCE ROW LEVEL SECURITY;
 
 -- ============================================================================
 -- MIGRATIONS TRACKING

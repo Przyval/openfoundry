@@ -1,12 +1,13 @@
 import type pg from "pg";
 import {
+  driverJarAlreadyExists,
   fileImportNotFound,
   resourceNameAlreadyExists,
   tableImportNotFound,
   virtualTableAlreadyExists,
 } from "./errors.js";
 import type { SecretBox } from "./secrets.js";
-import type { ConnectivityStore } from "./store.js";
+import { type ConnectivityStore, withDriver } from "./store.js";
 import type {
   ConnectionRecord,
   ImportKind,
@@ -155,6 +156,30 @@ export class PgConnectivityStore implements ConnectivityStore {
         );
       }
     });
+  }
+
+  async addJdbcDriver(rid: string, name: string, content: Buffer): Promise<ConnectionRecord> {
+    try {
+      return await this.tx(async (client) => {
+        await client.query(
+          "INSERT INTO connectivity_jdbc_drivers (connection_rid, name, content) VALUES ($1, $2, $3)",
+          [rid, name, content],
+        );
+        const { rows } = await client.query<ConnectionRow>(
+          `SELECT ${CONNECTION_COLUMNS} FROM connectivity_connections WHERE rid = $1 FOR UPDATE`,
+          [rid],
+        );
+        const updated = await client.query<ConnectionRow>(
+          `UPDATE connectivity_connections SET configuration = $2 WHERE rid = $1
+           RETURNING ${CONNECTION_COLUMNS}`,
+          [rid, JSON.stringify(withDriver((rows[0] as ConnectionRow).configuration, name))],
+        );
+        return toConnection(updated.rows[0] as ConnectionRow);
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === "23505") throw driverJarAlreadyExists(name, rid);
+      throw err;
+    }
   }
 
   async createImport(record: ImportRecord): Promise<ImportRecord> {

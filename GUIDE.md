@@ -748,7 +748,7 @@ svc-aip belum menerima konteks organisasi dari gateway, jadi semua model saat in
 
 ### Konektivitas (Data Connection)
 
-Bagian `connectivity` Foundry disajikan oleh svc-datasets lewat gateway, di memori maupun di Postgres (tabel `connectivity_connections`, `connectivity_secrets`, `connectivity_imports` dan `connectivity_virtual_tables`).
+Bagian `connectivity` Foundry disajikan oleh svc-datasets lewat gateway, di memori maupun di Postgres (tabel `connectivity_connections`, `connectivity_secrets`, `connectivity_jdbc_drivers`, `connectivity_imports` dan `connectivity_virtual_tables`).
 Semua operasinya berstatus preview di Foundry, jadi setiap panggilan wajib membawa `?preview=true`; tanpa itu jawabannya 400 `ApiFeaturePreviewUsageOnly`.
 
 ```
@@ -758,6 +758,7 @@ GET    /api/v2/connectivity/connections/:connectionRid/getConfiguration         
 POST   /api/v2/connectivity/connections/getConfigurationBatch                    Konfigurasi banyak koneksi (maks 200)
 POST   /api/v2/connectivity/connections/:connectionRid/updateExportSettings      Ubah pengaturan ekspor (butuh Owner)
 POST   /api/v2/connectivity/connections/:connectionRid/updateSecrets             Ganti nilai secret yang sudah ada
+POST   /api/v2/connectivity/connections/:connectionRid/uploadCustomJdbcDrivers   Unggah jar driver JDBC (octet-stream, ?fileName=x.jar)
 POST   /api/v2/connectivity/connections/:connectionRid/fileImports               Buat file import
 GET    /api/v2/connectivity/connections/:connectionRid/fileImports[/:rid]        List / ambil file import
 PUT    /api/v2/connectivity/connections/:connectionRid/fileImports/:rid          Ganti file import
@@ -778,12 +779,14 @@ Table import hanya menerima konfigurasi yang cocok dengan koneksinya; untuk JDBC
 Virtual table hanya bisa didaftarkan dari koneksi `snowflake` (config `snowflake`), `databricks` (`unity`, `delta`, `iceberg`, `files`) atau `s3` (`glue`, `delta`, `iceberg`, `files`).
 `parentFolderRid` dan `parentRid` harus berupa RID folder, tetapi keberadaan foldernya belum diperiksa; `markings` pada virtual table disimpan apa adanya.
 
-**3 dari 20 operasi bagian ini sengaja tidak disajikan** dan menjawab 404:
+**2 dari 20 operasi bagian ini sengaja tidak disajikan** dan menjawab 404:
 
 | Operasi | Alasan |
 |---------|--------|
 | `execute` pada file import dan table import (2 operasi) | Hasilnya `BuildRid` dari build yang menarik data dari sistem eksternal ke dataset; tidak ada build system maupun runtime konektor, jadi RID-nya hanya bisa dikarang dan impornya tidak akan pernah jalan |
-| `uploadCustomJdbcDrivers` | Isinya byte mentah sebuah jar (`application/octet-stream`); gateway menserialisasi ulang setiap body sebagai JSON, jadi byte-nya tidak akan sampai utuh |
+
+Driver JDBC diunggah sebagai byte mentah (`application/octet-stream`) dan harus berupa jar (nama berakhiran `.jar`, isi diawali tanda tangan zip); gateway meneruskan byte-nya utuh.
+Satu nama driver hanya bisa diunggah sekali per koneksi (409 `DriverJarAlreadyExists`), dan namanya muncul di `uploadedJdbcDrivers`.
 
 Dua jenis autentikasi ditolak dengan 400 karena bentuk bacanya memuat URL penerbit OIDC yang tidak dimiliki platform ini: `externalOauth` pada Snowflake dan `workflowIdentityFederation` pada Databricks.
 

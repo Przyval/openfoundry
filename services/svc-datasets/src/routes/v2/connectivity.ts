@@ -13,9 +13,11 @@ import { folderRid, parseCreateConnection, parseExportSettings, ridString } from
 import {
   apiFeaturePreviewUsageOnly,
   connectionNotFound,
+  driverContentMustBeUploadedAsJar,
   fileImportNotFound,
   secretNamesDoNotExist,
   tableImportNotFound,
+  uploadCustomJdbcDriverNotSupportForConnection,
 } from "../../connectivity/errors.js";
 import {
   parseFileImportFields,
@@ -33,24 +35,18 @@ import type { DatasetReadWriteStore } from "../../store/dataset-store.js";
 /**
  * The Foundry `connectivity` v2 section (`foundry_sdk/v2/connectivity/`).
  *
- * 17 of the section's 20 operations are served: Connection create, get,
- * getConfiguration, getConfigurationBatch, updateExportSettings and
- * updateSecrets; File Import create, get, list, replace and delete; Table
+ * 18 of the section's 20 operations are served: Connection create, get,
+ * getConfiguration, getConfigurationBatch, updateExportSettings,
+ * updateSecrets and uploadCustomJdbcDrivers; File Import create, get, list, replace and delete; Table
  * Import create, get, list, replace and delete; and Virtual Table create. Every
  * one is a preview endpoint in Foundry, so every one refuses a request without
  * `preview=true` with `ApiFeaturePreviewUsageOnly`.
  *
- * Three are not served, and answer 404:
- *
- *  - File Import `execute` and Table Import `execute` (`POST .../fileImports/{rid}/execute`,
- *    `.../tableImports/{rid}/execute`): they return the `BuildRid` of a build
- *    that pulls the data from the external system into the dataset. There is no
- *    build system and no connector runtime here, so the RID could only be
- *    invented, and the import would never have run.
- *  - Connection `uploadCustomJdbcDrivers`: the body is the raw bytes of a jar
- *    (`application/octet-stream`). The gateway re-serialises every body as JSON,
- *    so the bytes would not reach this service intact; serving it needs binary
- *    passthrough in the gateway first.
+ * Two are not served, and answer 404: File Import `execute` and Table Import
+ * `execute` (`POST .../fileImports/{rid}/execute`, `.../tableImports/{rid}/execute`).
+ * They return the `BuildRid` of a build that pulls the data from the external
+ * system into the dataset. There is no build system and no connector runtime
+ * here, so the RID could only be invented, and the import would never have run.
  *
  * Parameters that are stored but cannot take full effect:
  *
@@ -68,6 +64,10 @@ import type { DatasetReadWriteStore } from "../../store/dataset-store.js";
  * settings need Owner (Foundry restricts them to the Information Security
  * Officer). An import also needs `datasets:write` on its target dataset.
  */
+/** The largest driver jar accepted. */
+const DRIVER_UPLOAD_LIMIT = 64 * 1024 * 1024;
+const ZIP_SIGNATURE = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+
 export async function connectivityRoutes(
   app: FastifyInstance,
   opts: { store: ConnectivityStore; datasetStore: DatasetReadWriteStore },
@@ -79,6 +79,13 @@ export async function connectivityRoutes(
     const { preview } = request.query as { preview?: string };
     if (preview !== "true") throw apiFeaturePreviewUsageOnly();
   });
+
+  // A driver arrives as the raw bytes of a jar, not as JSON.
+  app.addContentTypeParser(
+    "application/octet-stream",
+    { parseAs: "buffer", bodyLimit: DRIVER_UPLOAD_LIMIT },
+    (_request, body, done) => done(null, body),
+  );
 
   const onConnection = {
     resource: (request: FastifyRequest) => [
@@ -205,6 +212,36 @@ export async function connectivityRoutes(
         Object.entries(secrets).map(([name, value]) => ({ name, value })),
       );
       return reply.status(204).send();
+    },
+  );
+
+  app.post<{
+    Params: { connectionRid: string };
+    Querystring: { fileName?: string; preview?: string };
+  }>(
+    "/connectivity/connections/:connectionRid/uploadCustomJdbcDrivers",
+    { preHandler: write, bodyLimit: DRIVER_UPLOAD_LIMIT },
+    async (request) => {
+      const { connectionRid } = request.params;
+      const connection = await requireConnection(store, connectionRid);
+      const connectionType = String(connection.configuration.type);
+      if (connectionType !== "jdbc") throw uploadCustomJdbcDriverNotSupportForConnection(connectionType);
+      const fileName = request.query.fileName;
+      if (fileName === undefined || fileName.trim() === "") {
+        throw invalidArgument("fileName", "is required");
+      }
+      const content = request.body;
+      // A jar is a zip archive: it opens with the local-file-header signature.
+      if (
+        !fileName.toLowerCase().endsWith(".jar") ||
+        fileName.includes("/") ||
+        fileName.includes("\\") ||
+        !Buffer.isBuffer(content) ||
+        !content.subarray(0, 4).equals(ZIP_SIGNATURE)
+      ) {
+        throw driverContentMustBeUploadedAsJar(fileName);
+      }
+      return toConnection(await store.addJdbcDriver(connectionRid, fileName, content));
     },
   );
 

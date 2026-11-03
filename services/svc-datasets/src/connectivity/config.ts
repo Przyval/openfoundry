@@ -145,7 +145,7 @@ function s3(o: Json, ctx: Ctx): Json {
     authenticationMode:
       o.authenticationMode === undefined || o.authenticationMode === null
         ? undefined
-        : byType(o.authenticationMode, "configuration.authenticationMode", {
+        : byType<Json>(o.authenticationMode, "configuration.authenticationMode", {
             awsAccessKey: (a, path) => ({
               accessKeyId: str(a, "accessKeyId", `${path}.`),
               secretAccessKey: encrypted(a.secretAccessKey, `${path}.secretAccessKey`, ctx),
@@ -269,7 +269,7 @@ function domain(raw: unknown, path: string, ctx: Ctx): Json {
             type: "bearerToken",
           }),
           apiKey: (a, ap) => ({
-            location: byType(a.location, `${ap}.location`, {
+            location: byType<Json>(a.location, `${ap}.location`, {
               header: (l, lp) => ({ headerName: str(l, "headerName", `${lp}.`), type: "header" }),
               queryParameter: (l, lp) => ({
                 queryParameterName: str(l, "queryParameterName", `${lp}.`),

@@ -73,4 +73,22 @@ describe("connectivity gateway routing", () => {
       );
     }
   });
+
+  it("forwards a driver jar byte for byte", async () => {
+    const jar = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0xff, 0x00, 0xfe, 0x80]);
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    const app = await createServer({ config: TEST_CONFIG });
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v2/connectivity/connections/${C}/uploadCustomJdbcDrivers?preview=true&fileName=a.jar`,
+      headers: { "content-type": "application/octet-stream" },
+      payload: jar,
+    });
+    await app.close();
+    expect(res.statusCode).toBe(200);
+    const init = vi.mocked(globalThis.fetch).mock.calls[0]![1] as { body: Buffer };
+    expect(Buffer.from(init.body).equals(jar)).toBe(true);
+  });
 });

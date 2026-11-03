@@ -15,7 +15,6 @@ import {
   byType,
   compact,
   list,
-  obj,
   oneOf,
   optionalBool,
   optionalStr,

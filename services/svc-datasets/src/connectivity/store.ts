@@ -1,6 +1,7 @@
 import {
   resourceNameAlreadyExists,
   virtualTableAlreadyExists,
+  driverJarAlreadyExists,
   fileImportNotFound,
   tableImportNotFound,
 } from "./errors.js";
@@ -9,6 +10,7 @@ import type {
   ConnectionRecord,
   ImportKind,
   ImportRecord,
+  Json,
   SecretWrite,
   VirtualTableRecord,
 } from "./types.js";
@@ -38,6 +40,14 @@ export interface ConnectivityStore {
   /** Replace the value of secrets that already exist; the caller checked the names. */
   updateSecrets(rid: string, secrets: SecretWrite[]): Promise<void>;
 
+  /**
+   * Keep a driver jar for a JDBC connection and list it in the connection's
+   * `uploadedJdbcDrivers`; returns the connection as it now stands.
+   *
+   * @throws DriverJarAlreadyExists when the connection already has this name.
+   */
+  addJdbcDriver(rid: string, name: string, content: Buffer): Promise<ConnectionRecord>;
+
   createImport(record: ImportRecord): Promise<ImportRecord>;
   getImport(kind: ImportKind, connectionRid: string, rid: string): Promise<ImportRecord | undefined>;
   listImports(
@@ -53,10 +63,17 @@ export interface ConnectivityStore {
   createVirtualTable(record: VirtualTableRecord): Promise<VirtualTableRecord>;
 }
 
+/** A JDBC configuration with `name` appended to its uploaded drivers. */
+export function withDriver(configuration: Json, name: string): Json {
+  const held = (configuration.uploadedJdbcDrivers as string[] | undefined) ?? [];
+  return { ...configuration, uploadedJdbcDrivers: [...held, name] };
+}
+
 /** The in-memory store, used when no `DATABASE_URL` is configured. */
 export class MemoryConnectivityStore implements ConnectivityStore {
   private readonly connections = new Map<string, ConnectionRecord>();
   private readonly secrets = new Map<string, Map<string, string>>();
+  private readonly drivers = new Map<string, Buffer>();
   private readonly imports = new Map<string, ImportRecord>();
   private readonly virtualTables: VirtualTableRecord[] = [];
 
@@ -98,6 +115,15 @@ export class MemoryConnectivityStore implements ConnectivityStore {
     const held = this.secrets.get(rid);
     if (!held) return;
     for (const secret of secrets) held.set(secret.name, this.box.seal(secret.value));
+  }
+
+  async addJdbcDriver(rid: string, name: string, content: Buffer): Promise<ConnectionRecord> {
+    const record = this.connections.get(rid) as ConnectionRecord;
+    const key = `${rid}/${name}`;
+    if (this.drivers.has(key)) throw driverJarAlreadyExists(name, rid);
+    this.drivers.set(key, Buffer.from(content));
+    record.configuration = withDriver(record.configuration, name);
+    return structuredClone(record);
   }
 
   async createImport(record: ImportRecord): Promise<ImportRecord> {
