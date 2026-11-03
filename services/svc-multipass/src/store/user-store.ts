@@ -1,4 +1,9 @@
-import { canonicalPlatformRole, type RoleId } from "@openfoundry/permissions";
+import {
+  ROOT_RESOURCE,
+  canonicalPlatformRole,
+  type AuthorizationStore,
+  type RoleId,
+} from "@openfoundry/permissions";
 import { hashPassword, verifyPassword } from "../passwords.js";
 
 /**
@@ -96,6 +101,46 @@ export function legacyRolesWarning(source: string, legacy: readonly string[]): s
     `${legacy.map((r) => r.toLowerCase()).join(", ")} on the platform root ` +
     `(ri.platform.main.root.root); grant roles on resources instead`
   );
+}
+
+/**
+ * The `grantedBy` of a root grant made from a legacy role name. It is what
+ * lets the mapping take back what it granted, and nothing an operator granted.
+ */
+export const LEGACY_ROLE_GRANT_SOURCE = "legacy-role-mapping";
+
+/**
+ * Make the legacy-role grants on the platform root of every principal `owns`
+ * selects match `desired`: grant what is missing, revoke what the mapping
+ * granted earlier and is no longer declared. A principal absent from
+ * `desired` loses every such grant.
+ */
+export async function syncLegacyRootGrants(
+  store: AuthorizationStore,
+  owns: (principalId: string) => boolean,
+  desired: ReadonlyMap<string, readonly RoleId[]>,
+): Promise<void> {
+  const mapped = (await store.listGrants(ROOT_RESOURCE)).filter(
+    (g) => g.principalType === "user" && g.grantedBy === LEGACY_ROLE_GRANT_SOURCE && owns(g.principalId),
+  );
+  for (const g of mapped) {
+    if (!desired.get(g.principalId)?.includes(g.roleId)) {
+      await store.removeGrant(ROOT_RESOURCE, g, g.roleId);
+    }
+  }
+  const grantedAt = new Date().toISOString();
+  for (const [principalId, roles] of desired) {
+    for (const roleId of roles) {
+      await store.addGrant({
+        resourceRid: ROOT_RESOURCE,
+        principalType: "user",
+        principalId,
+        roleId,
+        grantedBy: LEGACY_ROLE_GRANT_SOURCE,
+        grantedAt,
+      });
+    }
+  }
 }
 
 /**

@@ -17,6 +17,7 @@ import {
   createUserDirectory,
   InMemoryUserDirectory,
   isValidUsername,
+  syncLegacyRootGrants,
 } from "../src/store/user-store.js";
 import { PgAuthorizationStore, ROOT_RESOURCE } from "@openfoundry/permissions";
 import { PgUserStore, UserAlreadyExistsError } from "../src/store/pg-user-store.js";
@@ -306,5 +307,13 @@ describe.each(SCHEMAS)("PgUserStore on a database built from %s", (_name, files)
       ["erin", "editor"],
       ["vic", "viewer"],
     ]);
+
+    // `users set-roles --roles ADMIN` for erin: the migrated editor goes, vic's viewer stays.
+    const authorization = new PgAuthorizationStore(pool);
+    await syncLegacyRootGrants(authorization, (id) => id === "erin", new Map([["erin", []]]));
+    expect((await authorization.listGrants(ROOT_RESOURCE)).map((g) => g.principalId)).toEqual(["vic"]);
+    // `users set-roles --roles VIEWER` for vic: viewer stays, nothing is duplicated.
+    await syncLegacyRootGrants(authorization, (id) => id === "vic", new Map([["vic", ["viewer"]]]));
+    expect(await authorization.listGrants(ROOT_RESOURCE)).toHaveLength(1);
   });
 });

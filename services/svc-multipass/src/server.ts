@@ -3,9 +3,9 @@ import cors from "@fastify/cors";
 import type pg from "pg";
 import { createPool } from "@openfoundry/db";
 import {
-  ROOT_RESOURCE,
   createAuthorizationStore,
   type AuthorizationStore,
+  type RoleId,
 } from "@openfoundry/permissions";
 import { OpenFoundryApiError } from "@openfoundry/errors";
 import { type MultipassConfig, loadConfig } from "./config.js";
@@ -16,7 +16,12 @@ import { authRoutes, type AuthRoutesOptions } from "./routes/auth.js";
 import { createClientStore, parseDeclaredClients, type ClientStore } from "./store/client-store.js";
 import { PgUserStore } from "./store/pg-user-store.js";
 import type { TokenStore } from "./store/token-store.js";
-import { createUserDirectory, legacyRolesWarning, type UserDirectory } from "./store/user-store.js";
+import {
+  createUserDirectory,
+  legacyRolesWarning,
+  syncLegacyRootGrants,
+  type UserDirectory,
+} from "./store/user-store.js";
 
 // ---------------------------------------------------------------------------
 // Server factory
@@ -169,24 +174,17 @@ export async function createServer(
   };
 
   // A legacy EDITOR or VIEWER on a declared client becomes that role on the
-  // platform root, where the permission model looks for it.
-  const legacy = declared.filter((c) => c.rootRoles && c.rootRoles.length > 0);
-  if (legacy.length > 0) {
+  // platform root, where the permission model looks for it; one no longer
+  // declared is taken back.
+  if (!overrides.clientStore) {
     const authorization = options.authorizationStore ?? createAuthorizationStore(sharedPool());
-    const grantedAt = new Date().toISOString();
-    for (const client of legacy) {
+    const desired = new Map<string, readonly RoleId[]>();
+    for (const client of declared) {
+      if (!client.rootRoles || client.rootRoles.length === 0) continue;
       app.log.warn(legacyRolesWarning(`OAUTH_CLIENTS client "${client.clientId}"`, client.legacyRoles ?? []));
-      for (const roleId of client.rootRoles ?? []) {
-        await authorization.addGrant({
-          resourceRid: ROOT_RESOURCE,
-          principalType: "user",
-          principalId: `service:${client.clientId}`,
-          roleId,
-          grantedBy: "OAUTH_CLIENTS",
-          grantedAt,
-        });
-      }
+      desired.set(`service:${client.clientId}`, client.rootRoles);
     }
+    await syncLegacyRootGrants(authorization, (id) => id.startsWith("service:"), desired);
   }
 
   let users = options.users;

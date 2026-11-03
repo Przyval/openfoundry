@@ -46,6 +46,10 @@ beforeAll(async () => {
     "/api/v2/ontologies/:ontologyRid/objectTypes/:objectType",
     async (request, reply) => {
       const { ontologyRid, objectType } = request.params;
+      // As svc-ontology would for a caller who only discovers ALPHA.
+      if (ontologyRid === ALPHA && request.headers["x-user-id"] === "dee") {
+        return reply.status(403).send({ errorCode: "PERMISSION_DENIED" });
+      }
       if (!ONTOLOGIES[ontologyRid]?.[objectType]) return reply.status(404).send({});
       return { apiName: objectType };
     },
@@ -183,6 +187,23 @@ describe("Pipeline source objects are read as the caller", () => {
 
   it("returns the rows when the caller may read them", async () => {
     const res = await execute("Employee", BETA, { "x-user-id": "pia", "x-user-markings": "pii" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().resultData).toEqual([{ name: "Beta Bea" }, { name: "Beta Bob" }]);
+  });
+});
+
+describe("An unscoped pipeline's source ontology, for a caller", () => {
+  it("is found among the ontologies they may read, skipping one they may only discover", async () => {
+    await authorizationStore.addGrant({
+      resourceRid: ROOT_RESOURCE,
+      principalType: "user",
+      principalId: "dee",
+      roleId: "editor",
+      grantedBy: "test",
+      grantedAt: "2026-01-01T00:00:00.000Z",
+    });
+    // Employee is declared by ALPHA and BETA; dee cannot read ALPHA, so BETA is the one source.
+    const res = await execute("Employee", undefined, { "x-user-id": "dee", "x-user-markings": "pii" });
     expect(res.statusCode).toBe(200);
     expect(res.json().resultData).toEqual([{ name: "Beta Bea" }, { name: "Beta Bob" }]);
   });

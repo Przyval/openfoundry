@@ -48,28 +48,27 @@ export async function evaluate(
 }
 
 /**
- * `evaluate` for many resources directly inside the platform root, with one
- * read of policies and one of grants however many resources there are.
+ * `evaluate` for many resources at once, with one read of policies and one of
+ * grants however many there are. Each chain names a resource and its
+ * containers, without the platform root, which always counts.
  *
- * @returns the RIDs that are allowed.
+ * @returns for each chain, whether it is allowed.
  */
 export async function evaluateEach(
   store: AuthorizationStore,
   identity: Identity,
   operation: Operation,
-  resourceRids: readonly string[],
-): Promise<Set<string>> {
-  const rids = [...new Set([...resourceRids, ROOT_RESOURCE])];
+  chains: readonly (readonly string[])[],
+): Promise<boolean[]> {
+  const rids = [...new Set([...chains.flat(), ROOT_RESOURCE])];
   const policies = await store.policiesFor(rids);
   const grants = identity.platformAdmin ? [] : await store.grantsFor(rids, principalsOf(identity));
-  const allowed = new Set<string>();
-  for (const rid of resourceRids) {
-    const on = (r: { resourceRid: string }) => r.resourceRid === rid || r.resourceRid === ROOT_RESOURCE;
-    if (mandatoryDenial(identity, policies.filter(on))) continue;
-    if (!identity.platformAdmin && roleDenial(operation, grants.filter(on))) continue;
-    allowed.add(rid);
-  }
-  return allowed;
+  return chains.map((chain) => {
+    const scope = new Set([...chain, ROOT_RESOURCE]);
+    const on = (r: { resourceRid: string }) => scope.has(r.resourceRid);
+    if (mandatoryDenial(identity, policies.filter(on))) return false;
+    return identity.platformAdmin || !roleDenial(operation, grants.filter(on));
+  });
 }
 
 function mandatoryDenial(identity: Identity, policies: readonly ResourcePolicy[]): Denial | undefined {

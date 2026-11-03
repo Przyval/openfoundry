@@ -1,13 +1,14 @@
 import { parseArgs } from "node:util";
 import { createPool } from "@openfoundry/db";
 import { hashPassword, MIN_PASSWORD_LENGTH } from "../passwords.js";
-import { PgAuthorizationStore, ROOT_RESOURCE } from "@openfoundry/permissions";
+import { PgAuthorizationStore } from "@openfoundry/permissions";
 import { PgUserStore, UserAlreadyExistsError } from "../store/pg-user-store.js";
 import {
   canonicalIds,
   canonicalRoles,
   isValidUsername,
   legacyRolesWarning,
+  syncLegacyRootGrants,
   type RoleNames,
 } from "../store/user-store.js";
 
@@ -175,22 +176,17 @@ async function main(argv: string[]): Promise<void> {
 
   const pool = createPool({ connectionString: databaseUrl, maxConnections: 1 });
   const store = new PgUserStore(pool);
-  // A legacy EDITOR or VIEWER is a role on the platform root now.
-  const grantRootRoles = async () => {
-    if (roles.rootRoles.length === 0) return;
-    console.error(`users: warning: ${legacyRolesWarning(`user "${username}"`, roles.legacy)}`);
-    const authorization = new PgAuthorizationStore(pool);
-    const grantedAt = new Date().toISOString();
-    for (const roleId of roles.rootRoles) {
-      await authorization.addGrant({
-        resourceRid: ROOT_RESOURCE,
-        principalType: "user",
-        principalId: username,
-        roleId,
-        grantedBy: "users-cli",
-        grantedAt,
-      });
+  // A legacy EDITOR or VIEWER is a role on the platform root now; setting
+  // roles without one takes back what an earlier mapping granted.
+  const syncRootRoles = async () => {
+    if (roles.legacy.length > 0) {
+      console.error(`users: warning: ${legacyRolesWarning(`user "${username}"`, roles.legacy)}`);
     }
+    await syncLegacyRootGrants(
+      new PgAuthorizationStore(pool),
+      (id) => id === username,
+      new Map([[username, roles.rootRoles]]),
+    );
   };
   try {
     switch (command) {
@@ -205,7 +201,7 @@ async function main(argv: string[]): Promise<void> {
           groups,
           markings,
         });
-        await grantRootRoles();
+        await syncRootRoles();
         console.log(
           `Created user "${user.username}" with roles: ${user.roles.join(", ") || "(none)"}`,
         );
@@ -223,7 +219,7 @@ async function main(argv: string[]): Promise<void> {
         if (!(await store.setRoles(username, roles.platformRoles))) {
           throw new UsageError(`no user "${username}"`, false);
         }
-        await grantRootRoles();
+        await syncRootRoles();
         console.log(`Roles of "${username}" set to: ${roles.platformRoles.join(", ") || "(none)"}`);
         break;
       }

@@ -354,6 +354,37 @@ describe("token endpoint", () => {
     }
   });
 
+  it("takes back a legacy grant once the client no longer declares it, and leaves an operator's grant", async () => {
+    const authorizationStore = new FileAuthorizationStore(null);
+    const start = async (clients: unknown[]) =>
+      (
+        await createServer({
+          config: testConfig({ oauthClients: JSON.stringify(clients) }),
+          users: new InMemoryUserDirectory(),
+          authorizationStore,
+        })
+      ).close();
+    await authorizationStore.addGrant({
+      resourceRid: ROOT_RESOURCE,
+      principalType: "user",
+      principalId: "service:ops",
+      roleId: "viewer",
+      grantedBy: "root",
+      grantedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await start([
+      { clientId: "sync", clientSecret: "s3cret", roles: ["EDITOR", "VIEWER"] },
+      { clientId: "ops", clientSecret: "s3cret", roles: ["EDITOR"] },
+    ]);
+    const held = async () =>
+      (await authorizationStore.listGrants(ROOT_RESOURCE)).map((g) => `${g.principalId}:${g.roleId}`).sort();
+    expect(await held()).toEqual(["service:ops:editor", "service:ops:viewer", "service:sync:editor", "service:sync:viewer"]);
+
+    await start([{ clientId: "sync", clientSecret: "s3cret", roles: ["VIEWER"] }]);
+    expect(await held()).toEqual(["service:ops:viewer", "service:sync:viewer"]);
+  });
+
   it("puts the client's own roles on a client_credentials token", async () => {
     server.clientStore.registerClient({ ...SERVICE_CLIENT, clientId: "roleful", roles: ["SERVICE_ACCOUNT"] });
 

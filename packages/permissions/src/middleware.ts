@@ -160,6 +160,11 @@ export async function filterDiscoverable<T>(
 ): Promise<T[]> {
   const identity = request.identity;
   if (!identity) return [...items];
-  const allowed = await evaluateEach(request.server.authorization, identity, "resource:discover", items.map(ridOf));
-  return items.filter((item) => allowed.has(ridOf(item)));
+  const allowed = await evaluateEach(
+    request.server.authorization,
+    identity,
+    "resource:discover",
+    items.map((item) => [ridOf(item)]),
+  );
+  return items.filter((_, i) => allowed[i]);
 }

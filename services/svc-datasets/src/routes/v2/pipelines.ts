@@ -26,7 +26,8 @@ const ONTOLOGY_SERVICE_URL =
  * Resolve the ontology a pipeline reads its source object type from. A
  * pipeline that names no ontology predates the field, so it reads from the
  * one ontology that declares the type; none or several is an error, because
- * an object type's API name is unique only within one ontology.
+ * an object type's API name is unique only within one ontology. An ontology
+ * the caller may not read is no candidate source for them.
  */
 async function resolveSourceOntology(
   objectType: string,
@@ -54,7 +55,7 @@ async function resolveSourceOntology(
         { headers },
       );
       if (typeRes.ok) declaring.push(ontology.rid);
-      else if (typeRes.status !== 404) {
+      else if (typeRes.status !== 404 && typeRes.status !== 403) {
         throw new Error(
           `Failed to read object type ${objectType} in ontology ${ontology.rid}: HTTP ${typeRes.status}`,
         );

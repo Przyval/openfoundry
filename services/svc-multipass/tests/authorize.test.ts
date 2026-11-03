@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { decodeJwt } from "jose";
-import { identityFromClaims } from "@openfoundry/permissions";
+import { FileAuthorizationStore, ROOT_RESOURCE, evaluate, identityFromClaims } from "@openfoundry/permissions";
 import {
   ALICE_PASSWORD,
   CONSOLE_CLIENT,
@@ -260,11 +260,30 @@ describe("the token is the signed-in user's", () => {
     );
 
     const exchanged = await signInAndExchange(server.app);
-    expect(identityFromClaims(decodeJwt(exchanged.json().access_token))).toMatchObject({
+    const alice = identityFromClaims(decodeJwt(exchanged.json().access_token))!;
+    expect(alice).toMatchObject({
       userId: "alice",
       groups: ["ri.group.analysts"],
       markings: ["pii", "phi"],
     });
+
+    // What the token carries is what opens a marked resource: a viewer role
+    // through the group, and the Marking on the ontology.
+    const authz = new FileAuthorizationStore(null);
+    const marked = "ri.ontology.main.ontology.patients";
+    await authz.addGrant({
+      resourceRid: marked,
+      principalType: "group",
+      principalId: "ri.group.analysts",
+      roleId: "viewer",
+      grantedBy: "t",
+      grantedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await authz.setPolicy({ resourceRid: marked, organizations: [], markings: ["pii"] });
+    expect(await evaluate(authz, alice, "objects:read", [marked, ROOT_RESOURCE])).toBeUndefined();
+    expect(
+      await evaluate(authz, { ...alice, markings: [] }, "objects:read", [marked, ROOT_RESOURCE]),
+    ).toMatchObject({ layer: "marking" });
 
     const login = await server.app.inject({
       method: "POST",

@@ -2,7 +2,7 @@
   "name": "@openfoundry/svc-gateway",
   "version": "0.1.0",
   "private": true,
-  "description": "API Gateway — main entry point for all OpenFoundry API requests",
+  "description": "API Gateway \u2014 main entry point for all OpenFoundry API requests",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -34,7 +34,9 @@
     "tsx": "^4.19.0",
     "jose": "^5.9.0",
     "@types/node": "^20.14.0",
-    "@types/pg": "^8.11.0"
+    "@types/pg": "^8.11.0",
+    "@electric-sql/pglite": "0.5.14",
+    "@electric-sql/pglite-pgvector": "0.0.15"
   },
   "license": "Apache-2.0"
 }

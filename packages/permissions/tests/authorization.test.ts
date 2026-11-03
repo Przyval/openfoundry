@@ -249,19 +249,26 @@ describe("deciding a listing", () => {
       person("lena", { groups: ["analysts"], markings: ["pii"] }),
       person("root", { platformAdmin: true }),
     ]) {
-      const expected = new Set<string>();
+      const expected: boolean[] = [];
       for (const rid of rids) {
-        if ((await evaluate(inner, who, "resource:discover", [rid, ROOT_RESOURCE])) === undefined) expected.add(rid);
+        expected.push((await evaluate(inner, who, "resource:discover", [rid, ROOT_RESOURCE])) === undefined);
       }
       calls.policiesFor = 0;
       calls.grantsFor = 0;
-      expect(await evaluateEach(counting, who, "resource:discover", rids)).toEqual(expected);
+      expect(await evaluateEach(counting, who, "resource:discover", rids.map((r) => [r]))).toEqual(expected);
       expect(calls.policiesFor).toBe(1);
       expect(calls.grantsFor).toBeLessThanOrEqual(1);
     }
-    expect(await evaluateEach(inner, person("lena", { groups: ["analysts"] }), "resource:discover", rids)).toEqual(
-      new Set([rids[0], rids[1]]),
-    );
+    expect(
+      await evaluateEach(inner, person("lena", { groups: ["analysts"] }), "resource:discover", rids.map((r) => [r])),
+    ).toEqual([true, true, false, false, false, false]);
+    // A Marking on a container binds what is inside it.
+    expect(
+      await evaluateEach(inner, person("lena", { groups: ["analysts"] }), "resource:discover", [
+        ["ri.object-type.inside", rids[2]!],
+        ["ri.object-type.inside", rids[1]!],
+      ]),
+    ).toEqual([false, true]);
   });
 });
 

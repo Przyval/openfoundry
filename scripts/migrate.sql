@@ -516,7 +516,7 @@ DECLARE
     moved INTEGER;
 BEGIN
     INSERT INTO resource_role_grants (resource_rid, principal_type, principal_id, role_id, granted_by)
-    SELECT DISTINCT 'ri.platform.main.root.root', 'user', u.username::text, lower(r.role), 'migration-015'
+    SELECT DISTINCT 'ri.platform.main.root.root', 'user', u.username::text, lower(r.role), 'legacy-role-mapping'
       FROM users u, unnest(u.platform_roles) AS r(role)
      WHERE upper(r.role) IN ('EDITOR', 'VIEWER')
     ON CONFLICT DO NOTHING;
