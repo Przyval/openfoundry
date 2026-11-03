@@ -153,7 +153,7 @@ docker compose -f deploy/docker-compose.yml exec postgres sh -c \
 
 Kata sandi ditanyakan dua kali tanpa ditampilkan, atau dibaca dari `OPENFOUNDRY_USER_PASSWORD` bila variabel itu diisi; ia tidak pernah diberikan sebagai argumen.
 Perintah yang sama juga mengelola akun berikutnya: `create`, `set-password`, `set-roles` (peran platform: ADMIN, SERVICE_ACCOUNT), `set-groups`, dan `set-markings`.
-Grup dan Marking akun (`--groups`, `--markings`, dipisah koma) ikut ditandatangani ke token saat masuk dan saat refresh; deployment lama harus menerapkan `db/migrations/015_user_groups_markings.sql` dulu.
+Grup dan Marking akun (`--groups`, `--markings`, dipisah koma) ikut ditandatangani ke token sebagai klaim `groups` dan `markings` saat login, saat penukaran kode dari `/authorize`, dan saat refresh; deployment lama harus menerapkan `db/migrations/015_user_groups_markings.sql` dulu.
 Nama peran lama EDITOR dan VIEWER masih diterima di CLI dan di `OAUTH_CLIENTS`, tetapi diberikan sebagai peran editor atau viewer pada akar platform disertai peringatan deprecation; migrasi 015 memindahkan nilai itu dari `users.platform_roles` dengan cara yang sama.
 Grant hasil pemetaan itu ditandai `grantedBy: legacy-role-mapping`, sehingga `set-roles` tanpa EDITOR/VIEWER, atau client yang tidak lagi mendeklarasikannya di `OAUTH_CLIENTS` (berlaku saat svc-multipass dimulai ulang), mencabutnya kembali; grant yang diberikan lewat API peran tidak tersentuh.
 Pengguna yang dibuat dari halaman Users di konsol belum punya kata sandi dan baru bisa masuk setelah `set-password`.

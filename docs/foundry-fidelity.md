@@ -43,7 +43,7 @@ Resource-role management follows S2's shape: `POST /admin/resources/{resourceRid
   It reaches every resource through inheritance and stops at Organizations and Markings.
 - **Resources are named by the identifier in the path.** The ontology service resolves an API name to its RID before checking, so a Marking on the RID binds a caller who uses the name.
   The objects and actions services store data under whatever `ontologyRid` string the path carries, so a grant or Marking there must be attached to the identifier callers use.
-- **Groups and Markings are per-user lists in svc-multipass.** Foundry manages group and Marking membership as their own resources; here an operator sets them on the account (`users.group_ids`, `users.marking_ids`, through `src/cli/users.ts`) and svc-multipass signs them into the token at sign-in and on refresh.
+- **Groups and Markings are per-user lists in svc-multipass.** Foundry manages group and Marking membership as their own resources; here an operator sets them on the account (`users.group_ids`, `users.marking_ids`, through `src/cli/users.ts`) and svc-multipass signs them into the token as the `groups` and `markings` claims at every mint: password login, the `/authorize` code exchange, and refresh.
   A `client_credentials` client carries neither.
 
 ## Where the pieces are
