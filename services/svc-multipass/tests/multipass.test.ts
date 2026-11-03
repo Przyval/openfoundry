@@ -257,7 +257,8 @@ describe("development credentials under NODE_ENV=production", () => {
         payload: { username: "developer", password: "dev123" },
       });
       expect(login.statusCode).toBe(200);
-      expect(decodeJwt(login.json().accessToken).roles).toBe("EDITOR");
+      // The development user holds no platform role: access is a role on a resource.
+      expect(decodeJwt(login.json().accessToken).roles).toBeUndefined();
     } finally {
       await app.close();
     }
@@ -325,7 +326,7 @@ describe("token endpoint", () => {
   });
 
   it("puts the client's own roles on a client_credentials token", async () => {
-    server.clientStore.registerClient({ ...SERVICE_CLIENT, clientId: "roleful", roles: ["EDITOR"] });
+    server.clientStore.registerClient({ ...SERVICE_CLIENT, clientId: "roleful", roles: ["SERVICE_ACCOUNT"] });
 
     const response = await token({
       grant_type: "client_credentials",
@@ -334,7 +335,7 @@ describe("token endpoint", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(decodeJwt(response.json().access_token).roles).toBe("EDITOR");
+    expect(decodeJwt(response.json().access_token).roles).toBe("SERVICE_ACCOUNT");
   });
 
   it("rejects client_credentials with a wrong secret or from a public client", async () => {

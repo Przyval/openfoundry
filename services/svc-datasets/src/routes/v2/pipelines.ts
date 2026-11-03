@@ -3,7 +3,7 @@ import { validateDag, PipelineExecutor, topologicalSort } from "@openfoundry/pip
 import type { PipelineStep, PipelineStatus, PipelineSchedule } from "@openfoundry/pipeline";
 import type { CreatePipelineInput, UpdatePipelineInput } from "../../store/pipeline-store.js";
 import type { PipelineStore } from "../../store/pipeline-store.js";
-import { requirePermission } from "@openfoundry/permissions";
+import { filterDiscoverable, grantCreatorOwner, requireCaller, requirePermission } from "@openfoundry/permissions";
 import { paginateArray } from "./pagination-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -360,9 +360,10 @@ export async function pipelineRoutes(
   app.get<{
     Querystring: { pageSize?: string; pageToken?: string };
   }>("/pipelines", {
-    preHandler: requirePermission("datasets:read"),
+    preHandler: requireCaller,
   }, async (request) => {
-    const all = pipelineStore.listPipelines().map(serializePipeline);
+    const visible = await filterDiscoverable(request, pipelineStore.listPipelines(), (p) => p.rid);
+    const all = visible.map(serializePipeline);
     return paginateArray(all, request.query);
   });
 
@@ -392,6 +393,7 @@ export async function pipelineRoutes(
       schedule: request.body.schedule as PipelineSchedule | undefined,
     };
     const pipeline = pipelineStore.createPipeline(input);
+    await grantCreatorOwner(request, pipeline.rid);
     reply.status(201);
     return serializePipeline(pipeline);
   });

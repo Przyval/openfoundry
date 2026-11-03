@@ -1,4 +1,4 @@
-import { resolveRole } from "@openfoundry/permissions";
+import { canonicalPlatformRole } from "@openfoundry/permissions";
 import { hashPassword, verifyPassword } from "../passwords.js";
 
 /**
@@ -17,7 +17,7 @@ export interface UserRecord {
   readonly displayName: string;
   /** scrypt hash (see ../passwords.ts), or null for a user with no password. */
   readonly passwordHash: string | null;
-  /** Platform role names, canonical upper case (ADMIN, EDITOR, ...). */
+  /** Platform role names, canonical upper case (ADMIN, SERVICE_ACCOUNT). */
   readonly roles: readonly string[];
   /** The user's organization, or null for none. */
   readonly orgRid: string | null;
@@ -45,9 +45,11 @@ export function isValidUsername(username: string): boolean {
 }
 
 /**
- * Canonicalise role names against the roles the permission middleware
- * resolves (`@openfoundry/permissions`), rejecting any it would not. A role
- * nothing can resolve is a role that silently grants nothing.
+ * Canonicalise role names against the platform roles the permission model
+ * recognises (`PLATFORM_ROLES` in `@openfoundry/permissions`), rejecting any it
+ * would not. A role nothing recognises is a role that silently grants nothing.
+ * Access to a resource is a role granted on it (owner, editor, viewer or
+ * discoverer), never a platform role.
  *
  * @throws Error naming the first unknown role.
  */
@@ -56,11 +58,11 @@ export function canonicalRoles(roles: readonly string[]): string[] {
   for (const raw of roles) {
     const name = raw.trim();
     if (name === "") continue;
-    const role = resolveRole(name);
+    const role = canonicalPlatformRole(name);
     if (!role) {
       throw new Error(`unknown role "${name}"`);
     }
-    if (!canonical.includes(role.name)) canonical.push(role.name);
+    if (!canonical.includes(role)) canonical.push(role);
   }
   return canonical;
 }
@@ -145,8 +147,8 @@ export const DEV_USERS: ReadonlyArray<{
   displayName: string;
 }> = [
   { username: "admin", password: "admin123", roles: ["ADMIN"], displayName: "Admin User" },
-  { username: "developer", password: "dev123", roles: ["EDITOR"], displayName: "Dev User" },
-  { username: "analyst", password: "analyst123", roles: ["VIEWER"], displayName: "Analyst User" },
+  { username: "developer", password: "dev123", roles: [], displayName: "Dev User" },
+  { username: "analyst", password: "analyst123", roles: [], displayName: "Analyst User" },
 ];
 
 export async function devUserDirectory(): Promise<InMemoryUserDirectory> {

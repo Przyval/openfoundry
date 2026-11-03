@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createServer } from "../src/server.js";
 import { OntologyStore } from "../src/store/ontology-store.js";
-import { setEnforcePermissions } from "@openfoundry/permissions";
+import {
+  FileAuthorizationStore,
+  ROOT_RESOURCE,
+  setEnforcePermissions,
+} from "@openfoundry/permissions";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -15,17 +19,29 @@ const TEST_CONFIG = {
   nodeEnv: "test",
 } as const;
 
-/** Headers that grant full ADMIN access. */
+/** Headers of a platform administrator. */
 const ADMIN_HEADERS = {
   "x-user-id": "test-admin",
-  "x-user-roles": "ADMIN",
+  "x-user-platform-admin": "true",
 };
 
-/** Headers that grant read-only VIEWER access. */
+/** Headers of a user who holds only what `authz` grants them. */
 const VIEWER_HEADERS = {
   "x-user-id": "test-viewer",
-  "x-user-roles": "VIEWER",
 };
+
+/** In-memory grants: test-viewer is a Viewer and test-editor an Editor on the platform root. */
+const authz = new FileAuthorizationStore(null);
+for (const [principalId, roleId] of [["test-viewer", "viewer"], ["test-editor", "editor"]] as const) {
+  await authz.addGrant({
+    resourceRid: ROOT_RESOURCE,
+    principalType: "user",
+    principalId,
+    roleId,
+    grantedBy: "test",
+    grantedAt: new Date().toISOString(),
+  });
+}
 
 function makeObjectType(apiName: string) {
   return {
@@ -95,7 +111,7 @@ let store: OntologyStore;
 
 beforeEach(async () => {
   store = new OntologyStore(null);
-  app = await createServer({ config: TEST_CONFIG, store });
+  app = await createServer({ authorizationStore: authz, config: TEST_CONFIG, store });
 });
 
 // -------------------------------------------------------------------------

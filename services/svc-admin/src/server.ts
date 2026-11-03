@@ -2,7 +2,11 @@ import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import { OpenFoundryApiError } from "@openfoundry/errors";
 import { createPool } from "@openfoundry/db";
-import { PgPermissionStore } from "@openfoundry/permissions";
+import {
+  createAuthorizationStore,
+  registerAuthorization,
+  type AuthorizationStore,
+} from "@openfoundry/permissions";
 import { type AdminServiceConfig, loadConfig } from "./config.js";
 import { UserStore } from "./store/user-store.js";
 import { PgUserStore } from "./store/pg-user-store.js";
@@ -18,6 +22,8 @@ import { v2Routes } from "./routes/v2/index.js";
 // ---------------------------------------------------------------------------
 
 export interface CreateServerOptions {
+  /** Inject the grant and policy store (useful for tests). */
+  authorizationStore?: AuthorizationStore;
   /** Override the config (useful for tests). */
   config?: AdminServiceConfig;
   /** Inject an existing user store (useful for tests). */
@@ -35,11 +41,11 @@ export async function createServer(
   options: CreateServerOptions = {},
 ): Promise<FastifyInstance> {
   const config = options.config ?? loadConfig();
+  let authPool: ReturnType<typeof createPool> | undefined;
 
   let userStore: UserStore | PgUserStore;
   let groupStore: GroupStore | PgGroupStore;
   let auditStore: AuditStore;
-  let permissionStore: PgPermissionStore | undefined;
 
   if (options.userStore && options.groupStore) {
     userStore = options.userStore;
@@ -47,10 +53,10 @@ export async function createServer(
     auditStore = options.auditStore ?? new MemoryAuditStore();
   } else if (config.databaseUrl) {
     const pool = createPool({ connectionString: config.databaseUrl });
+    authPool = pool;
     userStore = options.userStore ?? new PgUserStore(pool);
     groupStore = options.groupStore ?? new PgGroupStore(pool);
     auditStore = options.auditStore ?? new PgAuditStore(pool);
-    permissionStore = new PgPermissionStore(pool);
   } else {
     userStore = options.userStore ?? new UserStore();
     groupStore = options.groupStore ?? new GroupStore();
@@ -128,13 +134,16 @@ export async function createServer(
   });
 
   // -- Routes -------------------------------------------------------------
+  registerAuthorization(app, {
+    store: options.authorizationStore ?? createAuthorizationStore(authPool),
+  });
+
   await app.register(healthRoutes);
   await app.register(v2Routes, {
     prefix: "/api/v2",
     userStore: userStore as UserStore,
     groupStore: groupStore as GroupStore,
     auditStore,
-    permissionStore,
   });
 
   return app;

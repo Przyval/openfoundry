@@ -414,6 +414,15 @@ importers:
         specifier: ^8.13.0
         version: 8.20.0
     devDependencies:
+      '@electric-sql/pglite':
+        specifier: 0.5.14
+        version: 0.5.14
+      '@electric-sql/pglite-pgvector':
+        specifier: 0.0.15
+        version: 0.0.15(@electric-sql/pglite@0.5.14)
+      '@types/node':
+        specifier: ^20.14.0
+        version: 20.19.37
       '@types/pg':
         specifier: ^8.11.0
         version: 8.18.0
@@ -925,6 +934,9 @@ importers:
       '@openfoundry/health':
         specifier: workspace:*
         version: link:../../packages/health
+      '@openfoundry/permissions':
+        specifier: workspace:*
+        version: link:../../packages/permissions
       '@openfoundry/rid':
         specifier: workspace:*
         version: link:../../packages/rid

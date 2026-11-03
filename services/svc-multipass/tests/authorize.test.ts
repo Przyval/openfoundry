@@ -233,7 +233,7 @@ describe("the token is the signed-in user's", () => {
     expect(response.statusCode).toBe(200);
     const claims = decodeJwt(response.json().access_token);
     expect(claims.sub).toBe("alice");
-    expect(claims.roles).toBe("EDITOR");
+    expect(claims.roles).toBe("SERVICE_ACCOUNT");
     expect(claims.org).toBe("org:acme");
     expect(claims.scope).toBe("api:read");
     expect(response.json().refresh_token).toBeTruthy();
@@ -275,7 +275,7 @@ describe("the token is the signed-in user's", () => {
 
   it("reads the roles again on refresh, so a demotion takes effect", async () => {
     const first = await signInAndExchange(server.app);
-    server.users.add(await user("alice", ALICE_PASSWORD, { roles: ["VIEWER"] }));
+    server.users.add(await user("alice", ALICE_PASSWORD, { roles: ["SERVICE_ACCOUNT"] }));
 
     const refreshed = await server.app.inject({
       method: "POST",
@@ -288,13 +288,13 @@ describe("the token is the signed-in user's", () => {
     });
 
     expect(refreshed.statusCode).toBe(200);
-    expect(decodeJwt(refreshed.json().access_token).roles).toBe("VIEWER");
+    expect(decodeJwt(refreshed.json().access_token).roles).toBe("SERVICE_ACCOUNT");
     expect(refreshed.json().refresh_token).not.toBe(first.json().refresh_token);
   });
 
   it("refuses to refresh for a user disabled since they signed in", async () => {
     const first = await signInAndExchange(server.app);
-    server.users.add(await user("alice", ALICE_PASSWORD, { roles: ["EDITOR"], active: false }));
+    server.users.add(await user("alice", ALICE_PASSWORD, { roles: ["SERVICE_ACCOUNT"], active: false }));
 
     const refreshed = await server.app.inject({
       method: "POST",

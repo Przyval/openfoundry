@@ -4,7 +4,11 @@ import { createServer } from "../src/server.js";
 import { ActionRegistry, type RegisteredAction } from "../src/store/action-registry.js";
 import { ActionLog } from "../src/store/action-log.js";
 import type { FastifyInstance } from "fastify";
-import { setEnforcePermissions } from "@openfoundry/permissions";
+import {
+  FileAuthorizationStore,
+  ROOT_RESOURCE,
+  setEnforcePermissions,
+} from "@openfoundry/permissions";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -17,17 +21,29 @@ const TEST_CONFIG = {
   nodeEnv: "test",
 };
 
-/** Headers that grant full ADMIN access. */
+/** Headers of a platform administrator. */
 const ADMIN_HEADERS = {
   "x-user-id": "test-admin",
-  "x-user-roles": "ADMIN",
+  "x-user-platform-admin": "true",
 };
 
-/** Headers that grant read-only VIEWER access. */
+/** Headers of a user who holds only what `authz` grants them. */
 const VIEWER_HEADERS = {
   "x-user-id": "test-viewer",
-  "x-user-roles": "VIEWER",
 };
+
+/** In-memory grants: test-viewer is a Viewer and test-editor an Editor on the platform root. */
+const authz = new FileAuthorizationStore(null);
+for (const [principalId, roleId] of [["test-viewer", "viewer"], ["test-editor", "editor"]] as const) {
+  await authz.addGrant({
+    resourceRid: ROOT_RESOURCE,
+    principalType: "user",
+    principalId,
+    roleId,
+    grantedBy: "test",
+    grantedAt: new Date().toISOString(),
+  });
+}
 
 const ONTOLOGY_RID = "ri.ontology.main.ontology.test-ontology";
 
@@ -55,7 +71,7 @@ let actionLog: ActionLog;
 async function buildApp(): Promise<FastifyInstance> {
   registry = new ActionRegistry();
   actionLog = new ActionLog();
-  app = await createServer({
+  app = await createServer({ authorizationStore: authz,
     config: TEST_CONFIG,
     registry,
     actionLog,

@@ -46,7 +46,7 @@ describe("parseDeclaredClients", () => {
 
   it("makes a declaration with a secret a confidential service client, roles canonicalised", () => {
     const [client] = parseDeclaredClients(
-      JSON.stringify([{ clientId: "sync", clientSecret: "s3cret", roles: ["editor"] }]),
+      JSON.stringify([{ clientId: "sync", clientSecret: "s3cret", roles: ["service_account"] }]),
     );
     expect(client).toMatchObject({
       clientId: "sync",
@@ -54,7 +54,7 @@ describe("parseDeclaredClients", () => {
       isPublic: false,
       grantTypes: ["client_credentials"],
       redirectUris: [],
-      roles: ["EDITOR"],
+      roles: ["SERVICE_ACCOUNT"],
     });
   });
 
@@ -95,17 +95,17 @@ describe("usernames and roles", () => {
   });
 
   it("canonicalises roles to the names the permission middleware resolves", () => {
-    expect(canonicalRoles(["admin", " Editor ", "ADMIN", ""])).toEqual(["ADMIN", "EDITOR"]);
+    expect(canonicalRoles(["admin", " Service_Account ", "ADMIN", ""])).toEqual(["ADMIN", "SERVICE_ACCOUNT"]);
     expect(() => canonicalRoles(["platform-admin"])).toThrow(/unknown role/);
   });
 });
 
 describe("authenticate", () => {
   it("returns the stored record, whatever case the username was typed in", async () => {
-    const directory = new InMemoryUserDirectory([await user("Alice", "pw-alice-1", { roles: ["VIEWER"] })]);
+    const directory = new InMemoryUserDirectory([await user("Alice", "pw-alice-1", { roles: ["SERVICE_ACCOUNT"] })]);
     const found = await authenticate(directory, "alice", "pw-alice-1");
     expect(found?.username).toBe("Alice");
-    expect(found?.roles).toEqual(["VIEWER"]);
+    expect(found?.roles).toEqual(["SERVICE_ACCOUNT"]);
   });
 
   it("refuses a wrong password, a disabled user, a user with no password, and an unknown user", async () => {
@@ -190,14 +190,14 @@ describe.each(SCHEMAS)("PgUserStore on a database built from %s", (_name, files)
       username: "alice",
       displayName: "Alice A.",
       passwordHash: "salt:key",
-      roles: ["EDITOR"],
+      roles: ["SERVICE_ACCOUNT"],
       orgRid: "org:acme",
     });
     const expected = {
       username: "alice",
       displayName: "Alice A.",
       passwordHash: "salt:key",
-      roles: ["EDITOR"],
+      roles: ["SERVICE_ACCOUNT"],
       orgRid: "org:acme",
       active: true,
     };
@@ -219,10 +219,10 @@ describe.each(SCHEMAS)("PgUserStore on a database built from %s", (_name, files)
     });
 
     expect(await store.setPassword("carol", "new:hash")).toBe(true);
-    expect(await store.setRoles("carol", ["ADMIN", "VIEWER"])).toBe(true);
+    expect(await store.setRoles("carol", ["ADMIN", "SERVICE_ACCOUNT"])).toBe(true);
     expect(await store.findByUsername("carol")).toMatchObject({
       passwordHash: "new:hash",
-      roles: ["ADMIN", "VIEWER"],
+      roles: ["ADMIN", "SERVICE_ACCOUNT"],
     });
 
     expect(await store.setPassword("nobody", "x:y")).toBe(false);

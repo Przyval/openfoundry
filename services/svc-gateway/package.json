@@ -22,6 +22,7 @@
     "@openfoundry/auth-tokens": "workspace:*",
     "@openfoundry/errors": "workspace:*",
     "@openfoundry/health": "workspace:*",
+    "@openfoundry/permissions": "workspace:*",
     "@openfoundry/rid": "workspace:*",
     "@openfoundry/search": "workspace:*",
     "pg": "^8.13.0"

@@ -73,7 +73,7 @@ export const DEV_CLIENTS: readonly OAuthClient[] = [
     redirectUris: [],
     grantTypes: ["client_credentials"],
     scopes: DEFAULT_SCOPES,
-    roles: ["EDITOR"],
+    roles: [],
   },
 ];
 
@@ -136,7 +136,7 @@ export function createClientStore(options: {
  *
  *   [{ "clientId": "openfoundry-console",
  *      "redirectUris": ["https://console.example.com/login"] },
- *    { "clientId": "sync-job", "clientSecret": "<secret>", "roles": ["EDITOR"] }]
+ *    { "clientId": "sync-job", "clientSecret": "<secret>", "roles": ["SERVICE_ACCOUNT"] }]
  *
  * A declaration with a `clientSecret` is confidential and defaults to the
  * client_credentials grant; one without is public and defaults to

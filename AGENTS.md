@@ -106,11 +106,10 @@ Every non-browser caller gets its bearer token from the environment through `scr
 Both send no header when neither is set, so the demo still works unauthenticated. Never write a credential into a script - this repository is public.
 The console covers its ~80 `fetch` call sites with one interceptor, `apps/app-console/src/lib/authFetch.ts`, installed from `main.tsx`.
 
-Downstream services read identity from `X-User-Id` / `X-User-Roles` (`packages/permissions/src/middleware.ts`).
-`services/svc-gateway/src/proxy.ts` always drops those headers on the way in, and sets none of its own, so downstream permission checks see no caller at all.
-That is deliberate: asserting roles there would make enforcement effective whatever `ENFORCE_PERMISSIONS` says, and enforcement is to be switched on deliberately - which is why it is off in `deploy/`.
-Minting the identity belongs to the work that unifies the guarded routes onto one permission model, where the role vocabulary is decided.
-svc-multipass does mint an optional `roles` claim - the signed-in user's `users.platform_roles`, or a `client_credentials` client's own `roles` - but nothing consumes it yet.
+Downstream services read the caller from `x-user-id`, `x-user-org`, `x-user-groups`, `x-user-markings` and `x-user-platform-admin` (`packages/permissions/src/identity.ts`).
+`services/svc-gateway/src/proxy.ts` drops every `x-user-*` header on the way in and writes those from the token it verified; with no verified token it writes none, and a service sees an anonymous request, which passes unless `ENFORCE_PERMISSIONS=true` - which is off in `deploy/`.
+svc-multipass mints an optional `roles` claim - the signed-in user's `users.platform_roles`, or a `client_credentials` client's own `roles` - and only `ADMIN` / `SERVICE_ACCOUNT` mean anything: they make the caller a platform administrator.
+The token format also carries `groups` and `markings`, but svc-multipass has no store that fills them.
 `/multipass/api/oauth2/authorize` serves a sign-in page (`services/svc-multipass/src/routes/authorize.ts`) and issues a code only after a password check; the client registry is closed, redirect URIs match exactly, and public clients must use PKCE S256.
 The only clients are the dev seeds outside production plus whatever the operator declares in `OAUTH_CLIENTS` (`parseDeclaredClients` in `src/store/client-store.ts`), and accounts are created with `services/svc-multipass/src/cli/users.ts` - there is no HTTP path to either, by design.
 
@@ -137,18 +136,21 @@ Dev login is `admin` / `admin123` (see `DEV_USERS` in `services/svc-multipass/sr
 
 ## Identity and permissions
 
-Two different `requirePermission` exports coexist and only one is reachable.
-`services/svc-gateway/src/middleware/rbac.ts` has zero importers repo-wide; the one that actually guards 118 routes is `@openfoundry/permissions`, whose header-based variant reads `x-user-id` / `x-user-roles`.
-Those headers are a trusted-hop input, never a client input: the gateway proxy drops every `x-user-*` header so a caller cannot assert its own roles. Do not re-add them to the forwarded set, and do not introduce a second identity header without a hop that sets it from a verified token.
-Seed and sync scripts talk to the service ports directly, not through the gateway, so that strip does not reach them - which is also why a service port must never be publicly reachable.
-No hop sets those headers today - the gateway deliberately does not - so role enforcement reaches no route; see "Authentication and caller identity" above.
-`claims.sub` is a username, not a RID (`svc-multipass/src/routes/auth.ts`), so the id downstream sees is a username too.
+One model, Foundry's, documented with its sources in `docs/foundry-fidelity.md`: Organization and Marking checks first (they bind administrators too), then a role (owner, editor, viewer, discoverer) held on the resource or a container up to the platform root `ri.platform.main.root.root`.
+Roles are platform-defined and read-only; what is managed is who holds one on a resource (`/admin/resources/:resourceRid/roles/*`, `.../policy`), and managing it needs Owner.
+Do not add a second model beside it, a global role, or a per-route ad hoc check.
 
-Neither model is Foundry's, so do not converge on either as-is.
-Foundry grants *roles on a resource* - `POST /v2/filesystem/resources/{resourceRid}/roles/add`, inherited by the container's contents, with principals that may be groups - while roles themselves are platform-defined and read-only over the API (`GET /v2/admin/roles/{roleId}` and `getBatch` only, no create or delete).
-Against that, `@openfoundry/permissions` roles are global (an EDITOR may write every ontology in the deployment) and `rbac.ts` is a bare `(subject, resource, permission)` ACL with no role, container, group or owner.
-`createPgStoreHook` in `packages/permissions/src/middleware.ts` is the one piece already shaped right: admin bypass, then resource grant, then role fallback.
-Tenant isolation is a separate, *mandatory* layer in Foundry (Organizations) and is `org_rid` + RLS here - no permission check delivers it, and none should be described as doing so.
+Guard a route with `requirePermission(operation)`; the resource comes from the route's `ontologyRid`, `datasetRid` or `pipelineRid`, else the root.
+A route that lists resources uses `requireCaller` and `filterDiscoverable`; one that creates a resource calls `grantCreatorOwner`.
+Each service registers its store with `registerAuthorization` before its routes, as `authPlugin` is registered, for the same encapsulation reason.
+Grants live in one JSON file shared by every service (`/tmp/openfoundry-data/authorization.json`, written by svc-admin) or in Postgres (`resource_role_grants`, `resource_policies`); tests pass `new FileAuthorizationStore(null)`.
+
+The `x-user-*` headers are a trusted-hop input, never a client input: the gateway proxy drops them from clients and sets them from a verified token. Do not add them to the forwarded set from anywhere else.
+Seed and sync scripts talk to the service ports directly, not through the gateway, so that strip does not reach them - which is also why a service port must never be publicly reachable.
+`claims.sub` is a username, not a RID (`svc-multipass/src/routes/auth.ts`), so the principal id of a user is a username.
+An alias that stands in for a RID in a path (an ontology's API name) must be resolved before the check, or a Marking on the RID does not bind it; the ontology service does so through the `alias` option of `registerAuthorization`.
+
+Tenant isolation is still `org_rid` + RLS in the stores; the Organization check in the permission model is a separate, mandatory layer over resources, not a replacement for it.
 
 ## Front-end to service sharp edges
 

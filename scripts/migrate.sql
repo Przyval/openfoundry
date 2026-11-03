@@ -480,39 +480,30 @@ CREATE INDEX IF NOT EXISTS idx_oauth_sessions_expires ON oauth_sessions (expires
     WHERE revoked_at IS NULL;
 
 -- ============================================================================
--- ROLES
+-- RESOURCE ROLE GRANTS AND POLICIES
+-- A role (owner | editor | viewer | discoverer) held by a user or group on a
+-- resource, inherited by what the resource contains; and the mandatory
+-- Organization / Marking restrictions on a resource. Same tables as
+-- db/migrations/014_resource_authorization.sql.
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS roles (
-    rid         TEXT PRIMARY KEY,
-    name        TEXT UNIQUE NOT NULL,
-    permissions TEXT[] DEFAULT '{}',
-    description TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS resource_role_grants (
+    resource_rid   TEXT NOT NULL,
+    principal_type TEXT NOT NULL CHECK (principal_type IN ('user', 'group')),
+    principal_id   TEXT NOT NULL,
+    role_id        TEXT NOT NULL CHECK (role_id IN ('owner', 'editor', 'viewer', 'discoverer')),
+    granted_by     TEXT,
+    granted_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (resource_rid, principal_type, principal_id, role_id)
 );
 
-CREATE TABLE IF NOT EXISTS role_assignments (
-    subject_rid TEXT NOT NULL,
-    role_rid    TEXT NOT NULL REFERENCES roles(rid) ON DELETE CASCADE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (subject_rid, role_rid)
+CREATE INDEX IF NOT EXISTS idx_resource_role_grants_principal
+    ON resource_role_grants (principal_type, principal_id);
+
+CREATE TABLE IF NOT EXISTS resource_policies (
+    resource_rid  TEXT PRIMARY KEY,
+    organizations TEXT[] NOT NULL DEFAULT '{}',
+    markings      TEXT[] NOT NULL DEFAULT '{}'
 );
-
-CREATE INDEX IF NOT EXISTS idx_role_assignments_role ON role_assignments (role_rid);
-
--- ============================================================================
--- PERMISSION GRANTS
--- ============================================================================
-CREATE TABLE IF NOT EXISTS permission_grants (
-    subject_rid  TEXT NOT NULL,
-    resource_rid TEXT NOT NULL,
-    permission   TEXT NOT NULL,
-    granted_by   TEXT,
-    granted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (subject_rid, resource_rid, permission)
-);
-
-CREATE INDEX IF NOT EXISTS idx_permission_grants_resource ON permission_grants (resource_rid);
-CREATE INDEX IF NOT EXISTS idx_permission_grants_subject ON permission_grants (subject_rid);
 
 -- ============================================================================
 -- SENTINEL MONITORS
@@ -838,24 +829,6 @@ INSERT INTO _migrations (name) VALUES
     ('006_phase2_pipelines.sql'),
     ('007_phase2_search.sql'),
     ('008_sentinel_notifications.sql')
-ON CONFLICT (name) DO NOTHING;
-
--- ============================================================================
--- SEED DEFAULT ROLES
--- ============================================================================
-INSERT INTO roles (rid, name, permissions, description) VALUES
-    ('ri.role.platform-admin', 'platform-admin',
-     ARRAY['read','write','execute','admin','manage-users','manage-roles','manage-ontologies','manage-datasets','manage-functions','manage-webhooks','manage-sentinel'],
-     'Full platform administrator with all permissions'),
-    ('ri.role.developer', 'developer',
-     ARRAY['read','write','execute'],
-     'Developer role with read, write, and execute permissions'),
-    ('ri.role.analyst', 'analyst',
-     ARRAY['read'],
-     'Analyst role with read-only permissions'),
-    ('ri.role.viewer', 'viewer',
-     ARRAY['read'],
-     'Viewer role with read-only permissions')
 ON CONFLICT (name) DO NOTHING;
 
 COMMIT;

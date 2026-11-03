@@ -166,14 +166,31 @@ Begitu penegakan menyala, semua pemanggil non-browser (skrip penyemai, `scripts/
 Di `NODE_ENV=production` tidak ada OAuth client yang di-seed, jadi pasangan id/secret itu harus milik client yang Anda deklarasikan di `OAUTH_CLIENTS`.
 Jangan pernah menulis nilai kredensial ke dalam skrip atau dokumen: repositori ini publik.
 
-### Apa yang belum ditegakkan
+### Model izin
 
-Token yang sah membuktikan *siapa* pemanggilnya, belum *apa* yang boleh dilakukannya.
-Gateway tidak mengisi header `x-user-id` / `x-user-roles` yang dibaca pemeriksaan izin di hilir, jadi `ENFORCE_PERMISSIONS` belum punya identitas untuk dinilai; itu menunggu penyatuan model izin.
+Token yang sah membuktikan *siapa* pemanggilnya.
+*Apa* yang boleh dilakukannya diputuskan oleh model izin Foundry, yang dijabarkan di `docs/foundry-fidelity.md`.
+Gateway memverifikasi token lalu menulis identitasnya (`x-user-id`, `x-user-org`, `x-user-groups`, `x-user-markings`, `x-user-platform-admin`) ke permintaan yang diteruskan; layanan hilir hanya mempercayai header itu.
+Tanpa `AUTH_PUBLIC_KEY` tidak ada identitas, dan permintaan lolos tanpa pemeriksaan - itu mode demo.
+
+Tiga lapisan, dalam urutan ini:
+
+1. **Organization** dan **Marking** bersifat wajib. Pemanggil harus anggota setiap Organization dan memegang setiap Marking yang menempel pada sumber daya atau wadahnya, apa pun perannya, termasuk administrator platform.
+2. **Peran pada sumber daya**: Owner, Editor, Viewer, Discoverer. Peran dipegang pengguna atau grup pada satu sumber daya dan diwariskan ke isinya. Peran sudah ditetapkan platform dan hanya bisa dibaca (`GET /api/v2/admin/roles`).
+3. **Administrator platform** (klaim `roles` berisi `ADMIN`) memegang Owner pada akar platform, jadi lolos lapisan peran di mana pun.
+
+Mengelola siapa memegang peran, dan Organization/Marking sebuah sumber daya, butuh Owner pada sumber daya itu:
+`POST /api/v2/admin/resources/{resourceRid}/roles/add`, `.../roles/remove`, `GET .../roles`, dan `GET`/`PUT .../policy`.
+Akar platform bernama `ri.platform.main.root.root`; peran yang diberikan di sana berlaku untuk semuanya.
+Pembuat ontologi, dataset atau pipeline otomatis menjadi Owner-nya.
+Akun dev `developer` dan `analyst` tidak punya peran apa pun sampai diberi satu.
+
+Yang belum ada: svc-multipass belum punya sumber untuk klaim `groups` dan `markings`, jadi peran lewat grup dan Marking baru berfungsi bagi token yang membawa klaim itu.
+Data objek disimpan menurut string `ontologyRid` di path, sehingga peran dan Marking harus ditempelkan pada pengenal yang dipakai pemanggil.
 Pembatasan laju juga masih jatuh ke kunci per-token, bukan per-tenant.
 
-Gateway **memang** membuang setiap header `x-user-*` yang dikirim klien sebelum meneruskan permintaan ke layanan hilir.
-Itu menutup jalan bagi pemanggil untuk mengarang perannya sendiri.
+Gateway membuang setiap header `x-user-*` yang dikirim klien sebelum meneruskan permintaan ke layanan hilir.
+Itu menutup jalan bagi pemanggil untuk mengarang identitasnya sendiri.
 
 Perlakukan port layanan (8081-8092) sebagai jaringan internal.
 Skrip penyemai dan sinkronisasi bicara langsung ke port-port itu, jadi pembuangan header di gateway tidak menjangkau mereka.
@@ -801,7 +818,7 @@ Seluruh operasi berkas v1 menolak `branchId`, `startTransactionRid`, `endTransac
 | PostgreSQL (opsional) | 5434 lewat Docker Compose | tidak |
 
 Konsol bicara hanya ke gateway.
-Gateway mem-proxy ke layanan hilir dan membuang setiap header `x-user-*` yang datang dari klien.
+Gateway mem-proxy ke layanan hilir, membuang setiap header `x-user-*` yang datang dari klien, dan menggantinya dengan identitas dari token yang diverifikasinya.
 
 Gateway juga membatasi laju permintaan: 100 permintaan per 60 detik secara bawaan, diatur lewat `RATE_LIMIT_MAX_REQUESTS`, `RATE_LIMIT_WINDOW_MS`, dan `RATE_LIMIT_ENABLED`.
 Batas itu mudah tersentuh oleh halaman konsol yang menembak banyak permintaan kecil, terutama Network Graph; kalau sebuah halaman tampak kehilangan data, periksa 429 di log gateway sebelum mencurigai datanya.
@@ -818,9 +835,8 @@ Semuanya nyata pada `master` saat panduan ini ditulis.
 
 **Autentikasi dan izin**
 
-1. Gateway tidak menegakkan token. Permintaan tanpa `Authorization`, atau dengan token karangan, tetap dilayani, bahkan ketika `AUTH_PUBLIC_KEY` diset.
-   `authPlugin` didaftarkan terkurung di `services/svc-gateway/src/server.ts`, jadi hook-nya tidak berlaku untuk rute mana pun.
-2. Karena itu `request.claims` tidak pernah terisi, penegakan izin berbasis peran tidak aktif, dan `ENFORCE_PERMISSIONS=true` membuat setiap rute terproxy menjawab 403.
+1. Peran lewat grup dan Marking belum punya sumber di svc-multipass: tidak ada tabel atau perintah CLI yang mengisi klaim `groups` dan `markings`.
+2. `ENFORCE_PERMISSIONS=true` menolak permintaan tanpa identitas; gateway yang tidak memverifikasi token (tanpa `AUTH_PUBLIC_KEY`) tidak menulis identitas, jadi setiap rute terproxy menjawab 403.
 3. Rate limit per-tenant jatuh ke kunci per-token atau per-IP, karena kunci per-org bergantung pada klaim yang tidak pernah ada.
 
 **Konsol**

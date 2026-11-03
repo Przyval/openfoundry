@@ -4,7 +4,7 @@ import type {
   LinkTypeDefinition,
   ObjectTypeDefinition,
 } from "@openfoundry/ontology-schema";
-import { requirePermission } from "@openfoundry/permissions";
+import { filterDiscoverable, requireCaller, requirePermission } from "@openfoundry/permissions";
 import type { OntologyStore, StoredOntology } from "../../store/ontology-store.js";
 // `pageSize` / `pageToken` mean the same thing in both API versions, so the
 // helper is shared rather than duplicated under `v1/`.
@@ -61,9 +61,11 @@ export async function ontologyRoutesV1(
   // default page of 100, which the v1 response has no token to page past. That
   // is a store limit shared with the v2 route, not a choice made here.
   app.get("/ontologies", {
-    preHandler: requirePermission("ontology:read"),
-  }, async () => {
-    return { data: asArray(await store.listOntologies()).map(toV1Ontology) };
+    preHandler: requireCaller,
+  }, async (request) => {
+    const listed = asArray<StoredOntology>(await store.listOntologies());
+    const visible = await filterDiscoverable(request, listed, (o) => o.rid);
+    return { data: visible.map(toV1Ontology) };
   });
 
   // Get ontology

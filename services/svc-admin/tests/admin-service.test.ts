@@ -10,7 +10,11 @@ import type {
   AuditStore,
 } from "../src/store/audit-store.js";
 import { PgAuditStore } from "../src/store/pg-audit-store.js";
-import { setEnforcePermissions } from "@openfoundry/permissions";
+import {
+  FileAuthorizationStore,
+  ROOT_RESOURCE,
+  setEnforcePermissions,
+} from "@openfoundry/permissions";
 import { notFound } from "@openfoundry/errors";
 
 // ---------------------------------------------------------------------------
@@ -24,17 +28,29 @@ const TEST_CONFIG = {
   nodeEnv: "test",
 } as const;
 
-/** Headers that grant full ADMIN access. */
+/** Headers of a platform administrator. */
 const ADMIN_HEADERS = {
   "x-user-id": "test-admin",
-  "x-user-roles": "ADMIN",
+  "x-user-platform-admin": "true",
 };
 
-/** Headers that grant read-only VIEWER access. */
+/** Headers of a user who holds only what `authz` grants them. */
 const VIEWER_HEADERS = {
   "x-user-id": "test-viewer",
-  "x-user-roles": "VIEWER",
 };
+
+/** In-memory grants: test-viewer is a Viewer and test-editor an Editor on the platform root. */
+const authz = new FileAuthorizationStore(null);
+for (const [principalId, roleId] of [["test-viewer", "viewer"], ["test-editor", "editor"]] as const) {
+  await authz.addGrant({
+    resourceRid: ROOT_RESOURCE,
+    principalType: "user",
+    principalId,
+    roleId,
+    grantedBy: "test",
+    grantedAt: new Date().toISOString(),
+  });
+}
 
 let app: FastifyInstance;
 let userStore: UserStore;
@@ -43,7 +59,7 @@ let groupStore: GroupStore;
 beforeEach(async () => {
   userStore = new UserStore(false);
   groupStore = new GroupStore();
-  app = await createServer({ config: TEST_CONFIG, userStore, groupStore });
+  app = await createServer({ authorizationStore: authz, config: TEST_CONFIG, userStore, groupStore });
 });
 
 // -------------------------------------------------------------------------
@@ -584,10 +600,7 @@ describe("Permission enforcement", () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/v2/admin/users",
-      headers: {
-        "x-user-id": "test-editor",
-        "x-user-roles": "EDITOR",
-      },
+      headers: { "x-user-id": "test-editor" },
     });
     expect(res.statusCode).toBe(403);
   });
@@ -632,7 +645,7 @@ describe("Membership with async stores", () => {
       getMembers: () => Promise.resolve([user.rid]),
     } as unknown as GroupStore;
 
-    asyncApp = await createServer({
+    asyncApp = await createServer({ authorizationStore: authz,
       config: TEST_CONFIG,
       userStore: asyncUserStore,
       groupStore: asyncGroupStore,
@@ -1058,7 +1071,7 @@ describe("Audit log", () => {
   });
 
   it("reports an empty trail as available when a store can hold entries", async () => {
-    const auditApp = await createServer({
+    const auditApp = await createServer({ authorizationStore: authz,
       config: TEST_CONFIG,
       userStore: new UserStore(false),
       groupStore: new GroupStore(),
@@ -1077,7 +1090,7 @@ describe("Audit log", () => {
 
   it("rejects a non-numeric pageSize with 400 rather than failing downstream", async () => {
     const store = new RecordingAuditStore([auditEntry(1)]);
-    const auditApp = await createServer({
+    const auditApp = await createServer({ authorizationStore: authz,
       config: TEST_CONFIG,
       userStore: new UserStore(false),
       groupStore: new GroupStore(),
@@ -1107,7 +1120,7 @@ describe("Audit log", () => {
 
   it("returns audit entries as a page", async () => {
     const store = new RecordingAuditStore([auditEntry(1), auditEntry(2)]);
-    const auditApp = await createServer({
+    const auditApp = await createServer({ authorizationStore: authz,
       config: TEST_CONFIG,
       userStore: new UserStore(false),
       groupStore: new GroupStore(),
@@ -1127,7 +1140,7 @@ describe("Audit log", () => {
 
   it("forwards the console's filters to the store", async () => {
     const store = new RecordingAuditStore([]);
-    const auditApp = await createServer({
+    const auditApp = await createServer({ authorizationStore: authz,
       config: TEST_CONFIG,
       userStore: new UserStore(false),
       groupStore: new GroupStore(),
@@ -1161,7 +1174,7 @@ describe("Audit log", () => {
       auditEntry(2),
       auditEntry(3),
     ]);
-    const auditApp = await createServer({
+    const auditApp = await createServer({ authorizationStore: authz,
       config: TEST_CONFIG,
       userStore: new UserStore(false),
       groupStore: new GroupStore(),

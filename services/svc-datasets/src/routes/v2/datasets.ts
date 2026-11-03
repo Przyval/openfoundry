@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { DatasetStore, StoredDataset } from "../../store/dataset-store.js";
-import { requirePermission } from "@openfoundry/permissions";
+import { filterDiscoverable, grantCreatorOwner, requireCaller, requirePermission } from "@openfoundry/permissions";
 import { paginateArray } from "./pagination-helpers.js";
 
 /** Serialize a StoredDataset to the wire format. */
@@ -29,9 +29,10 @@ export async function datasetRoutes(
   app.get<{
     Querystring: { pageSize?: string; pageToken?: string };
   }>("/datasets", {
-    preHandler: requirePermission("datasets:read"),
+    preHandler: requireCaller,
   }, async (request) => {
-    const all = datasetStore.listDatasets().map(serializeDataset);
+    const visible = await filterDiscoverable(request, datasetStore.listDatasets(), (d) => d.rid);
+    const all = visible.map(serializeDataset);
     return paginateArray(all, request.query);
   });
 
@@ -42,6 +43,7 @@ export async function datasetRoutes(
     preHandler: requirePermission("datasets:write"),
   }, async (request, reply) => {
     const dataset = datasetStore.createDataset(request.body);
+    await grantCreatorOwner(request, dataset.rid);
     reply.status(201);
     return serializeDataset(dataset);
   });

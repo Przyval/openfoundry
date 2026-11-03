@@ -2,6 +2,11 @@ import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import { OpenFoundryApiError } from "@openfoundry/errors";
 import { createPool } from "@openfoundry/db";
+import {
+  createAuthorizationStore,
+  registerAuthorization,
+  type AuthorizationStore,
+} from "@openfoundry/permissions";
 import { type ActionsConfig, loadConfig } from "./config.js";
 import { ActionRegistry } from "./store/action-registry.js";
 import { ActionLog } from "./store/action-log.js";
@@ -17,6 +22,8 @@ import { registerPestControlActions } from "./handlers/index.js";
 // ---------------------------------------------------------------------------
 
 export interface CreateServerOptions {
+  /** Inject the grant and policy store (useful for tests). */
+  authorizationStore?: AuthorizationStore;
   /** Override the config (useful for tests). */
   config?: ActionsConfig;
 
@@ -40,6 +47,7 @@ export async function createServer(
   options: CreateServerOptions = {},
 ): Promise<FastifyInstance> {
   const config = options.config ?? loadConfig();
+  let authPool: ReturnType<typeof createPool> | undefined;
 
   let registry: ActionRegistry | PgActionRegistry;
   let actionLog: ActionLog | PgActionLog;
@@ -49,6 +57,7 @@ export async function createServer(
     actionLog = options.actionLog;
   } else if (config.databaseUrl) {
     const pool = createPool({ connectionString: config.databaseUrl });
+    authPool = pool;
     registry = options.registry ?? new PgActionRegistry(pool);
     actionLog = options.actionLog ?? new PgActionLog(pool);
   } else {
@@ -127,6 +136,10 @@ export async function createServer(
   }
 
   // -- Routes -------------------------------------------------------------
+  registerAuthorization(app, {
+    store: options.authorizationStore ?? createAuthorizationStore(authPool),
+  });
+
   await app.register(healthRoutes);
   await app.register(actionRoutes, {
     prefix: "/api/v2",

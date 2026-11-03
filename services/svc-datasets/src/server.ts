@@ -2,6 +2,11 @@ import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import { OpenFoundryApiError } from "@openfoundry/errors";
 import { createPool } from "@openfoundry/db";
+import {
+  createAuthorizationStore,
+  registerAuthorization,
+  type AuthorizationStore,
+} from "@openfoundry/permissions";
 import { type DatasetServiceConfig, loadConfig } from "./config.js";
 import { DatasetStore } from "./store/dataset-store.js";
 import { FileStore } from "./store/file-store.js";
@@ -18,6 +23,8 @@ import { v1Routes } from "./routes/v1/index.js";
 // ---------------------------------------------------------------------------
 
 export interface CreateServerOptions {
+  /** Inject the grant and policy store (useful for tests). */
+  authorizationStore?: AuthorizationStore;
   /** Override the config (useful for tests). */
   config?: DatasetServiceConfig;
   /** Inject an existing dataset store (useful for tests). */
@@ -35,6 +42,7 @@ export async function createServer(
   options: CreateServerOptions = {},
 ): Promise<FastifyInstance> {
   const config = options.config ?? loadConfig();
+  let authPool: ReturnType<typeof createPool> | undefined;
 
   let datasetStore: DatasetStore | PgDatasetStore;
   let fileStore: FileStore | PgFileStore;
@@ -46,6 +54,7 @@ export async function createServer(
     pipelineStore = options.pipelineStore ?? new PipelineStore();
   } else if (config.databaseUrl) {
     const pool = createPool({ connectionString: config.databaseUrl });
+    authPool = pool;
     datasetStore = options.datasetStore ?? new PgDatasetStore(pool);
     fileStore = options.fileStore ?? new PgFileStore(pool);
     pipelineStore = options.pipelineStore ?? new PgPipelineStore(pool);
@@ -131,6 +140,10 @@ export async function createServer(
   });
 
   // -- Routes -------------------------------------------------------------
+  registerAuthorization(app, {
+    store: options.authorizationStore ?? createAuthorizationStore(authPool),
+  });
+
   await app.register(healthRoutes);
   await app.register(v2Routes, {
     prefix: "/api/v2",

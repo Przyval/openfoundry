@@ -3,6 +3,11 @@ import cors from "@fastify/cors";
 import type { Pool } from "pg";
 import { OpenFoundryApiError } from "@openfoundry/errors";
 import { createPool } from "@openfoundry/db";
+import {
+  createAuthorizationStore,
+  registerAuthorization,
+  type AuthorizationStore,
+} from "@openfoundry/permissions";
 import { type ObjectsConfig, loadConfig } from "./config.js";
 import { ObjectStore, type ObjectTypeSchemaSource } from "./store/object-store.js";
 import { PgObjectStore } from "./store/pg-object-store.js";
@@ -20,6 +25,8 @@ import { semanticSearchRoutes } from "./routes/v2/semantic-search.js";
 // ---------------------------------------------------------------------------
 
 export interface CreateServerOptions {
+  /** Inject the grant and policy store (useful for tests). */
+  authorizationStore?: AuthorizationStore;
   config?: ObjectsConfig;
   store?: ObjectStore | PgObjectStore;
   linkStore?: LinkStore;
@@ -118,6 +125,10 @@ export async function createServer(
   });
 
   // -- Routes -------------------------------------------------------------
+  registerAuthorization(app, {
+    store: options.authorizationStore ?? createAuthorizationStore(pgPool),
+  });
+
   await app.register(healthRoutes);
   await app.register(objectRoutes, {
     prefix: "/api/v2",

@@ -12,7 +12,7 @@ import { canonicalRoles, isValidUsername } from "../store/user-store.js";
  * holds the database credentials can use it, and nothing about it is
  * reachable over HTTP.
  *
- *   users create       --username <name> --roles <ADMIN,EDITOR,...>
+ *   users create       --username <name> --roles <ADMIN,SERVICE_ACCOUNT>
  *                      [--display-name <text>] [--org-rid <rid>]
  *   users set-password --username <name>
  *   users set-roles    --username <name> --roles <ADMIN,...|"">
@@ -24,7 +24,7 @@ import { canonicalRoles, isValidUsername } from "../store/user-store.js";
  */
 
 const USAGE = `Usage:
-  users create       --username <name> --roles <ADMIN,EDITOR,VIEWER,...> [--display-name <text>] [--org-rid <rid>]
+  users create       --username <name> --roles <ADMIN,SERVICE_ACCOUNT> [--display-name <text>] [--org-rid <rid>]
   users set-password --username <name>
   users set-roles    --username <name> --roles <ADMIN,...>   (an empty list removes every role)
 
